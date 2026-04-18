@@ -1,0 +1,29 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+
+# Data files (keep sample)
+DATA/*.json
+!DATA/settings.json.example
+
+# Build output
+*.exe
+*.dll
+*.pdb
+
+# VS
+.vs/
+
+# Rider
+.idea/
+
+# Mac
+.DS_Store
+
+# Temp
+*.tmp
+*.bak
