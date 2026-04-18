@@ -105,11 +105,20 @@ public partial class MainForm : Form
 
     private void ImportFromXml()
     {
-        string xmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "DATA", "TbLYBillSet.xml");
-        xmlPath = Path.GetFullPath(xmlPath);
+        using var dialog = new OpenFileDialog
+        {
+            Title = "选择XML账套文件",
+            Filter = "XML文件(*.xml)|*.xml|所有文件(*.*)|*.*",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog() != DialogResult.OK)
+            return;
+
+        string xmlPath = dialog.FileName;
         if (!File.Exists(xmlPath))
         {
-            MessageBox.Show("未找到 TbLYBillSet.xml 文件！", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("文件不存在！", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
@@ -163,7 +172,7 @@ public partial class MainForm : Form
                 _dataService.AddAccount(account);
             }
             LoadAccounts();
-            MessageBox.Show($"成功导入 {accounts.Count} 条账套！", "导入成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show($"成功从 {Path.GetFileName(xmlPath)} 导入 {accounts.Count} 条账套！", "导入成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
