@@ -10,9 +10,15 @@ public partial class AccountDialog : Form
     private readonly Account? _original;
     private readonly DataService _dataService = new();
 
-    public AccountDialog(Account? account)
+    /// <summary>
+    /// 是否显示密码明文（Root模式使用）
+    /// </summary>
+    public bool ShowPasswords { get; set; } = false;
+
+    public AccountDialog(Account? account, bool showPasswords = false)
     {
         _original = account;
+        ShowPasswords = showPasswords;
         InitializeComponent();
         if (account != null)
             LoadAccount(account);
@@ -58,6 +64,14 @@ public partial class AccountDialog : Form
         // 密码已经是解密后的，直接使用
         this.txtRemotePassword.Text = account.RemotePassword;
         this.txtRemark.Text = account.Remark;
+
+        // Root模式显示明文密码
+        if (ShowPasswords)
+        {
+            this.txtServerPassword.UseSystemPasswordChar = false;
+            this.txtDbPassword.UseSystemPasswordChar = false;
+            this.txtRemotePassword.UseSystemPasswordChar = false;
+        }
     }
 
     private void BtnSave_Click(object? sender, EventArgs e)

@@ -14,15 +14,61 @@ public partial class MainForm : Form
     private readonly DataService _dataService;
     private readonly List<IPlugin> _plugins = new();
     private readonly List<int> _processIds = new();
+    private readonly Dictionary<string, AccountStatus> _accountStatuses = new();
+    private bool _isInitializing = true;
+    private bool _isRootMode = false;
+    private int _titleClickCount = 0;
+    private DateTime _lastTitleClickTime = DateTime.MinValue;
+    private const string ROOT_PASSWORD = "xiaopacai"; // Root模式密码
 
     public MainForm()
     {
         _dataService = new DataService();
+        // 启动时更新所有现有账套的拼音
+        _dataService.UpdateAllPinyin();
         InitializeComponent();
         WireUpEvents();
         LoadPlugins();
         LoadAccounts();
+        LoadAccountStatuses();
         this.scrollPanel?.BringToFront();
+        this.Resize += MainForm_Resize;
+        UpdateVersionPosition();
+        _isInitializing = false;
+        UpdateRootModeUI();
+    }
+
+    private void MainForm_Resize(object? sender, EventArgs e)
+    {
+        UpdateVersionPosition();
+        RefreshDgvColumns();
+    }
+
+    private void RefreshDgvColumns()
+    {
+        // 强制刷新 Fill 列的宽度
+        if (this.dgvAccounts == null || this.dgvAccounts.IsDisposed) return;
+        
+        foreach (DataGridViewColumn col in this.dgvAccounts.Columns)
+        {
+            if (col.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
+            {
+                // 先设为 None 再设回 Fill，强制重新计算
+                var oldWidth = col.Width;
+                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+            }
+        }
+    }
+
+    private void UpdateVersionPosition()
+    {
+        if (lblVersion != null && lblVersion.Parent != null)
+        {
+            int parentWidth = lblVersion.Parent.Width;
+            lblVersion.Left = parentWidth - lblVersion.Width - 15;
+            lblVersion.Top = (lblVersion.Parent.Height - lblVersion.Height) / 2;
+        }
     }
 
     private void WireUpEvents()
@@ -37,14 +83,51 @@ public partial class MainForm : Form
         this.btnSettings.Click += BtnSettings_Click;
         this.btnConnectDB.Click += BtnConnectDB_Click;
         this.btnRemote.Click += BtnRemote_Click;
-        this.btnClose.Click += BtnClose_Click;
         this.tabControl.SelectedIndexChanged += TabControl_SelectedIndexChanged;
         this.dgvAccounts.DoubleClick += DgvAccounts_DoubleClick;
+        this.dgvAccounts.ColumnWidthChanged += DgvAccounts_ColumnWidthChanged;
+        this.menuCopyAccount.Click += MenuCopyAccount_Click;
+        this.menuExit.Click += MenuExit_Click;
+        this.menuAbout.Click += MenuAbout_Click;
+        this.lblTitle.Click += LblTitle_Click;
+    }
+
+    private void DgvAccounts_ColumnWidthChanged(object? sender, DataGridViewColumnEventArgs e)
+    {
+        // 初始化阶段跳过，避免与 HandleCreated 时的布局冲突
+        if (_isInitializing) return;
+        
+        // 用户手动调整列宽后，固定该列为手动模式
+        var column = e.Column;
+        if (column.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
+        {
+            // 使用 Timer 延迟执行，避开布局冲突
+            var timer = new System.Windows.Forms.Timer { Interval = 50 };
+            timer.Tick += (s, args) =>
+            {
+                timer.Stop();
+                timer.Dispose();
+                try
+                {
+                    column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                }
+                catch { }
+            };
+            timer.Start();
+        }
     }
 
     private void LoadAccounts()
     {
         var accounts = _dataService.LoadAndDecryptAccounts();
+        // 为没有拼音的历史数据自动计算
+        foreach (var acc in accounts)
+        {
+            if (string.IsNullOrEmpty(acc.Pinyin) && !string.IsNullOrEmpty(acc.Name))
+            {
+                acc.Pinyin = PinyinHelper.GetPinyinInitial(acc.Name);
+            }
+        }
         this.dgvAccounts.DataSource = null;
         this.dgvAccounts.DataSource = accounts;
         SetupDataGridViewColumns();
@@ -58,22 +141,20 @@ public partial class MainForm : Form
 
     private void SetupDataGridViewColumns()
     {
+        this.dgvAccounts.AutoGenerateColumns = false;
         this.dgvAccounts.Columns.Clear();
+        
         var cols = new DataGridViewColumn[]
         {
-            new DataGridViewTextBoxColumn { HeaderText = "代码", DataPropertyName = "Code", Width = 80, Name = "ColCode" },
-            new DataGridViewTextBoxColumn { HeaderText = "账套名称", DataPropertyName = "Name", Width = 150, Name = "ColName" },
-            new DataGridViewTextBoxColumn { HeaderText = "账套地址", DataPropertyName = "Server", Width = 200, Name = "ColServer" },
-            new DataGridViewTextBoxColumn { HeaderText = "数据库地址", DataPropertyName = "Database", Width = 150, Name = "ColDatabase" },
-            new DataGridViewTextBoxColumn { HeaderText = "数据库名称", DataPropertyName = "DatabaseName", Width = 120, Name = "ColDatabaseName" },
-            new DataGridViewTextBoxColumn { HeaderText = "DB用户", DataPropertyName = "DbUser", Width = 100, Name = "ColDbUser" },
-            new DataGridViewTextBoxColumn { HeaderText = "远程方式", DataPropertyName = "RemoteType", Width = 80, Name = "ColRemoteType" },
-            new DataGridViewTextBoxColumn { HeaderText = "远程地址", DataPropertyName = "RemoteAddress", Width = 180, Name = "ColRemoteAddress" },
-            new DataGridViewTextBoxColumn { HeaderText = "远程用户", DataPropertyName = "RemoteUser", Width = 100, Name = "ColRemoteUser" },
-            // 隐藏密码列
-            new DataGridViewTextBoxColumn { HeaderText = "DB密码", DataPropertyName = "DbPassword", Width = 0, Visible = false, Name = "ColDbPassword" },
-            new DataGridViewTextBoxColumn { HeaderText = "账套密码", DataPropertyName = "ServerPassword", Width = 0, Visible = false, Name = "ColServerPassword" },
-            new DataGridViewTextBoxColumn { HeaderText = "远程密码", DataPropertyName = "RemotePassword", Width = 0, Visible = false, Name = "ColRemotePassword" },
+            new DataGridViewTextBoxColumn { HeaderText = "代码", DataPropertyName = "Code", Name = "ColCode", Width = 120, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+            new DataGridViewTextBoxColumn { HeaderText = "账套名称", DataPropertyName = "Name", Name = "ColName", FillWeight = 25, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewTextBoxColumn { HeaderText = "账套地址", DataPropertyName = "Server", Name = "ColServer", FillWeight = 30, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewTextBoxColumn { HeaderText = "数据库地址", DataPropertyName = "Database", Name = "ColDatabase", FillWeight = 20, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewTextBoxColumn { HeaderText = "数据库名称", DataPropertyName = "DatabaseName", Name = "ColDatabaseName", FillWeight = 18, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewTextBoxColumn { HeaderText = "DB用户", DataPropertyName = "DbUser", Name = "ColDbUser", FillWeight = 12, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewTextBoxColumn { HeaderText = "远程方式", DataPropertyName = "RemoteType", Name = "ColRemoteType", FillWeight = 10, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewTextBoxColumn { HeaderText = "远程地址", DataPropertyName = "RemoteAddress", Name = "ColRemoteAddress", FillWeight = 25, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewTextBoxColumn { HeaderText = "远程用户", DataPropertyName = "RemoteUser", Name = "ColRemoteUser", FillWeight = 12, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
         };
         this.dgvAccounts.Columns.AddRange(cols);
     }
@@ -91,10 +172,26 @@ public partial class MainForm : Form
 
     private void SearchAccounts()
     {
-        var keyword = this.txtSearch.Text.Trim();
-        var accounts = string.IsNullOrEmpty(keyword)
-            ? _dataService.LoadAndDecryptAccounts()
-            : _dataService.SearchAccounts(keyword);
+        var keyword = this.txtSearch.Text.Trim().ToLower();
+        var accounts = _dataService.LoadAndDecryptAccounts();
+
+        if (string.IsNullOrEmpty(keyword))
+        {
+            // 空关键字显示全部
+        }
+        else
+        {
+            // 搜索：代码、名称、拼音、地址等
+            accounts = accounts.Where(a =>
+                (a.Code ?? "").ToLower().Contains(keyword) ||
+                (a.Name ?? "").ToLower().Contains(keyword) ||
+                (a.Pinyin ?? "").ToLower().Contains(keyword) ||
+                (a.Server ?? "").ToLower().Contains(keyword) ||
+                (a.Database ?? "").ToLower().Contains(keyword) ||
+                (a.RemoteAddress ?? "").ToLower().Contains(keyword)
+            ).ToList();
+        }
+
         this.dgvAccounts.DataSource = null;
         this.dgvAccounts.DataSource = accounts;
         SetupDataGridViewColumns();
@@ -146,7 +243,7 @@ public partial class MainForm : Form
                 string remark = block.Trim();
                 accounts.Add(new Account
                 {
-                    Code = "", Name = name, Server = serverUrl, ServerPassword = ztpwd,
+                    Code = "", Name = name, Pinyin = PinyinHelper.GetPinyinInitial(name), Server = serverUrl, ServerPassword = ztpwd,
                     Database = dbAddr, DatabaseName = "", DbUser = dbUser, DbPassword = userpwd,
                     RemoteType = "", RemoteAddress = "", RemoteUser = "", RemotePassword = "", Remark = remark
                 });
@@ -194,10 +291,13 @@ public partial class MainForm : Form
 
     private void ShowAccountDialog(Account? account)
     {
-        using var dialog = new AccountDialog(account);
+        bool isRoot = _isRootMode;
+        using var dialog = new AccountDialog(account, isRoot);
         if (dialog.ShowDialog() == DialogResult.OK)
         {
             var edited = dialog.GetAccount();
+            // 自动计算拼音
+            edited.Pinyin = PinyinHelper.GetPinyinInitial(edited.Name);
             if (account == null)
                 _dataService.AddAccount(edited);
             else
@@ -208,9 +308,23 @@ public partial class MainForm : Form
 
     private void EditSelectedAccount()
     {
+        if (this.dgvAccounts.SelectedRows.Count == 0)
+        {
+            // 尝试选择当前行
+            if (this.dgvAccounts.CurrentRow != null && this.dgvAccounts.CurrentRow.Index >= 0)
+            {
+                this.dgvAccounts.Rows[this.dgvAccounts.CurrentRow.Index].Selected = true;
+            }
+        }
+        
         if (this.dgvAccounts.SelectedRows.Count == 0) return;
         var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
-        if (account != null) ShowAccountDialog(account);
+        if (account != null) 
+        {
+            // 调试：显示Root模式状态
+            // MessageBox.Show($"Root模式：{_isRootMode}", "调试");
+            ShowAccountDialog(account);
+        }
     }
 
     private void DeleteSelectedAccount()
@@ -274,7 +388,11 @@ public partial class MainForm : Form
             if (File.Exists(exe1))
             {
                 var p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
-                if (p != null) _processIds.Add(p.Id);
+                if (p != null) 
+                {
+                    _processIds.Add(p.Id);
+                    RecordProcess(account.Code, p.Id, "client");
+                }
             }
         }
 
@@ -284,7 +402,11 @@ public partial class MainForm : Form
             if (File.Exists(exe2))
             {
                 var p = Process.Start(new ProcessStartInfo { FileName = exe2, WorkingDirectory = appDir, UseShellExecute = true });
-                if (p != null) _processIds.Add(p.Id);
+                if (p != null) 
+                {
+                    _processIds.Add(p.Id);
+                    RecordProcess(account.Code, p.Id, "dev");
+                }
             }
         }
 
@@ -292,7 +414,11 @@ public partial class MainForm : Form
         {
             string url = account.Server.TrimEnd('/') + "/h5comerp/#/login";
             var p = Process.Start(new ProcessStartInfo { FileName = "chrome.exe", Arguments = url, UseShellExecute = true });
-            if (p != null) _processIds.Add(p.Id);
+            if (p != null) 
+            {
+                _processIds.Add(p.Id);
+                RecordProcess(account.Code, p.Id, "web");
+            }
         }
     }
 
@@ -300,21 +426,6 @@ public partial class MainForm : Form
     {
         using var dialog = new SettingsDialog();
         dialog.ShowDialog();
-    }
-
-    private void BtnClose_Click(object? sender, EventArgs e)
-    {
-        foreach (var pid in _processIds.ToList())
-        {
-            try
-            {
-                var p = Process.GetProcessById(pid);
-                if (!p.HasExited)
-                    p.Kill();
-            }
-            catch { }
-        }
-        _processIds.Clear();
     }
 
     private void TabControl_SelectedIndexChanged(object? sender, EventArgs e)
@@ -358,7 +469,11 @@ public partial class MainForm : Form
             try
             {
                 var p = Process.Start(new ProcessStartInfo { FileName = "cmd.exe", Arguments = $"/c start \"\" \"{ssmsPath}\" {args}", UseShellExecute = false, CreateNoWindow = true });
-                if (p != null) _processIds.Add(p.Id);
+                if (p != null) 
+                {
+                    _processIds.Add(p.Id);
+                    RecordProcess(account.Code, p.Id, "db");
+                }
             }
             catch { }
         }
@@ -381,7 +496,11 @@ public partial class MainForm : Form
                 string tempRdp = Path.Combine(Path.GetTempPath(), $"remote_{DateTime.Now.Ticks}.rdp");
                 File.WriteAllText(tempRdp, rdpContent);
                 var p = Process.Start(new ProcessStartInfo { FileName = "mstsc.exe", Arguments = $"\"{tempRdp}\"", UseShellExecute = true });
-                if (p != null) _processIds.Add(p.Id);
+                if (p != null) 
+                {
+                    _processIds.Add(p.Id);
+                    RecordProcess(account.Code, p.Id, "remote");
+                }
                 if (!string.IsNullOrEmpty(account.RemotePassword))
                     Clipboard.SetText(account.RemotePassword);
             }
@@ -400,7 +519,11 @@ public partial class MainForm : Form
                 try
                 {
                     var p = Process.Start(new ProcessStartInfo { FileName = sunflowerPath, Arguments = $"--type=remote --code={account.RemoteAddress}", UseShellExecute = true });
-                    if (p != null) _processIds.Add(p.Id);
+                    if (p != null) 
+                    {
+                        _processIds.Add(p.Id);
+                        RecordProcess(account.Code, p.Id, "remote");
+                    }
                 }
                 catch { }
             }
@@ -502,4 +625,315 @@ public partial class MainForm : Form
         btn.FlatAppearance.MouseDownBackColor = System.Drawing.Color.FromArgb(230, 240, 250);
         return btn;
     }
+
+    #region Root模式
+
+    private void LblTitle_Click(object? sender, EventArgs e)
+    {
+        // 连续点击标题5次触发Root模式
+        var now = DateTime.Now;
+        if ((now - _lastTitleClickTime).TotalSeconds > 3)
+        {
+            _titleClickCount = 0;
+        }
+        _lastTitleClickTime = now;
+        _titleClickCount++;
+
+        if (_titleClickCount >= 5 && !_isRootMode)
+        {
+            ShowRootPasswordDialog();
+        }
+    }
+
+    private void ShowRootPasswordDialog()
+    {
+        var dialog = new Form
+        {
+            Text = "Root模式验证",
+            Size = new System.Drawing.Size(400, 200),
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false
+        };
+
+        var lbl = new Label { Text = "请输入Root密码：", Location = new System.Drawing.Point(30, 25), AutoSize = true };
+        var txtPassword = new TextBox { Location = new System.Drawing.Point(30, 55), Width = 320, UseSystemPasswordChar = true };
+        var btnOk = new Button { Text = "确定", Location = new System.Drawing.Point(100, 110), Width = 90, Height = 35 };
+        var btnCancel = new Button { Text = "取消", Location = new System.Drawing.Point(210, 110), Width = 90, Height = 35 };
+
+        btnOk.Click += (s, e) =>
+        {
+            if (txtPassword.Text == ROOT_PASSWORD)
+            {
+                _isRootMode = true;
+                _titleClickCount = 0;
+                UpdateRootModeUI();
+                dialog.Close();
+                MessageBox.Show("Root模式已开启！\n可查看和复制密码。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show("密码错误！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                txtPassword.Clear();
+            }
+        };
+        btnCancel.Click += (s, e) => dialog.Close();
+        txtPassword.KeyDown += (s, e) => { if (e.KeyValue == 13) btnOk.PerformClick(); };
+
+        dialog.Controls.AddRange(new Control[] { lbl, txtPassword, btnOk, btnCancel });
+        dialog.ShowDialog(this);
+    }
+
+    private void UpdateRootModeUI()
+    {
+        if (_isRootMode)
+        {
+            // Root模式下标题显示特殊标识
+            this.lblTitle.Text = "🔓 A3工具箱 (Root)";
+            this.lblTitle.ForeColor = Color.Yellow;
+        }
+        else
+        {
+            this.lblTitle.Text = "A3工具箱";
+            this.lblTitle.ForeColor = Color.White;
+        }
+    }
+
+    #endregion
+
+    #region 菜单事件
+
+    private void MenuCopyAccount_Click(object? sender, EventArgs e)
+    {
+        // 确保选中了一行
+        if (this.dgvAccounts.SelectedRows.Count == 0)
+        {
+            // 尝试点击当前单元格所在行
+            if (this.dgvAccounts.CurrentRow != null)
+            {
+                this.dgvAccounts.CurrentRow.Selected = true;
+            }
+        }
+        
+        if (this.dgvAccounts.SelectedRows.Count == 0)
+        {
+            MessageBox.Show("请先在列表中选择要复制的账套！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
+        if (account == null)
+        {
+            MessageBox.Show("无法获取选中的账套信息！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        CopyAccountInfo(account);
+    }
+
+    private void CopyAccountInfo(Account account)
+    {
+        var info = new System.Text.StringBuilder();
+        info.AppendLine($"代码：{account.Code}");
+        info.AppendLine($"名称：{account.Name}");
+        info.AppendLine($"账套地址：{account.Server}");
+        info.AppendLine($"账套密码：{account.ServerPassword}");
+        info.AppendLine($"数据库地址：{account.Database}");
+        info.AppendLine($"数据库名称：{account.DatabaseName}");
+        info.AppendLine($"DB用户：{account.DbUser}");
+        info.AppendLine($"DB密码：{account.DbPassword}");
+        info.AppendLine($"远程方式：{account.RemoteType}");
+        info.AppendLine($"远程地址：{account.RemoteAddress}");
+        info.AppendLine($"远程用户：{account.RemoteUser}");
+        info.AppendLine($"远程密码：{account.RemotePassword}");
+
+        Clipboard.SetText(info.ToString());
+        MessageBox.Show("账套信息已复制到剪贴板！" + (_isRootMode ? "（包含明文密码）" : ""), "复制成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void MenuExit_Click(object? sender, EventArgs e)
+    {
+        this.Close();
+    }
+
+    private void MenuAbout_Click(object? sender, EventArgs e)
+    {
+        MessageBox.Show("A3工具箱 v1.0.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问等功能。", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    #endregion
+
+    #region 账套运行状态
+
+    private void LoadAccountStatuses()
+    {
+        // 初始为空，只有运行了才添加
+        _accountStatuses.Clear();
+        RefreshStatusGrid();
+    }
+
+    private void RefreshAccountStatuses()
+    {
+        // 清理已结束的进程，更新显示
+        var deadCodes = new List<string>();
+        foreach (var kvp in _accountStatuses)
+        {
+            var deadPids = new List<int>();
+            foreach (var pid in kvp.Value.ProcessIds)
+            {
+                try
+                {
+                    var p = Process.GetProcessById(pid);
+                    if (p.HasExited)
+                        deadPids.Add(pid);
+                }
+                catch
+                {
+                    deadPids.Add(pid);
+                }
+            }
+            foreach (var pid in deadPids)
+                kvp.Value.ProcessIds.Remove(pid);
+            
+            if (kvp.Value.ProcessIds.Count == 0)
+                deadCodes.Add(kvp.Key);
+        }
+        
+        // 移除没有进程的账套
+        foreach (var code in deadCodes)
+            _accountStatuses.Remove(code);
+        
+        RefreshStatusGrid();
+    }
+
+    private void RefreshStatusGrid()
+    {
+        if (dgvStatus == null || dgvStatus.IsDisposed) return;
+        
+        var statusList = _accountStatuses.Values.ToList();
+        
+        // 移除旧事件
+        dgvStatus.CellFormatting -= DgvStatus_CellFormatting;
+        dgvStatus.CellContentClick -= DgvStatus_CellContentClick;
+        
+        dgvStatus.DataSource = null;
+        dgvStatus.Columns.Clear();
+        
+        // 设置列
+        var cols = new DataGridViewColumn[]
+        {
+            new DataGridViewTextBoxColumn { HeaderText = "账套代码", DataPropertyName = "Code", Name = "ColCode", Width = 100, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+            new DataGridViewTextBoxColumn { HeaderText = "账套名称", DataPropertyName = "Name", Name = "ColName", FillWeight = 30, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
+            new DataGridViewCheckBoxColumn { HeaderText = "Web", DataPropertyName = "IsWebRunning", Name = "ColWeb", Width = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, ReadOnly = true },
+            new DataGridViewCheckBoxColumn { HeaderText = "客户端", DataPropertyName = "IsClientRunning", Name = "ColClient", Width = 70, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, ReadOnly = true },
+            new DataGridViewCheckBoxColumn { HeaderText = "开发工具", DataPropertyName = "IsDevToolsRunning", Name = "ColDev", Width = 80, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, ReadOnly = true },
+            new DataGridViewCheckBoxColumn { HeaderText = "数据库", DataPropertyName = "IsDbConnected", Name = "ColDb", Width = 70, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, ReadOnly = true },
+            new DataGridViewCheckBoxColumn { HeaderText = "远程连接", DataPropertyName = "IsRemoteConnected", Name = "ColRemote", Width = 80, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, ReadOnly = true },
+            new DataGridViewTextBoxColumn { HeaderText = "进程数", Name = "ColPidCount", Width = 70, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+            new DataGridViewButtonColumn { HeaderText = "操作", Name = "ColAction", Text = "关闭", UseColumnTextForButtonValue = true, Width = 80, AutoSizeMode = DataGridViewAutoSizeColumnMode.None }
+        };
+        
+        dgvStatus.Columns.AddRange(cols);
+        dgvStatus.DataSource = statusList;
+        
+        // 绑定事件
+        dgvStatus.CellFormatting += DgvStatus_CellFormatting;
+        dgvStatus.CellContentClick += DgvStatus_CellContentClick;
+    }
+
+    private void DgvStatus_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= dgvStatus.Rows.Count) return;
+        if (dgvStatus.Columns[e.ColumnIndex].Name == "ColPidCount")
+        {
+            var status = dgvStatus.Rows[e.RowIndex].DataBoundItem as AccountStatus;
+            if (status != null)
+                e.Value = status.ProcessIds.Count.ToString();
+        }
+    }
+
+    private void DgvStatus_CellContentClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= dgvStatus.Rows.Count) return;
+        if (dgvStatus.Columns[e.ColumnIndex].Name == "ColAction")
+        {
+            var status = dgvStatus.Rows[e.RowIndex].DataBoundItem as AccountStatus;
+            if (status != null && status.ProcessIds.Count > 0)
+            {
+                CloseAccountProcesses(status);
+            }
+        }
+    }
+
+    private void CloseAccountProcesses(AccountStatus status)
+    {
+        if (status.ProcessIds.Count == 0) return;
+        
+        var result = MessageBox.Show($"确定要关闭账套【{status.Name}】的所有进程吗？\n共 {status.ProcessIds.Count} 个进程。", 
+            "确认关闭", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        
+        if (result != DialogResult.Yes) return;
+        
+        foreach (var pid in status.ProcessIds.ToList())
+        {
+            try
+            {
+                var p = Process.GetProcessById(pid);
+                if (!p.HasExited)
+                    p.Kill();
+            }
+            catch { }
+        }
+        
+        status.ProcessIds.Clear();
+        _accountStatuses.Remove(status.Code);
+        RefreshStatusGrid();
+    }
+
+    /// <summary>
+    /// 记录账套启动的进程
+    /// </summary>
+    public void RecordProcess(string code, int processId, string processType = "")
+    {
+        // 如果账套不在列表中，先获取账套名称
+        if (!_accountStatuses.ContainsKey(code))
+        {
+            var accounts = _dataService.LoadAccounts();
+            var acc = accounts.FirstOrDefault(a => a.Code == code);
+            _accountStatuses[code] = new AccountStatus
+            {
+                Code = code,
+                Name = acc?.Name ?? code
+            };
+        }
+        
+        if (!_accountStatuses[code].ProcessIds.Contains(processId))
+            _accountStatuses[code].ProcessIds.Add(processId);
+        
+        // 设置运行状态
+        var status = _accountStatuses[code];
+        switch (processType.ToLower())
+        {
+            case "web":
+                status.IsWebRunning = true;
+                break;
+            case "client":
+                status.IsClientRunning = true;
+                break;
+            case "dev":
+                status.IsDevToolsRunning = true;
+                break;
+            case "db":
+                status.IsDbConnected = true;
+                break;
+            case "remote":
+                status.IsRemoteConnected = true;
+                break;
+        }
+        
+        RefreshStatusGrid();
+    }
+
+    #endregion
 }

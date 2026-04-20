@@ -8,9 +8,16 @@ partial class MainForm
     private Panel titleBar = null!;
     private Label lblTitle = null!;
     private Label lblVersion = null!;
+    private MenuStrip menuStrip = null!;
+    private ToolStripMenuItem menuFile = null!;
+    private ToolStripMenuItem menuHelp = null!;
+    private ToolStripMenuItem menuExit = null!;
+    private ToolStripMenuItem menuAbout = null!;
+    private ToolStripMenuItem menuCopyAccount = null!;
     private TabControl tabControl = null!;
     private TabPage tabLaunch = null!;
     private TabPage tabTools = null!;
+    private TabPage tabStatus = null!;
     private Panel searchPanel = null!;
     private Label lblSearch = null!;
     private TextBox txtSearch = null!;
@@ -21,7 +28,6 @@ partial class MainForm
     private Button btnRefresh = null!;
     private Button btnLaunch = null!;
     private Button btnSettings = null!;
-    private Button btnClose = null!;
     private Button btnImport = null!;
     private Button btnConnectDB = null!;
     private Button btnRemote = null!;
@@ -31,6 +37,7 @@ partial class MainForm
     private Label lblPluginStatus = null!;
     private Panel scrollPanel = null!;
     private FlowLayoutPanel flpTools = null!;
+    private DataGridView dgvStatus = null!;
 
     protected override void Dispose(bool disposing)
     {
@@ -44,14 +51,63 @@ partial class MainForm
     private void InitializeComponent()
     {
         titleBar = new Panel();
-        lblVersion = new Label();
         lblTitle = new Label();
+        lblVersion = new Label();
+        menuStrip = new MenuStrip();
+        menuFile = new ToolStripMenuItem();
+        menuCopyAccount = new ToolStripMenuItem();
+        menuExit = new ToolStripMenuItem();
+        menuHelp = new ToolStripMenuItem();
+        menuAbout = new ToolStripMenuItem();
         tabControl = new TabControl();
         tabLaunch = new TabPage();
         tabTools = new TabPage();
+        tabStatus = new TabPage();
+        menuStrip.SuspendLayout();
         titleBar.SuspendLayout();
         tabControl.SuspendLayout();
         SuspendLayout();
+        // 
+        // menuStrip
+        // 
+        menuStrip.Items.AddRange(new ToolStripItem[] { menuFile, menuHelp });
+        menuStrip.Location = new Point(0, 0);
+        menuStrip.Name = "menuStrip";
+        menuStrip.Size = new Size(1100, 25);
+        menuStrip.TabIndex = 2;
+        menuStrip.Text = "menuStrip1";
+        // 
+        // menuFile
+        // 
+        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuExit });
+        menuFile.Name = "menuFile";
+        menuFile.Size = new Size(54, 21);
+        menuFile.Text = "文件(_F)";
+        // 
+        // menuCopyAccount
+        // 
+        menuCopyAccount.Name = "menuCopyAccount";
+        menuCopyAccount.Size = new Size(150, 22);
+        menuCopyAccount.Text = "复制账套信息";
+        // 
+        // menuExit
+        // 
+        menuExit.Name = "menuExit";
+        menuExit.Size = new Size(150, 22);
+        menuExit.Text = "退出(_X)";
+        // 
+        // menuHelp
+        // 
+        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuAbout });
+        menuHelp.Name = "menuHelp";
+        menuHelp.Size = new Size(57, 21);
+        menuHelp.Text = "帮助(_H)";
+        // 
+        // menuAbout
+        // 
+        menuAbout.Name = "menuAbout";
+        menuAbout.Size = new Size(122, 22);
+        menuAbout.Text = "关于";
         // 
         // titleBar
         // 
@@ -64,32 +120,33 @@ partial class MainForm
         titleBar.Size = new Size(1100, 55);
         titleBar.TabIndex = 1;
         // 
-        // lblVersion
-        // 
-        lblVersion.AutoSize = true;
-        lblVersion.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        lblVersion.ForeColor = Color.FromArgb(200, 230, 240);
-        lblVersion.Location = new Point(1019, 23);
-        lblVersion.Name = "lblVersion";
-        lblVersion.Size = new Size(69, 28);
-        lblVersion.TabIndex = 0;
-        lblVersion.Text = "v1.0.0";
-        // 
         // lblTitle
         // 
         lblTitle.AutoSize = true;
         lblTitle.Font = new Font("微软雅黑", 16F, FontStyle.Bold, GraphicsUnit.Point);
         lblTitle.ForeColor = Color.White;
-        lblTitle.Location = new Point(4, 0);
+        lblTitle.Location = new Point(15, 10);
         lblTitle.Name = "lblTitle";
-        lblTitle.Size = new Size(188, 50);
+        lblTitle.Size = new Size(188, 38);
         lblTitle.TabIndex = 1;
         lblTitle.Text = "A3工具箱";
+        // 
+        // lblVersion
+        // 
+        lblVersion.AutoSize = true;
+        lblVersion.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        lblVersion.ForeColor = Color.FromArgb(200, 230, 240);
+        lblVersion.Name = "lblVersion";
+        lblVersion.Size = new Size(69, 28);
+        lblVersion.TabIndex = 0;
+        lblVersion.Text = "v1.0.0";
+        lblVersion.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         // 
         // tabControl
         // 
         tabControl.Controls.Add(tabLaunch);
         tabControl.Controls.Add(tabTools);
+        tabControl.Controls.Add(tabStatus);
         tabControl.Dock = DockStyle.Fill;
         tabControl.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         tabControl.ForeColor = Color.FromArgb(60, 60, 60);
@@ -120,6 +177,15 @@ partial class MainForm
         tabTools.TabIndex = 1;
         tabTools.Text = "  工具箱  ";
         // 
+        // tabStatus
+        // 
+        tabStatus.BackColor = Color.White;
+        tabStatus.Location = new Point(4, 44);
+        tabStatus.Name = "tabStatus";
+        tabStatus.Size = new Size(1092, 597);
+        tabStatus.TabIndex = 2;
+        tabStatus.Text = "  账套运行情况  ";
+        // 
         // MainForm
         // 
         AutoScaleMode = AutoScaleMode.None;
@@ -127,10 +193,14 @@ partial class MainForm
         ClientSize = new Size(1100, 700);
         Controls.Add(tabControl);
         Controls.Add(titleBar);
+        Controls.Add(menuStrip);
+        MainMenuStrip = menuStrip;
         MinimumSize = new Size(900, 600);
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
         Text = "A3工具箱";
+        menuStrip.ResumeLayout(false);
+        menuStrip.PerformLayout();
         titleBar.ResumeLayout(false);
         titleBar.PerformLayout();
         tabControl.ResumeLayout(false);
@@ -139,6 +209,7 @@ partial class MainForm
         // 初始化Tab页控件
         InitLaunchTabControls();
         InitToolsTabControls();
+        InitStatusTabControls();
     }
 
     private void InitLaunchTabControls()
@@ -304,18 +375,6 @@ partial class MainForm
         btnRemote.Name = "btnRemote";
         btnRemote.Margin = new Padding(0, 0, 10, 0);
 
-        btnClose = new Button();
-        btnClose.Text = "❌ 关闭";
-        btnClose.Size = new Size(110, btnHeight);
-        btnClose.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-        btnClose.FlatAppearance.BorderSize = 0;
-        btnClose.BackColor = System.Drawing.Color.FromArgb(220, 53, 69);
-        btnClose.ForeColor = System.Drawing.Color.White;
-        btnClose.Font = new Font("微软雅黑", 10F);
-        btnClose.Cursor = System.Windows.Forms.Cursors.Hand;
-        btnClose.Name = "btnClose";
-        btnClose.Margin = new Padding(0, 0, 0, 0);
-
         buttonRow.Controls.Add(btnAdd);
         buttonRow.Controls.Add(btnImport);
         buttonRow.Controls.Add(btnEdit);
@@ -325,7 +384,6 @@ partial class MainForm
         buttonRow.Controls.Add(btnSettings);
         buttonRow.Controls.Add(btnConnectDB);
         buttonRow.Controls.Add(btnRemote);
-        buttonRow.Controls.Add(btnClose);
         tabLaunch.Controls.Add(buttonRow);
         buttonRow.ResumeLayout(false);
 
@@ -357,6 +415,8 @@ partial class MainForm
         tabLaunch.Controls.Add(dgvAccounts);
         dgvAccounts.ResumeLayout(false);
         ((System.ComponentModel.ISupportInitialize)dgvAccounts).EndInit();
+
+        this.ResumeLayout(false);
     }
 
     private void InitToolsTabControls()
@@ -414,5 +474,52 @@ partial class MainForm
         flpTools.ResumeLayout(false);
         scrollPanel.ResumeLayout(false);
         descPanel.ResumeLayout(false);
+    }
+
+    private void InitStatusTabControls()
+    {
+        // --- 状态Tab页 --- 
+        var headerPanel = new Panel();
+        headerPanel.SuspendLayout();
+        headerPanel.Height = 55;
+        headerPanel.Dock = System.Windows.Forms.DockStyle.Top;
+        headerPanel.BackColor = System.Drawing.Color.FromArgb(250, 250, 250);
+
+        var lblStatusTitle = new Label();
+        lblStatusTitle.Text = "实时监控所有账套的运行状态";
+        lblStatusTitle.Font = new Font("微软雅黑", 10F);
+        lblStatusTitle.ForeColor = System.Drawing.Color.FromArgb(80, 80, 80);
+        lblStatusTitle.Location = new Point(20, 18);
+        lblStatusTitle.AutoSize = true;
+
+        headerPanel.Controls.Add(lblStatusTitle);
+
+        // --- DataGridView ---
+        dgvStatus = new DataGridView();
+        dgvStatus.SuspendLayout();
+        dgvStatus.Dock = System.Windows.Forms.DockStyle.Fill;
+        dgvStatus.Name = "dgvStatus";
+        dgvStatus.BackgroundColor = System.Drawing.Color.White;
+        dgvStatus.BorderStyle = System.Windows.Forms.BorderStyle.None;
+        dgvStatus.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+        dgvStatus.ColumnHeadersHeight = 40;
+        dgvStatus.RowHeadersVisible = false;
+        dgvStatus.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+        dgvStatus.MultiSelect = false;
+        dgvStatus.AllowUserToAddRows = false;
+        dgvStatus.AllowUserToDeleteRows = false;
+        dgvStatus.ReadOnly = true;
+        dgvStatus.AutoGenerateColumns = false;
+        dgvStatus.Font = new Font("微软雅黑", 10F);
+        dgvStatus.RowTemplate.Height = 36;
+        dgvStatus.ColumnHeadersDefaultCellStyle.Font = new Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+        dgvStatus.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+        dgvStatus.AlternatingRowsDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(248, 248, 248);
+        dgvStatus.EnableHeadersVisualStyles = false;
+
+        tabStatus.Controls.Add(dgvStatus);
+        tabStatus.Controls.Add(headerPanel);
+        headerPanel.ResumeLayout(false);
+        dgvStatus.ResumeLayout(false);
     }
 }

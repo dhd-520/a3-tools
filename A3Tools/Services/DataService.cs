@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using A3Tools.Models;
+using A3Tools.Services;
 
 namespace A3Tools.Services;
 
@@ -56,6 +57,25 @@ public class DataService
             System.Diagnostics.Debug.WriteLine($"加载账套失败: {ex.Message}");
             return new List<Account>();
         }
+    }
+
+    /// <summary>
+    /// 更新所有账套的拼音字段并保存
+    /// </summary>
+    public void UpdateAllPinyin()
+    {
+        var accounts = LoadAccounts();
+        bool hasUpdate = false;
+        foreach (var acc in accounts)
+        {
+            if (string.IsNullOrEmpty(acc.Pinyin) && !string.IsNullOrEmpty(acc.Name))
+            {
+                acc.Pinyin = PinyinHelper.GetPinyinInitial(acc.Name);
+                hasUpdate = true;
+            }
+        }
+        if (hasUpdate)
+            SaveAccounts(accounts);
     }
 
     /// <summary>
@@ -141,12 +161,41 @@ public class DataService
     }
 
     /// <summary>
-    /// 删除账套
+    /// 删除账套，并重排后续编码保持连贯
     /// </summary>
     public void DeleteAccount(string code)
     {
         var accounts = LoadAccounts();
-        accounts.RemoveAll(a => a.Code == code);
+        
+        // 先找到被删除账套的编码数值
+        int deletedNum = 0;
+        Account? toDelete = null;
+        foreach (var acc in accounts)
+        {
+            if (acc.Code == code)
+            {
+                toDelete = acc;
+                if (int.TryParse(acc.Code.TrimStart('0'), out int num))
+                    deletedNum = num;
+                break;
+            }
+        }
+        
+        if (toDelete == null) return; // 没找到
+        
+        // 先移除要删除的账套
+        accounts.Remove(toDelete);
+        
+        // 重排后续编码：大于被删除编码的减1
+        foreach (var acc in accounts)
+        {
+            if (int.TryParse(acc.Code.TrimStart('0'), out int num) && num > deletedNum)
+            {
+                int newNum = num - 1;
+                acc.Code = newNum.ToString(new string('0', acc.Code.Length));
+            }
+        }
+        
         SaveAccounts(accounts);
     }
 

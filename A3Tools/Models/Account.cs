@@ -9,6 +9,7 @@ public class Account
 {
     public string Code { get; set; } = string.Empty;           // 代码
     public string Name { get; set; } = string.Empty;           // 账套名称
+    public string Pinyin { get; set; } = string.Empty;          // 账套名称拼音首字母
     public string Server { get; set; } = string.Empty;         // 账套地址
     public string ServerPassword { get; set; } = string.Empty;// 账套密码（加密）
     public string Database { get; set; } = string.Empty;      // 数据库地址
