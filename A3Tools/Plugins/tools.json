@@ -1,37 +1,7 @@
 {
   "tools": [
     {
-      "name": "数据库备份",
-      "description": "备份当前账套数据库",
-      "library": "A3Tools.Plugins.Default.dll",
-      "className": "A3Tools.Plugins.Default.DatabaseBackupTool",
-      "methodName": "Execute",
-      "enabled": true,
-      "icon": "",
-      "category": "数据库"
-    },
-    {
-      "name": "账套信息",
-      "description": "查看账套详细信息",
-      "library": "A3Tools.Plugins.Default.dll",
-      "className": "A3Tools.Plugins.Default.AccountInfoTool",
-      "methodName": "Execute",
-      "enabled": true,
-      "icon": "",
-      "category": "工具"
-    },
-    {
-      "name": "远程连接",
-      "description": "快速复制远程地址",
-      "library": "A3Tools.Plugins.Default.dll",
-      "className": "A3Tools.Plugins.Default.RemoteConnectTool",
-      "methodName": "Execute",
-      "enabled": true,
-      "icon": "",
-      "category": "远程"
-    },
-    {
-      "name": "跨库复制表结构",
+      "name": "复制表结构",
       "description": "复制表结构到目标数据库",
       "library": "A3Tools.Plugins.Default.dll",
       "className": "A3Tools.Plugins.Default.CrossDbCopyTableTool",
@@ -41,7 +11,7 @@
       "category": "跨库"
     },
     {
-      "name": "跨库复制Win表单",
+      "name": "复制Win表单",
       "description": "复制Win表单到目标账套",
       "library": "A3Tools.Plugins.Default.dll",
       "className": "A3Tools.Plugins.Default.CrossDbCopyWinFormTool",
@@ -51,7 +21,7 @@
       "category": "跨库"
     },
     {
-      "name": "跨库复制APP表单",
+      "name": "复制APP表单",
       "description": "复制APP表单到目标账套",
       "library": "A3Tools.Plugins.Default.dll",
       "className": "A3Tools.Plugins.Default.CrossDbCopyAppFormTool",
