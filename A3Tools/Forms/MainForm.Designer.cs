@@ -445,34 +445,43 @@ partial class MainForm
         lblPluginStatus.AutoSize = true;
         lblPluginStatus.Name = "lblPluginStatus";
 
-        descPanel.Controls.Add(lblPluginStatus);
         descPanel.Controls.Add(lblDesc);
+        descPanel.Controls.Add(lblPluginStatus);
 
-        // --- 滚动面板 ---
-        scrollPanel = new Panel();
-        scrollPanel.SuspendLayout();
-        scrollPanel.Dock = System.Windows.Forms.DockStyle.Fill;
-        scrollPanel.AutoScroll = true;
-        scrollPanel.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
-        scrollPanel.Name = "scrollPanel";
+        // --- 滚动容器（只竖向滚动）---
+        var toolsScrollPanel = new Panel();
+        toolsScrollPanel.SuspendLayout();
+        toolsScrollPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+        toolsScrollPanel.AutoScroll = true;
+        toolsScrollPanel.HorizontalScroll.Enabled = false;
+        toolsScrollPanel.HorizontalScroll.Visible = false;
+        toolsScrollPanel.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+        toolsScrollPanel.Name = "toolsScrollPanel";
 
-        // FlowLayoutPanel 工具卡片（TopDown 自动排列）
+        // FlowLayoutPanel 工具卡片（左到右自动排列，换行）
         flpTools = new FlowLayoutPanel();
         flpTools.SuspendLayout();
-        flpTools.Dock = System.Windows.Forms.DockStyle.Top;
-        flpTools.FlowDirection = System.Windows.Forms.FlowDirection.TopDown;
+        flpTools.Location = new Point(0, 0);
+        flpTools.Size = new Size(tabTools.Width - 20, 500);
+        flpTools.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
         flpTools.WrapContents = true;
         flpTools.AutoScroll = false;
-        flpTools.Padding = new Padding(20, 15, 20, 20);
-        flpTools.BackColor = System.Drawing.Color.Transparent;
+        flpTools.Padding = new Padding(20, 60, 20, 20);
+        flpTools.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
         flpTools.Name = "flpTools";
 
-        scrollPanel.Controls.Add(flpTools);
-        tabTools.Controls.Add(scrollPanel);
+        // Tab页大小变化时调整FlowLayoutPanel宽度
+        tabTools.SizeChanged += (s, e) =>
+        {
+            flpTools.Width = tabTools.Width - 20;
+        };
+
+        toolsScrollPanel.Controls.Add(flpTools);
+        tabTools.Controls.Add(toolsScrollPanel);
         tabTools.Controls.Add(descPanel);
 
         flpTools.ResumeLayout(false);
-        scrollPanel.ResumeLayout(false);
+        toolsScrollPanel.ResumeLayout(false);
         descPanel.ResumeLayout(false);
     }
 

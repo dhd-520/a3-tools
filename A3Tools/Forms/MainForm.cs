@@ -9,9 +9,11 @@ using A3Tools.Services;
 
 namespace A3Tools.Forms;
 
-public partial class MainForm : Form
+public partial class MainForm : Form, IToolContext
 {
     private readonly DataService _dataService;
+    private readonly ToolsConfigService _toolsConfigService;
+    private readonly ToolExecutorService _toolExecutorService;
     private readonly List<IPlugin> _plugins = new();
     private readonly List<int> _processIds = new();
     private readonly Dictionary<string, AccountStatus> _accountStatuses = new();
@@ -24,11 +26,14 @@ public partial class MainForm : Form
     public MainForm()
     {
         _dataService = new DataService();
+        _toolsConfigService = new ToolsConfigService();
+        _toolExecutorService = new ToolExecutorService();
         // 启动时更新所有现有账套的拼音
         _dataService.UpdateAllPinyin();
         InitializeComponent();
         WireUpEvents();
         LoadPlugins();
+        LoadTools();
         LoadAccounts();
         LoadAccountStatuses();
         this.scrollPanel?.BringToFront();
@@ -37,6 +42,54 @@ public partial class MainForm : Form
         _isInitializing = false;
         UpdateRootModeUI();
     }
+
+    #region IToolContext 实现
+
+    /// <summary>
+    /// 获取当前选中的账套（供工具箱开发者使用）
+    /// </summary>
+    public Account? GetSelectedAccount()
+    {
+        if (this.dgvAccounts.SelectedRows.Count > 0)
+        {
+            return this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 获取当前选中的账套代码
+    /// </summary>
+    public string? GetSelectedAccountCode()
+    {
+        return GetSelectedAccount()?.Code;
+    }
+
+    /// <summary>
+    /// 获取所有账套
+    /// </summary>
+    public List<Account> GetAllAccounts()
+    {
+        return _dataService.LoadAccounts();
+    }
+
+    /// <summary>
+    /// 显示消息提示
+    /// </summary>
+    public void ShowMessage(string message)
+    {
+        MessageBox.Show(message, "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    /// <summary>
+    /// 显示错误提示
+    /// </summary>
+    public void ShowError(string message)
+    {
+        MessageBox.Show(message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+
+    #endregion
 
     private void MainForm_Resize(object? sender, EventArgs e)
     {
@@ -539,34 +592,11 @@ public partial class MainForm : Form
         _plugins.Clear();
         this.flpTools.Controls.Clear();
 
-        var builtInTools = new[]
-        {
-            ("跨库复制表结构", "📋", "复制数据库表结构到目标库"),
-            ("跨库复制Win表单", "🪟", "复制WinForms表单到目标库"),
-            ("跨库复制APP表单", "📱", "复制APP表单到目标库"),
-            ("跨库复制自定义数据源", "🗄️", "复制自定义数据源配置"),
-        };
-
-        foreach (var (name, icon, desc) in builtInTools)
-        {
-            var btn = CreateToolCard(icon, name, desc);
-            var toolName = name;
-            btn.Click += (s, e) =>
-            {
-                var account = this.dgvAccounts.SelectedRows.Count > 0
-                    ? this.dgvAccounts.SelectedRows[0].DataBoundItem as Account : null;
-                if (account == null)
-                {
-                    MessageBox.Show("请先在【A3程序启动】中选择一个账套！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                MessageBox.Show($"【{toolName}】功能开发中...\n\n目标账套：{account.Name}", toolName, MessageBoxButtons.OK, MessageBoxIcon.Information);
-            };
-            this.flpTools.Controls.Add(btn);
-        }
-
+        // 加载旧版IPlugin插件（兼容）
         LoadExternalPlugins();
-        this.lblPluginStatus.Text = $"已加载 {_plugins.Count} 个工具";
+        
+        // 加载新版配置化工具
+        LoadTools();
     }
 
     private void LoadExternalPlugins()
@@ -606,18 +636,45 @@ public partial class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// 加载配置化工具（从tools.json读取）
+    /// </summary>
+    private void LoadTools()
+    {
+        _toolExecutorService.LoadTools(_toolsConfigService, this);
+        
+        foreach (var tool in _toolExecutorService.Tools)
+        {
+            var btn = CreateToolCard("🔧", tool.Config.Name, tool.Config.Description);
+            var loadedTool = tool;
+            btn.Click += (s, e) =>
+            {
+                var account = GetSelectedAccount();
+                if (account == null)
+                {
+                    MessageBox.Show("请先在【A3程序启动】中选择一个账套！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                _toolExecutorService.ExecuteTool(loadedTool, account, this);
+            };
+            this.flpTools.Controls.Add(btn);
+        }
+        
+        this.lblPluginStatus.Text = $"已加载 {_toolExecutorService.Tools.Count} 个工具";
+    }
+
     private Button CreateToolCard(string icon, string name, string description)
     {
         var btn = new Button
         {
             Text = $"{icon}  {name}\n{description}",
-            Size = new System.Drawing.Size(280, 70),
+            Size = new System.Drawing.Size(200, 65),
             FlatStyle = FlatStyle.Flat,
             BackColor = System.Drawing.Color.White,
-            Font = new System.Drawing.Font("微软雅黑", 10F),
+            Font = new System.Drawing.Font("微软雅黑", 9F),
             Cursor = Cursors.Hand,
             TextAlign = ContentAlignment.MiddleCenter,
-            Margin = new Padding(5),
+            Margin = new Padding(8),
         };
         btn.FlatAppearance.BorderSize = 1;
         btn.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(220, 220, 220);

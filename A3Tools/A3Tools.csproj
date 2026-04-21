@@ -25,4 +25,11 @@
     <PackageReference Include="NPinyin" Version="0.2.6321.26573" />
   </ItemGroup>
 
+  <!-- 插件目录 -->
+  <ItemGroup>
+    <None Update="Plugins\tools.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "A3Tools", "A3Tools\A3Tools.csproj", "{80EF3458-C616-405D-9736-E7647F123E19}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "A3Tools.Plugins.Default", "A3Tools.Plugins.Default\A3Tools.Plugins.Default.csproj", "{1FBA9D41-5F78-4A77-9A07-D0C914A3CCD2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +20,9 @@ Global
 		{80EF3458-C616-405D-9736-E7647F123E19}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{80EF3458-C616-405D-9736-E7647F123E19}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{80EF3458-C616-405D-9736-E7647F123E19}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1FBA9D41-5F78-4A77-9A07-D0C914A3CCD2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1FBA9D41-5F78-4A77-9A07-D0C914A3CCD2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1FBA9D41-5F78-4A77-9A07-D0C914A3CCD2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1FBA9D41-5F78-4A77-9A07-D0C914A3CCD2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
