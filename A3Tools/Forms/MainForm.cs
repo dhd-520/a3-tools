@@ -401,7 +401,22 @@ public partial class MainForm : Form, IToolContext
         if (account == null) return;
 
         var settings = _dataService.LoadSettings();
-        if (string.IsNullOrEmpty(settings.AppDirectory) || !Directory.Exists(settings.AppDirectory)) return;
+        if (string.IsNullOrEmpty(settings.AppDirectory) || !Directory.Exists(settings.AppDirectory))
+        {
+            MessageBox.Show("请先在【设置】中设置A3应用程序目录！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 弹出启动选项选择对话框，传入上次的设置作为默认值
+        using var dialog = new LaunchOptionsDialog(settings.LaunchDesktop, settings.LaunchDevTools, settings.LaunchWeb, settings.SelectedBrowser);
+        if (dialog.ShowDialog() != DialogResult.OK) return;
+
+        // 保存用户的选择
+        settings.LaunchDesktop = dialog.LaunchDesktop;
+        settings.LaunchDevTools = dialog.LaunchDevTools;
+        settings.LaunchWeb = dialog.LaunchWeb;
+        settings.SelectedBrowser = dialog.SelectedBrowser;
+        _dataService.SaveSettings(settings);
 
         string appDir = settings.AppDirectory;
 
@@ -466,13 +481,106 @@ public partial class MainForm : Form, IToolContext
         if (settings.LaunchWeb && !string.IsNullOrEmpty(account.Server))
         {
             string url = account.Server.TrimEnd('/') + "/h5comerp/#/login";
-            var p = Process.Start(new ProcessStartInfo { FileName = "chrome.exe", Arguments = url, UseShellExecute = true });
-            if (p != null) 
+            LaunchWebBrowser(url, settings.SelectedBrowser, account.Code);
+        }
+    }
+
+    private void LaunchWebBrowser(string url, string browser, string accountCode)
+    {
+        string browserPath = GetBrowserPath(browser);
+
+        if (!string.IsNullOrEmpty(browserPath) && File.Exists(browserPath))
+        {
+            // 根据浏览器类型使用不同的启动参数
+            string args = browser switch
             {
-                _processIds.Add(p.Id);
-                RecordProcess(account.Code, p.Id, "web");
+                // Chrome 效能优化参数
+                "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding \"{url}\"",
+                // Edge 使用简单参数（Edge对参数更严格）
+                "msedge" => $"--new-window \"{url}\"",
+                // Firefox 参数
+                "firefox" => $"-new-window \"{url}\"",
+                // 360浏览器
+                "360se" => $"--new-window \"{url}\"",
+                // 其他浏览器使用默认参数
+                _ => $"--new-window \"{url}\""
+            };
+
+            // Edge 和 Firefox 使用 ShellExecute 更可靠
+            bool useShellExecute = browser == "msedge" || browser == "firefox";
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = browserPath,
+                Arguments = args,
+                UseShellExecute = useShellExecute,
+                CreateNoWindow = !useShellExecute
+            };
+            try
+            {
+                var p = Process.Start(startInfo);
+                if (p != null)
+                {
+                    _processIds.Add(p.Id);
+                    RecordProcess(accountCode, p.Id, "web");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"启动{browser}失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
+        else
+        {
+            // 浏览器未找到，使用系统默认浏览器
+            try
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                };
+                var p = Process.Start(startInfo);
+                if (p != null)
+                {
+                    _processIds.Add(p.Id);
+                    RecordProcess(accountCode, p.Id, "web");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"启动浏览器失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+    }
+
+    private string GetBrowserPath(string browser)
+    {
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        return browser switch
+        {
+            "chrome" => FindFileInPaths(programFiles, @"Google\Chrome\Application\chrome.exe"),
+            "msedge" => FindFileInPaths(
+                programFiles + @"\Microsoft\Edge\Application\msedge.exe",
+                localAppData + @"\Microsoft\Edge\Application\msedge.exe"
+            ),
+            "firefox" => FindFileInPaths(programFiles, @"Mozilla Firefox\firefox.exe"),
+            "360se" => FindFileInPaths(programFilesX86, @"360safe\sechrome\sechrome.exe"),
+            _ => string.Empty
+        };
+    }
+
+    private string FindFileInPaths(params string[] paths)
+    {
+        foreach (var path in paths)
+        {
+            if (File.Exists(path))
+                return path;
+        }
+        return string.Empty;
     }
 
     private void BtnSettings_Click(object? sender, EventArgs e)
@@ -515,14 +623,18 @@ public partial class MainForm : Form, IToolContext
         try
         {
             var p = Process.Start(new ProcessStartInfo { FileName = ssmsPath, Arguments = args, UseShellExecute = true });
-            if (p != null) _processIds.Add(p.Id);
+            if (p != null)
+            {
+                _processIds.Add(p.Id);
+                RecordProcess(account.Code, p.Id, "db");
+            }
         }
         catch
         {
             try
             {
                 var p = Process.Start(new ProcessStartInfo { FileName = "cmd.exe", Arguments = $"/c start \"\" \"{ssmsPath}\" {args}", UseShellExecute = false, CreateNoWindow = true });
-                if (p != null) 
+                if (p != null)
                 {
                     _processIds.Add(p.Id);
                     RecordProcess(account.Code, p.Id, "db");

@@ -29,4 +29,9 @@ public class AppSettings
     /// 是否启动网页版
     /// </summary>
     public bool LaunchWeb { get; set; } = false;
+
+    /// <summary>
+    /// 选择的浏览器 (chrome, msedge, firefox, 360se, default)
+    /// </summary>
+    public string SelectedBrowser { get; set; } = "chrome";
 }
