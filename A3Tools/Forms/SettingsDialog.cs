@@ -13,6 +13,7 @@ public partial class SettingsDialog : Form
     private Button btnCancel = null!;
     private Label lblTitle = null!;
     private Panel titleBar = null!;
+    private CheckBox chkShowLaunchDialog = null!;
 
     public string AppDirectory { get; private set; } = string.Empty;
 
@@ -29,7 +30,7 @@ public partial class SettingsDialog : Form
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
-        this.ClientSize = new System.Drawing.Size(1152, 280);
+        this.ClientSize = new System.Drawing.Size(1152, 480);
         this.StartPosition = FormStartPosition.CenterParent;
         this.BackColor = System.Drawing.Color.White;
 
@@ -95,7 +96,38 @@ public partial class SettingsDialog : Form
             ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
         };
 
+        // 启动选项设置区域
+        var lblLaunchTitle = new Label
+        {
+            Text = "启动选项：",
+            Font = new System.Drawing.Font("微软雅黑", 11F),
+            Location = new System.Drawing.Point(0, 155),
+            Size = new System.Drawing.Size(180, 40),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+
+        chkShowLaunchDialog = new CheckBox
+        {
+            Text = "启动时弹出启动选项选择窗口",
+            Location = new System.Drawing.Point(0, 200),
+            Size = new System.Drawing.Size(400, 36),
+            Font = new System.Drawing.Font("微软雅黑", 10F),
+            Checked = true
+        };
+
+        var hintLaunch = new Label
+        {
+            Text = "不勾选则按上次选择直接启动（首次使用会弹出选择）",
+            Location = new System.Drawing.Point(0, 240),
+            Size = new System.Drawing.Size(600, 30),
+            Font = new System.Drawing.Font("微软雅黑", 9F),
+            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
+        };
+
         content.Controls.Add(hint);
+        content.Controls.Add(hintLaunch);
+        content.Controls.Add(chkShowLaunchDialog);
+        content.Controls.Add(lblLaunchTitle);
         content.Controls.Add(btnBrowse);
         content.Controls.Add(txtAppDir);
         content.Controls.Add(lblAppDir);
@@ -164,6 +196,7 @@ public partial class SettingsDialog : Form
         var settings = dataService.LoadSettings();
         txtAppDir.Text = settings.AppDirectory;
         AppDirectory = settings.AppDirectory;
+        chkShowLaunchDialog.Checked = settings.ShowLaunchOptionsDialog;
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -187,6 +220,7 @@ public partial class SettingsDialog : Form
         var dataService = new DataService();
         var settings = dataService.LoadSettings();
         settings.AppDirectory = AppDirectory;
+        settings.ShowLaunchOptionsDialog = chkShowLaunchDialog.Checked;
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();

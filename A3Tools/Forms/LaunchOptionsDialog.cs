@@ -48,7 +48,7 @@ public class LaunchOptionsDialog : Form
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
-        this.ClientSize = new System.Drawing.Size(540, 440);
+        this.ClientSize = new System.Drawing.Size(540, 520);
         this.StartPosition = FormStartPosition.CenterParent;
         this.BackColor = System.Drawing.Color.White;
 
@@ -119,8 +119,8 @@ public class LaunchOptionsDialog : Form
         cboBrowser = new ComboBox
         {
             Location = new System.Drawing.Point(150, 180),
-            Size = new System.Drawing.Size(280, 32),
-            Font = new System.Drawing.Font("微软雅黑", 10F),
+            Size = new System.Drawing.Size(280, 40),
+            Font = new System.Drawing.Font("微软雅黑", 11F),
             DropDownStyle = ComboBoxStyle.DropDownList,
             FlatStyle = FlatStyle.Flat
         };

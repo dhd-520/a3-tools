@@ -257,6 +257,14 @@ public class DataService
     }
 
     /// <summary>
+    /// 检查设置文件是否存在
+    /// </summary>
+    public bool HasSettings()
+    {
+        return File.Exists(_settingsFile);
+    }
+
+    /// <summary>
     /// 保存设置
     /// </summary>
     public void SaveSettings(AppSettings settings)

@@ -407,16 +407,28 @@ public partial class MainForm : Form, IToolContext
             return;
         }
 
-        // 弹出启动选项选择对话框，传入上次的设置作为默认值
-        using var dialog = new LaunchOptionsDialog(settings.LaunchDesktop, settings.LaunchDevTools, settings.LaunchWeb, settings.SelectedBrowser);
-        if (dialog.ShowDialog() != DialogResult.OK) return;
+        // 检查是否需要弹出启动选项对话框
+        // 条件：勾选了"弹出"选项，或者从未保存过设置（首次使用）
+        bool shouldShowDialog = settings.ShowLaunchOptionsDialog || !_dataService.HasSettings();
 
-        // 保存用户的选择
-        settings.LaunchDesktop = dialog.LaunchDesktop;
-        settings.LaunchDevTools = dialog.LaunchDevTools;
-        settings.LaunchWeb = dialog.LaunchWeb;
-        settings.SelectedBrowser = dialog.SelectedBrowser;
-        _dataService.SaveSettings(settings);
+        if (shouldShowDialog)
+        {
+            // 弹出启动选项选择对话框
+            using var dialog = new LaunchOptionsDialog(settings.LaunchDesktop, settings.LaunchDevTools, settings.LaunchWeb, settings.SelectedBrowser);
+            if (dialog.ShowDialog() != DialogResult.OK) return;
+
+            // 保存用户的选择
+            settings.LaunchDesktop = dialog.LaunchDesktop;
+            settings.LaunchDevTools = dialog.LaunchDevTools;
+            settings.LaunchWeb = dialog.LaunchWeb;
+            settings.SelectedBrowser = dialog.SelectedBrowser;
+            // 如果是首次使用且用户选择了保存，下次不再弹出
+            if (!_dataService.HasSettings())
+            {
+                settings.ShowLaunchOptionsDialog = false;
+            }
+            _dataService.SaveSettings(settings);
+        }
 
         string appDir = settings.AppDirectory;
 

@@ -34,4 +34,9 @@ public class AppSettings
     /// 选择的浏览器 (chrome, msedge, firefox, 360se, default)
     /// </summary>
     public string SelectedBrowser { get; set; } = "chrome";
+
+    /// <summary>
+    /// 启动时是否弹出启动选项对话框（默认true）
+    /// </summary>
+    public bool ShowLaunchOptionsDialog { get; set; } = true;
 }
