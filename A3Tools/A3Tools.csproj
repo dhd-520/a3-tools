@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>A3Tool.ico</ApplicationIcon>
+    <AssemblyName>A3Tools</AssemblyName>
   </PropertyGroup>
 
   <!-- 为 Designer.cs 添加嵌套关系（SDK默认已包含，通过Update添加DependentUpon） -->
@@ -23,6 +25,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />
     <PackageReference Include="NPinyin" Version="0.2.6321.26573" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\A3Tools.Common\A3Tools.Common.csproj" />
   </ItemGroup>
 
   <!-- 插件目录 -->

@@ -27,3 +27,12 @@ DATA/*.json
 # Temp
 *.tmp
 *.bak
+
+# Build release
+release/
+
+# Test project
+TestForm/
+
+# Junk files
+nul

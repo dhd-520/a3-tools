@@ -2,15 +2,16 @@ using System.Diagnostics;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
+using Microsoft.Data.SqlClient;
 
 namespace A3Tools.Plugins.Default.Forms;
 
-public partial class CrossDbCopyTableForm : Form
+public partial class CrossDbCopyFormForm : Form
 {
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
 
-    public CrossDbCopyTableForm(IToolContext context, Account? currentAccount)
+    public CrossDbCopyFormForm(IToolContext context, Account? currentAccount)
     {
         _context = context;
         _currentAccount = currentAccount;
@@ -67,10 +68,7 @@ public partial class CrossDbCopyTableForm : Form
 
         var txtSearch = new TextBox
         {
-            Left = 20,
-            Top = 45,
-            Width = 540,
-            Height = 30,
+            Left = 20, Top = 45, Width = 540, Height = 30,
             Font = new Font("微软雅黑", 11F),
             PlaceholderText = "输入账套编码或名称搜索..."
         };
@@ -79,6 +77,7 @@ public partial class CrossDbCopyTableForm : Form
         var listBox = new ListBox { Left = 20, Top = 85, Width = 540, Height = 380, Font = new Font("微软雅黑", 11F) };
         dialog.Controls.Add(listBox);
 
+        // 添加账套到列表
         void PopulateList(string filter)
         {
             listBox.Items.Clear();
@@ -96,7 +95,10 @@ public partial class CrossDbCopyTableForm : Form
             }
         }
 
+        // 初始填充
         PopulateList("");
+
+        // 搜索事件
         txtSearch.TextChanged += (s, e) => PopulateList(txtSearch.Text);
 
         var btnOk = new Button { Text = "确定", Left = 170, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 145, 176), ForeColor = Color.White, Font = new Font("微软雅黑", 11F) };
@@ -106,6 +108,7 @@ public partial class CrossDbCopyTableForm : Form
         {
             if (listBox.SelectedIndex >= 0)
             {
+                // 从listBox选中项获取对应的账套（通过显示文本匹配）
                 var selectedText = listBox.SelectedItem?.ToString() ?? "";
                 var selectedAcc = accounts.FirstOrDefault(a => (a.Code + " - " + a.Name) == selectedText);
                 if (selectedAcc != null)
@@ -148,14 +151,11 @@ public partial class CrossDbCopyTableForm : Form
             MessageBox.Show("请填写目标数据库地址！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        if (string.IsNullOrWhiteSpace(txtTables.Text))
+        if (string.IsNullOrWhiteSpace(txtObjectGuids.Text))
         {
-            MessageBox.Show("请输入要复制的表名称！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("请输入要复制的表单OBJECTGUID！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-
-        var tableNames = txtTables.Text.Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t.Trim()).ToList();
 
         lblProgress.Text = "正在连接源数据库...";
         progressBar.Value = 10;
@@ -179,19 +179,19 @@ public partial class CrossDbCopyTableForm : Form
             return;
         }
 
-        lblProgress.Text = "正在复制表结构...";
+        lblProgress.Text = "正在复制表单...";
         progressBar.Value = 50;
 
-        var success = await CopyTablesAsync(
+        var success = await CopyFormsAsync(
             txtSourceServer.Text, txtSourceUser.Text, txtSourcePassword.Text,
             txtTargetServer.Text, txtTargetUser.Text, txtTargetPassword.Text,
-            tableNames);
+            txtObjectGuids.Text.Trim(), chkDeleteFirst.Checked);
 
         if (success)
         {
             progressBar.Value = 100;
             lblProgress.Text = "复制完成";
-            MessageBox.Show("成功复制 " + tableNames.Count + " 个表的结构！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("表单复制完成！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
             this.Close();
         }
         else
@@ -208,7 +208,7 @@ public partial class CrossDbCopyTableForm : Form
             try
             {
                 var connStr = "Server=" + server + ";User Id=" + user + ";Password=" + password + ";TrustServerCertificate=True;";
-                using var conn = new Microsoft.Data.SqlClient.SqlConnection(connStr);
+                using var conn = new SqlConnection(connStr);
                 conn.Open();
                 return true;
             }
@@ -220,10 +220,10 @@ public partial class CrossDbCopyTableForm : Form
         });
     }
 
-    private async Task<bool> CopyTablesAsync(
+    private async Task<bool> CopyFormsAsync(
         string srcServer, string srcUser, string srcPassword,
         string tgtServer, string tgtUser, string tgtPassword,
-        List<string> tableNames)
+        string objectGuids, bool deleteFirst)
     {
         return await Task.Run(() =>
         {
@@ -232,30 +232,36 @@ public partial class CrossDbCopyTableForm : Form
                 var srcConnStr = "Server=" + srcServer + ";User Id=" + srcUser + ";Password=" + srcPassword + ";TrustServerCertificate=True;";
                 var tgtConnStr = "Server=" + tgtServer + ";User Id=" + tgtUser + ";Password=" + tgtPassword + ";TrustServerCertificate=True;";
 
-                using var srcConn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr);
-                using var tgtConn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr);
+                using var srcConn = new SqlConnection(srcConnStr);
+                using var tgtConn = new SqlConnection(tgtConnStr);
                 srcConn.Open();
                 tgtConn.Open();
 
-                int total = tableNames.Count;
+                // 解析OBJECTGUID列表
+                var guidList = objectGuids.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(g => g.Trim()).ToList();
+
+                int total = guidList.Count;
                 int current = 0;
 
-                foreach (var tableName in tableNames)
+                foreach (var objectGuid in guidList)
                 {
                     current++;
-                    var progress = 50 + (current * 50 / total);
+                    var progress = 30 + (current * 70 / total);
                     this.Invoke(new Action(() =>
                     {
                         progressBar.Value = progress;
-                        lblProgress.Text = "正在复制：" + tableName + " (" + current + "/" + total + ")";
+                        lblProgress.Text = "正在复制：" + objectGuid + " (" + current + "/" + total + ")";
                     }));
 
-                    var scripts = GenerateCreateTableScripts(srcConn, tableName);
-                    foreach (var script in scripts)
-                    {
-                        using var cmd = new Microsoft.Data.SqlClient.SqlCommand(script, tgtConn);
-                        cmd.ExecuteNonQuery();
-                    }
+                    // 复制S_OBJECT表
+                    CopyTableData(srcConn, tgtConn, "S_OBJECT", "GUID", objectGuid, deleteFirst);
+
+                    // 复制S_CONTROL表
+                    CopyTableData(srcConn, tgtConn, "S_CONTROL", "OBJECTGUID", objectGuid, deleteFirst);
+
+                    // 复制S_DATA表
+                    CopyTableData(srcConn, tgtConn, "S_DATA", "OBJECTGUID", objectGuid, deleteFirst);
                 }
 
                 return true;
@@ -271,72 +277,113 @@ public partial class CrossDbCopyTableForm : Form
         });
     }
 
-    private List<string> GenerateCreateTableScripts(Microsoft.Data.SqlClient.SqlConnection conn, string tableName)
+    private void CopyTableData(SqlConnection srcConn, SqlConnection tgtConn, string tableName, string whereField, string whereValue, bool deleteFirst)
     {
-        var scripts = new List<string>();
         try
         {
-            var columnsSql = @"
-                SELECT c.name, t.name AS data_type, c.max_length, c.precision, c.scale, c.is_nullable,
-                       CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key,
-                       dc.definition AS default_value
-                FROM sys.columns c
-                JOIN sys.types t ON c.user_type_id = t.user_type_id
-                LEFT JOIN (SELECT ic.column_id, ic.object_id FROM sys.index_columns ic JOIN sys.indexes i ON ic.index_id = i.index_id AND ic.object_id = i.object_id WHERE i.is_primary_key = 1) pk
-                       ON c.column_id = pk.column_id AND c.object_id = pk.object_id
-                LEFT JOIN sys.default_constraints dc ON c.default_object_id = dc.object_id
-                WHERE c.object_id = OBJECT_ID(@tableName)
-                ORDER BY c.column_id";
-
-            using var cmd = new Microsoft.Data.SqlClient.SqlCommand(columnsSql, conn);
-            cmd.Parameters.AddWithValue("@tableName", tableName);
-            using var reader = cmd.ExecuteReader();
-
-            var columnDefs = new List<string>();
-            while (reader.Read())
+            // 获取目标表的列信息
+            var tgtColumns = GetTableColumns(tgtConn, tableName);
+            if (tgtColumns.Count == 0)
             {
-                var colName = reader["name"]?.ToString() ?? "";
-                var dataType = reader["data_type"]?.ToString() ?? "";
-                var maxLen = Convert.ToInt32(reader["max_length"]);
-                var precision = Convert.ToInt32(reader["precision"]);
-                var scale = Convert.ToInt32(reader["scale"]);
-                var isNullable = Convert.ToBoolean(reader["is_nullable"]);
-                var isPk = Convert.ToInt32(reader["is_primary_key"]) == 1;
-                var defaultValue = reader["default_value"]?.ToString();
+                Debug.WriteLine($"目标表{tableName}不存在或没有列");
+                return;
+            }
 
-                var colDef = "[" + colName + "] " + GetSqlDataType(dataType, maxLen, precision, scale);
-                if (!isNullable) colDef += " NOT NULL";
-                else colDef += " NULL";
-                if (!string.IsNullOrEmpty(defaultValue)) colDef += " DEFAULT " + defaultValue;
-                if (isPk) colDef += " PRIMARY KEY";
-                columnDefs.Add(colDef);
+            // 如果需要先删除
+            if (deleteFirst)
+            {
+                var deleteSql = $"DELETE FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
+                using var deleteCmd = new SqlCommand(deleteSql, tgtConn);
+                deleteCmd.Parameters.AddWithValue("@value", whereValue);
+                deleteCmd.ExecuteNonQuery();
+            }
+
+            // 从源数据库读取数据 - 只选择目标表存在的列
+            var commonColumns = tgtColumns.ToHashSet();
+            var selectColumns = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
+            var selectSql = $"SELECT {selectColumns} FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
+            using var selectCmd = new SqlCommand(selectSql, srcConn);
+            selectCmd.Parameters.AddWithValue("@value", whereValue);
+            using var reader = selectCmd.ExecuteReader();
+
+            var rows = new List<Dictionary<string, object?>>();
+
+            // 获取列信息
+            if (reader.Read())
+            {
+                var columns = new List<string>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    columns.Add(reader.GetName(i));
+                }
+
+                do
+                {
+                    var row = new Dictionary<string, object?>();
+                    foreach (var col in columns)
+                    {
+                        row[col] = reader[col];
+                    }
+                    rows.Add(row);
+                } while (reader.Read());
             }
             reader.Close();
 
-            if (columnDefs.Count == 0) return scripts;
+            if (rows.Count == 0) return;
 
-            scripts.Add("IF OBJECT_ID('" + tableName + "', 'U') IS NOT NULL DROP TABLE [" + tableName + "]");
-            scripts.Add("CREATE TABLE [" + tableName + "] (" + string.Join(", ", columnDefs) + ")");
-            return scripts;
+            // 检查是否已存在
+            if (!deleteFirst)
+            {
+                var checkSql = $"SELECT COUNT(*) FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
+                using var checkCmd = new SqlCommand(checkSql, tgtConn);
+                checkCmd.Parameters.AddWithValue("@value", whereValue);
+                var count = Convert.ToInt32(checkCmd.ExecuteScalar());
+                if (count > 0)
+                {
+                    Debug.WriteLine($"表{tableName}中{whereField}={whereValue}已存在，跳过");
+                    return;
+                }
+            }
+
+            // 插入数据 - 使用目标表的列
+            foreach (var row in rows)
+            {
+                var columnNames = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
+                var paramNames = string.Join(", ", tgtColumns.Select(c => "@" + c));
+                var insertSql = $"INSERT INTO dbo.[{tableName}] ({columnNames}) VALUES ({paramNames})";
+
+                using var insertCmd = new SqlCommand(insertSql, tgtConn);
+                foreach (var col in tgtColumns)
+                {
+                    var value = row.ContainsKey(col) ? row[col] : null;
+                    insertCmd.Parameters.AddWithValue("@" + col, value ?? DBNull.Value);
+                }
+                insertCmd.ExecuteNonQuery();
+            }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine("生成建表脚本失败: " + ex.Message);
-            return scripts;
+            Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
+            throw;
         }
     }
 
-    private string GetSqlDataType(string dataType, int maxLen, int precision, int scale)
+    private List<string> GetTableColumns(SqlConnection conn, string tableName)
     {
-        return dataType.ToLower() switch
+        var columns = new List<string>();
+        var sql = @"
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'
+            ORDER BY ORDINAL_POSITION";
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@tableName", tableName);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
         {
-            "varchar" => maxLen == -1 ? "NVARCHAR(MAX)" : "NVARCHAR(" + (maxLen / 2) + ")",
-            "nvarchar" => maxLen == -1 ? "NVARCHAR(MAX)" : "NVARCHAR(" + (maxLen / 2) + ")",
-            "char" => "CHAR(" + maxLen + ")",
-            "nchar" => "NCHAR(" + (maxLen / 2) + ")",
-            "decimal" => "DECIMAL(" + precision + ", " + scale + ")",
-            "numeric" => "NUMERIC(" + precision + ", " + scale + ")",
-            _ => dataType
-        };
+            columns.Add(reader.GetString(0));
+        }
+        reader.Close();
+        return columns;
     }
 }

@@ -119,17 +119,12 @@ public class CrossDbCopyTableTool
 public class CrossDbCopyWinFormTool
 {
     public string Name => "跨库复制Win表单";
-    public string Description => "复制Win表单到目标账套";
+    public string Description => "复制Win表单到目标账套（通过OBJECTGUID）";
 
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
-        if (account == null)
-        {
-            context.ShowError("请先选择一个账套！");
-            return;
-        }
-
-        context.ShowMessage($"跨库复制Win表单功能开发中...\n当前账套：{account.Name}");
+        var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyFormForm(context, account);
+        form.ShowDialog();
     }
 }
 
@@ -143,12 +138,7 @@ public class CrossDbCopyAppFormTool
 
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
-        if (account == null)
-        {
-            context.ShowError("请先选择一个账套！");
-            return;
-        }
-
-        context.ShowMessage($"跨库复制APP表单功能开发中...\n当前账套：{account.Name}");
+        var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyAppFormForm(context, account);
+        form.ShowDialog();
     }
 }

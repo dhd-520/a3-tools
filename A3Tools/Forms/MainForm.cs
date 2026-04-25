@@ -33,7 +33,6 @@ public partial class MainForm : Form, IToolContext
         InitializeComponent();
         WireUpEvents();
         LoadPlugins();
-        LoadTools();
         LoadAccounts();
         LoadAccountStatuses();
         this.scrollPanel?.BringToFront();
@@ -180,6 +179,19 @@ public partial class MainForm : Form, IToolContext
             {
                 acc.Pinyin = PinyinHelper.GetPinyinInitial(acc.Name);
             }
+        }
+        // 如果搜索框有内容，按搜索条件过滤
+        var keyword = txtSearch?.Text?.Trim()?.ToLower();
+        if (!string.IsNullOrEmpty(keyword))
+        {
+            accounts = accounts.Where(a =>
+                (a.Code ?? "").ToLower().Contains(keyword) ||
+                (a.Name ?? "").ToLower().Contains(keyword) ||
+                (a.Pinyin ?? "").ToLower().Contains(keyword) ||
+                (a.Server ?? "").ToLower().Contains(keyword) ||
+                (a.Database ?? "").ToLower().Contains(keyword) ||
+                (a.RemoteAddress ?? "").ToLower().Contains(keyword)
+            ).ToList();
         }
         this.dgvAccounts.DataSource = null;
         this.dgvAccounts.DataSource = accounts;
@@ -716,10 +728,7 @@ public partial class MainForm : Form, IToolContext
         _plugins.Clear();
         this.flpTools.Controls.Clear();
 
-        // 加载旧版IPlugin插件（兼容）
-        LoadExternalPlugins();
-        
-        // 加载新版配置化工具
+        // 只加载配置化工具（禁用旧版IPlugin兼容加载）
         LoadTools();
     }
 
@@ -774,11 +783,6 @@ public partial class MainForm : Form, IToolContext
             btn.Click += (s, e) =>
             {
                 var account = GetSelectedAccount();
-                if (account == null)
-                {
-                    MessageBox.Show("请先在【A3程序启动】中选择一个账套！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
                 _toolExecutorService.ExecuteTool(loadedTool, account, this);
             };
             this.flpTools.Controls.Add(btn);

@@ -430,7 +430,7 @@ partial class MainForm
         descPanel.Name = "descPanel";
 
         lblDesc = new Label();
-        lblDesc.Text = "选择工具开始操作（需先在【A3程序启动】中选择账套）";
+        lblDesc.Text = "选择工具开始操作";
         lblDesc.Location = new Point(20, 16);
         lblDesc.Font = new Font("微软雅黑", 10F);
         lblDesc.ForeColor = System.Drawing.Color.FromArgb(102, 109, 118);
