@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
+using A3Tools.Services;
 
 namespace A3Tools.Plugins.Default.Forms;
 
@@ -160,7 +161,7 @@ public partial class CrossDbCopyTableForm : Form
         lblProgress.Text = "正在连接源数据库...";
         progressBar.Value = 10;
 
-        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceUser.Text, txtSourcePassword.Text))
+        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text))
         {
             MessageBox.Show("源数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -171,7 +172,7 @@ public partial class CrossDbCopyTableForm : Form
         lblProgress.Text = "正在连接目标数据库...";
         progressBar.Value = 30;
 
-        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetUser.Text, txtTargetPassword.Text))
+        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text))
         {
             MessageBox.Show("目标数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -183,8 +184,8 @@ public partial class CrossDbCopyTableForm : Form
         progressBar.Value = 50;
 
         var success = await CopyTablesAsync(
-            txtSourceServer.Text, txtSourceUser.Text, txtSourcePassword.Text,
-            txtTargetServer.Text, txtTargetUser.Text, txtTargetPassword.Text,
+            txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
+            txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
             tableNames);
 
         if (success)
@@ -201,13 +202,13 @@ public partial class CrossDbCopyTableForm : Form
         }
     }
 
-    private async Task<bool> TestConnectionAsync(string server, string user, string password)
+    private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password)
     {
         return await Task.Run(() =>
         {
             try
             {
-                var connStr = "Server=" + server + ";User Id=" + user + ";Password=" + password + ";TrustServerCertificate=True;";
+                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
                 using var conn = new Microsoft.Data.SqlClient.SqlConnection(connStr);
                 conn.Open();
                 return true;
@@ -221,16 +222,16 @@ public partial class CrossDbCopyTableForm : Form
     }
 
     private async Task<bool> CopyTablesAsync(
-        string srcServer, string srcUser, string srcPassword,
-        string tgtServer, string tgtUser, string tgtPassword,
+        string srcServer, string srcDbName, string srcUser, string srcPassword,
+        string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
         List<string> tableNames)
     {
         return await Task.Run(() =>
         {
             try
             {
-                var srcConnStr = "Server=" + srcServer + ";User Id=" + srcUser + ";Password=" + srcPassword + ";TrustServerCertificate=True;";
-                var tgtConnStr = "Server=" + tgtServer + ";User Id=" + tgtUser + ";Password=" + tgtPassword + ";TrustServerCertificate=True;";
+                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.Decrypt(srcPassword) + ";TrustServerCertificate=True;";
+                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
 
                 using var srcConn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr);
                 using var tgtConn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr);
@@ -330,10 +331,10 @@ public partial class CrossDbCopyTableForm : Form
     {
         return dataType.ToLower() switch
         {
-            "varchar" => maxLen == -1 ? "NVARCHAR(MAX)" : "NVARCHAR(" + (maxLen / 2) + ")",
-            "nvarchar" => maxLen == -1 ? "NVARCHAR(MAX)" : "NVARCHAR(" + (maxLen / 2) + ")",
+            "varchar" => maxLen == -1 ? "VARCHAR(MAX)" : "VARCHAR(" + (maxLen) + ")",
+            "nvarchar" => maxLen == -1 ? "NVARCHAR(MAX)" : "NVARCHAR(" + (maxLen) + ")",
             "char" => "CHAR(" + maxLen + ")",
-            "nchar" => "NCHAR(" + (maxLen / 2) + ")",
+            "nchar" => "NCHAR(" + (maxLen) + ")",
             "decimal" => "DECIMAL(" + precision + ", " + scale + ")",
             "numeric" => "NUMERIC(" + precision + ", " + scale + ")",
             _ => dataType

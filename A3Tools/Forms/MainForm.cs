@@ -17,6 +17,7 @@ public partial class MainForm : Form, IToolContext
     private readonly List<IPlugin> _plugins = new();
     private readonly List<int> _processIds = new();
     private readonly Dictionary<string, AccountStatus> _accountStatuses = new();
+    private EdgeDockManager? _edgeDockManager;
     private bool _isInitializing = true;
     private bool _isRootMode = false;
     private int _titleClickCount = 0;
@@ -40,6 +41,7 @@ public partial class MainForm : Form, IToolContext
         UpdateVersionPosition();
         _isInitializing = false;
         UpdateRootModeUI();
+        _edgeDockManager = new EdgeDockManager(this);
     }
 
     #region IToolContext 实现
@@ -877,11 +879,13 @@ public partial class MainForm : Form, IToolContext
             // Root模式下标题显示特殊标识
             this.lblTitle.Text = "🔓 A3工具箱 (Root)";
             this.lblTitle.ForeColor = Color.Yellow;
+            this.menuCopyAccount.Visible = true;
         }
         else
         {
             this.lblTitle.Text = "A3工具箱";
             this.lblTitle.ForeColor = Color.White;
+            this.menuCopyAccount.Visible = false;
         }
     }
 

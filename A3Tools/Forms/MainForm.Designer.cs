@@ -41,9 +41,10 @@ partial class MainForm
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && (components != null))
+        if (disposing)
         {
-            components.Dispose();
+            _edgeDockManager?.Dispose();
+            components?.Dispose();
         }
         base.Dispose(disposing);
     }

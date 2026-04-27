@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
+using A3Tools.Services;
 using Microsoft.Data.SqlClient;
 
 namespace A3Tools.Plugins.Default.Forms;
@@ -148,7 +149,7 @@ public partial class CrossDbCopyAppFormForm : Form
         lblProgress.Text = "正在连接源数据库...";
         progressBar.Value = 10;
 
-        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceUser.Text, txtSourcePassword.Text))
+        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text))
         {
             MessageBox.Show("源数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -159,7 +160,7 @@ public partial class CrossDbCopyAppFormForm : Form
         lblProgress.Text = "正在连接目标数据库...";
         progressBar.Value = 30;
 
-        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetUser.Text, txtTargetPassword.Text))
+        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text))
         {
             MessageBox.Show("目标数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -171,8 +172,8 @@ public partial class CrossDbCopyAppFormForm : Form
         progressBar.Value = 50;
 
         var success = await CopyAppFormsAsync(
-            txtSourceServer.Text, txtSourceUser.Text, txtSourcePassword.Text,
-            txtTargetServer.Text, txtTargetUser.Text, txtTargetPassword.Text,
+            txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
+            txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
             txtObjectGuids.Text.Trim(), chkDeleteFirst.Checked);
 
         if (success)
@@ -189,13 +190,13 @@ public partial class CrossDbCopyAppFormForm : Form
         }
     }
 
-    private async Task<bool> TestConnectionAsync(string server, string user, string password)
+    private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password)
     {
         return await Task.Run(() =>
         {
             try
             {
-                var connStr = "Server=" + server + ";User Id=" + user + ";Password=" + password + ";TrustServerCertificate=True;";
+                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
                 using var conn = new SqlConnection(connStr);
                 conn.Open();
                 return true;
@@ -209,16 +210,16 @@ public partial class CrossDbCopyAppFormForm : Form
     }
 
     private async Task<bool> CopyAppFormsAsync(
-        string srcServer, string srcUser, string srcPassword,
-        string tgtServer, string tgtUser, string tgtPassword,
+        string srcServer, string srcDbName, string srcUser, string srcPassword,
+        string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
         string objectGuids, bool deleteFirst)
     {
         return await Task.Run(() =>
         {
             try
             {
-                var srcConnStr = "Server=" + srcServer + ";User Id=" + srcUser + ";Password=" + srcPassword + ";TrustServerCertificate=True;";
-                var tgtConnStr = "Server=" + tgtServer + ";User Id=" + tgtUser + ";Password=" + tgtPassword + ";TrustServerCertificate=True;";
+                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.Decrypt(srcPassword) + ";TrustServerCertificate=True;";
+                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
 
                 using var srcConn = new SqlConnection(srcConnStr);
                 using var tgtConn = new SqlConnection(tgtConnStr);
@@ -289,37 +290,19 @@ public partial class CrossDbCopyAppFormForm : Form
                 deleteCmd.ExecuteNonQuery();
             }
 
-            // 从源数据库读取数据 - 只选择目标表存在的列
+            // 从源数据库读取数据到DataTable
             var selectColumns = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
             var selectSql = $"SELECT {selectColumns} FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
             using var selectCmd = new SqlCommand(selectSql, srcConn);
             selectCmd.Parameters.AddWithValue("@value", whereValue);
-            using var reader = selectCmd.ExecuteReader();
 
-            var rows = new List<Dictionary<string, object?>>();
-
-            // 获取列信息
-            if (reader.Read())
+            var dataTable = new System.Data.DataTable();
+            using (var adapter = new SqlDataAdapter(selectCmd))
             {
-                var columns = new List<string>();
-                for (int i = 0; i < reader.FieldCount; i++)
-                {
-                    columns.Add(reader.GetName(i));
-                }
-
-                do
-                {
-                    var row = new Dictionary<string, object?>();
-                    foreach (var col in columns)
-                    {
-                        row[col] = reader[col];
-                    }
-                    rows.Add(row);
-                } while (reader.Read());
+                adapter.Fill(dataTable);
             }
-            reader.Close();
 
-            if (rows.Count == 0) return;
+            if (dataTable.Rows.Count == 0) return;
 
             // 检查是否已存在
             if (!deleteFirst)
@@ -335,21 +318,14 @@ public partial class CrossDbCopyAppFormForm : Form
                 }
             }
 
-            // 插入数据 - 使用目标表的列
-            foreach (var row in rows)
+            // 使用SqlBulkCopy批量写入，自动处理所有列类型
+            using var bulkCopy = new SqlBulkCopy(tgtConn);
+            bulkCopy.DestinationTableName = $"dbo.[{tableName}]";
+            foreach (var col in tgtColumns)
             {
-                var columnNames = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
-                var paramNames = string.Join(", ", tgtColumns.Select(c => "@" + c));
-                var insertSql = $"INSERT INTO dbo.[{tableName}] ({columnNames}) VALUES ({paramNames})";
-
-                using var insertCmd = new SqlCommand(insertSql, tgtConn);
-                foreach (var col in tgtColumns)
-                {
-                    var value = row.ContainsKey(col) ? row[col] : null;
-                    insertCmd.Parameters.AddWithValue("@" + col, value ?? DBNull.Value);
-                }
-                insertCmd.ExecuteNonQuery();
+                bulkCopy.ColumnMappings.Add(col, col);
             }
+            bulkCopy.WriteToServer(dataTable);
         }
         catch (Exception ex)
         {
