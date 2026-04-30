@@ -38,4 +38,11 @@
     </None>
   </ItemGroup>
 
+  <!-- 复制图标到输出目录（托盘图标用） -->
+  <ItemGroup>
+    <None Include="A3Tool.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

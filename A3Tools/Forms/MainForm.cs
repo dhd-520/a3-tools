@@ -18,11 +18,16 @@ public partial class MainForm : Form, IToolContext
     private readonly List<int> _processIds = new();
     private readonly Dictionary<string, AccountStatus> _accountStatuses = new();
     private EdgeDockManager? _edgeDockManager;
+    private HotkeyManager? _hotkeyManager;
     private bool _isInitializing = true;
     private bool _isRootMode = false;
     private int _titleClickCount = 0;
     private DateTime _lastTitleClickTime = DateTime.MinValue;
     private const string ROOT_PASSWORD = "xiaopacai"; // Root模式密码
+    private bool _isHiddenToTray = false; // 是否已隐藏到托盘
+    private const int WM_SYSCOMMAND = 0x0112;
+    private const int SC_MINIMIZE = 0xF020;
+    private const int SC_RESTORE = 0xF120;
 
     public MainForm()
     {
@@ -42,6 +47,77 @@ public partial class MainForm : Form, IToolContext
         _isInitializing = false;
         UpdateRootModeUI();
         _edgeDockManager = new EdgeDockManager(this);
+        _edgeDockManager.OnHideToTray = HideToTray;
+        _edgeDockManager.OnShowFromTray = ShowFromTray;
+        _edgeDockManager.OnShowFromEdge = ShowFromTray;
+
+        // 设置托盘图标
+        SetTrayIcon();
+
+        // 监听窗体大小变化，处理最小化
+        this.Resize += MainForm_ResizeForMinimize;
+
+        // 初始化快捷键管理器（延迟到窗体显示后注册，确保Handle已创建）
+        this.Shown += (s, e) => InitHotkey();
+    }
+
+    private void InitHotkey()
+    {
+        _hotkeyManager = new HotkeyManager();
+        RegisterTrayHotkey();
+    }
+
+    /// <summary>
+    /// 注册托盘显示快捷键
+    /// </summary>
+    public void RegisterTrayHotkey()
+    {
+        var settings = _dataService.LoadSettings();
+        if (!string.IsNullOrEmpty(settings.TrayShowHotkey))
+        {
+            _hotkeyManager?.UnregisterCurrentHotkey();
+            if (_hotkeyManager?.RegisterHotkey(settings.TrayShowHotkey) == true)
+            {
+                // 订阅快捷键事件
+                _hotkeyManager.HotkeyPressed -= OnHotkeyPressed;
+                _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
+            }
+        }
+        else
+        {
+            _hotkeyManager?.UnregisterCurrentHotkey();
+        }
+    }
+
+    private void OnHotkeyPressed(object? sender, EventArgs e)
+    {
+        // 在UI线程上执行
+        this.BeginInvoke(new Action(() => ShowFromTray()));
+    }
+
+    private void MainForm_ResizeForMinimize(object? sender, EventArgs e)
+    {
+        // 如果窗体已隐藏到托盘，点击最小化按钮时恢复正常显示
+        if (_isHiddenToTray && this.WindowState == FormWindowState.Minimized)
+        {
+            ShowFromTray();
+        }
+    }
+
+    private void SetTrayIcon()
+    {
+        try
+        {
+            string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "A3Tool.ico");
+            if (File.Exists(iconPath))
+            {
+                notifyIcon.Icon = new Icon(iconPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"加载托盘图标失败: {ex.Message}");
+        }
     }
 
     #region IToolContext 实现
@@ -127,6 +203,13 @@ public partial class MainForm : Form, IToolContext
 
     private void WireUpEvents()
     {
+        // 托盘事件
+        this.notifyIcon.DoubleClick += NotifyIcon_DoubleClick;
+        this.menuShow.Click += MenuShow_Click;
+        this.menuHide.Click += MenuHide_Click;
+        this.menuTrayExit.Click += MenuTrayExit_Click;
+        this.menuExit.Click += MenuExit_Click;
+
         this.txtSearch.TextChanged += TxtSearch_TextChanged;
         this.btnAdd.Click += BtnAdd_Click;
         this.btnImport.Click += BtnImport_Click;
@@ -141,7 +224,6 @@ public partial class MainForm : Form, IToolContext
         this.dgvAccounts.DoubleClick += DgvAccounts_DoubleClick;
         this.dgvAccounts.ColumnWidthChanged += DgvAccounts_ColumnWidthChanged;
         this.menuCopyAccount.Click += MenuCopyAccount_Click;
-        this.menuExit.Click += MenuExit_Click;
         this.menuAbout.Click += MenuAbout_Click;
         this.lblTitle.Click += LblTitle_Click;
     }
@@ -612,7 +694,11 @@ public partial class MainForm : Form, IToolContext
     private void BtnSettings_Click(object? sender, EventArgs e)
     {
         using var dialog = new SettingsDialog();
-        dialog.ShowDialog();
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            // 重新注册快捷键（如果设置改变了）
+            RegisterTrayHotkey();
+        }
     }
 
     private void TabControl_SelectedIndexChanged(object? sender, EventArgs e)
@@ -630,19 +716,32 @@ public partial class MainForm : Form, IToolContext
         if (account == null) return;
         if (string.IsNullOrWhiteSpace(account.Database) || string.IsNullOrWhiteSpace(account.DbUser)) return;
 
-        string[] ssmsPaths = new[]
+        // 优先使用设置中的SSMS路径
+        var settings = new DataService().LoadSettings();
+        string ssmsPath;
+
+        if (!string.IsNullOrWhiteSpace(settings.SsmsPath) && File.Exists(settings.SsmsPath))
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft SQL Server Management Studio 19\Common7\IDE\Ssms.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft SQL Server Management Studio 18\Common7\IDE\Ssms.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft SQL Server Management Studio 19\Common7\IDE\Ssms.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft SQL Server Management Studio 18\Common7\IDE\Ssms.exe")
-        };
+            ssmsPath = settings.SsmsPath;
+        }
+        else
+        {
+            string[] ssmsPaths = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft SQL Server Management Studio 20\Common7\IDE\Ssms.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft SQL Server Management Studio 19\Common7\IDE\Ssms.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft SQL Server Management Studio 18\Common7\IDE\Ssms.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft SQL Server Management Studio 20\Common7\IDE\Ssms.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft SQL Server Management Studio 19\Common7\IDE\Ssms.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft SQL Server Management Studio 18\Common7\IDE\Ssms.exe")
+            };
+            ssmsPath = ssmsPaths.FirstOrDefault(File.Exists) ?? "Ssms.exe";
+        }
 
         // 复制数据库密码到剪贴板
         if (!string.IsNullOrEmpty(account.DbPassword))
             Clipboard.SetText(account.DbPassword);
 
-        string ssmsPath = ssmsPaths.FirstOrDefault(File.Exists) ?? "Ssms.exe";
         string dbName = string.IsNullOrWhiteSpace(account.DatabaseName) ? "master" : account.DatabaseName;
         string args = $"-S \"{account.Database}\" -d {dbName} -U {account.DbUser}";
 
@@ -1122,6 +1221,112 @@ public partial class MainForm : Form, IToolContext
         }
         
         RefreshStatusGrid();
+    }
+
+    #endregion
+
+    #region 托盘相关
+
+    /// <summary>
+    /// 隐藏到系统托盘
+    /// </summary>
+    public void HideToTray()
+    {
+        if (_isHiddenToTray) return;
+
+        // 使用最小化 + ShowInTaskbar=false 实现托盘隐藏
+        // 这样点击任务栏图标仍然可以恢复（只是图标变灰或看不见）
+        this.WindowState = FormWindowState.Minimized;
+        this.ShowInTaskbar = false;
+        this.notifyIcon.Visible = true;
+        _isHiddenToTray = true;
+
+        // 更新托盘菜单文字
+        this.menuHide.Text = "显示主窗体";
+    }
+
+    /// <summary>
+    /// 从托盘显示窗体
+    /// </summary>
+    public void ShowFromTray()
+    {
+        if (!_isHiddenToTray) return;
+
+        // 先设置 WindowState 再 Show，避免状态冲突
+        this.WindowState = FormWindowState.Normal;
+        this.ShowInTaskbar = true;
+        this.Show();
+        this.notifyIcon.Visible = false;
+        _isHiddenToTray = false;
+
+        // 通知 EdgeDockManager 记录显示时间，防止立即被隐藏
+        _edgeDockManager?.RecordShowTime();
+
+        // 重新注册快捷键（窗体重新显示后需要重新注册）
+        RegisterTrayHotkey();
+
+        // 更新托盘菜单文字
+        this.menuHide.Text = "隐藏到托盘";
+
+        this.Activate();
+    }
+
+    /// <summary>
+    /// 拦截窗体消息，处理托盘模式下的最小化
+    /// </summary>
+    protected override void WndProc(ref Message m)
+    {
+        // 当隐藏到托盘时，拦截最小化消息，直接隐藏到托盘
+        if (m.Msg == WM_SYSCOMMAND && m.WParam.ToInt32() == SC_MINIMIZE)
+        {
+            if (!_isHiddenToTray)
+            {
+                // 正常最小化
+                base.WndProc(ref m);
+            }
+            else
+            {
+                // 托盘模式下最小化，什么都不做，保持托盘状态
+                // 或者可以恢复显示
+                ShowFromTray();
+            }
+            return;
+        }
+
+        // 拦截恢复消息（当任务栏图标被点击时）
+        if (m.Msg == WM_SYSCOMMAND && m.WParam.ToInt32() == SC_RESTORE)
+        {
+            if (_isHiddenToTray)
+            {
+                ShowFromTray();
+                return;
+            }
+        }
+
+        base.WndProc(ref m);
+    }
+
+    private void NotifyIcon_DoubleClick(object? sender, EventArgs e)
+    {
+        ShowFromTray();
+    }
+
+    private void MenuShow_Click(object? sender, EventArgs e)
+    {
+        ShowFromTray();
+    }
+
+    private void MenuHide_Click(object? sender, EventArgs e)
+    {
+        HideToTray();
+    }
+
+    private void MenuTrayExit_Click(object? sender, EventArgs e)
+    {
+        // 退出程序
+        _edgeDockManager?.Dispose();
+        notifyIcon.Visible = false;
+        Application.Exit();
     }
 
     #endregion

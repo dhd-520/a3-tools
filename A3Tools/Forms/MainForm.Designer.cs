@@ -5,6 +5,11 @@ partial class MainForm
     private System.ComponentModel.IContainer components = null;
 
     // 控件字段声明
+    private NotifyIcon notifyIcon = null!;
+    private ContextMenuStrip trayContextMenu = null!;
+    private ToolStripMenuItem menuShow = null!;
+    private ToolStripMenuItem menuHide = null!;
+    private ToolStripMenuItem menuTrayExit = null!;
     private Panel titleBar = null!;
     private Label lblTitle = null!;
     private Label lblVersion = null!;
@@ -44,6 +49,9 @@ partial class MainForm
         if (disposing)
         {
             _edgeDockManager?.Dispose();
+            _hotkeyManager?.Dispose();
+            notifyIcon?.Dispose();
+            trayContextMenu?.Dispose();
             components?.Dispose();
         }
         base.Dispose(disposing);
@@ -68,6 +76,21 @@ partial class MainForm
         titleBar.SuspendLayout();
         tabControl.SuspendLayout();
         SuspendLayout();
+        // 
+        // trayContextMenu
+        // 
+        trayContextMenu = new ContextMenuStrip();
+        menuShow = new ToolStripMenuItem("显示主窗体");
+        menuHide = new ToolStripMenuItem("隐藏到托盘");
+        menuTrayExit = new ToolStripMenuItem("退出");
+        trayContextMenu.Items.AddRange(new ToolStripItem[] { menuShow, menuHide, new ToolStripSeparator(), menuTrayExit });
+        // 
+        // notifyIcon
+        // 
+        notifyIcon = new NotifyIcon();
+        notifyIcon.Text = "A3工具箱";
+        notifyIcon.Visible = false;
+        notifyIcon.ContextMenuStrip = trayContextMenu;
         // 
         // menuStrip
         // 
@@ -140,7 +163,7 @@ partial class MainForm
         lblVersion.Name = "lblVersion";
         lblVersion.Size = new Size(69, 28);
         lblVersion.TabIndex = 0;
-        lblVersion.Text = "v1.0.0";
+        lblVersion.Text = "v1.0.1";
         lblVersion.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         // 
         // tabControl

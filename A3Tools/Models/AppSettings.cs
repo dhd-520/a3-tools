@@ -39,4 +39,14 @@ public class AppSettings
     /// 启动时是否弹出启动选项对话框（默认true）
     /// </summary>
     public bool ShowLaunchOptionsDialog { get; set; } = true;
+
+    /// <summary>
+    /// SSMS可执行文件路径（为空则自动查找）
+    /// </summary>
+    public string SsmsPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 从托盘恢复显示的快捷键（如 "Ctrl+Shift+Z"，为空表示不启用）
+    /// </summary>
+    public string TrayShowHotkey { get; set; } = "Ctrl+Shift+Z";
 }

@@ -130,7 +130,9 @@ A3Tools.sln
   "launchDevTools": true,
   "launchWeb": false,
   "selectedBrowser": "chrome",
-  "showLaunchOptionsDialog": true
+  "showLaunchOptionsDialog": true,
+  "ssmsPath": "",
+  "trayShowHotkey": "Ctrl+Shift+Z"
 }
 ```
 
@@ -203,6 +205,15 @@ dotnet run --project A3Tools\A3Tools.csproj
 | `ShowError(string)` | 显示错误提示框 |
 
 ## 版本历史
+
+### v1.0.1 (2026-04-30)
+
+- **新增托盘隐藏功能**：拖到屏幕顶部自动隐藏到托盘
+- **托盘快捷键**：可在设置中配置快捷键（如 Ctrl+Shift+Z），从托盘恢复显示窗体
+- **全局快捷键**：使用独立的 HotkeyReceiver 接收快捷键消息，窗体隐藏时也能响应
+- **设置窗口优化**：增加高度，添加托盘快捷键设置项
+- 修复 EdgeDockManager 子窗体检测问题
+- 修复工具箱插件 DLL 输出路径问题
 
 ### v1.1 (2026-04-25)
 

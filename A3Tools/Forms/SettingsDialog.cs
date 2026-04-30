@@ -14,8 +14,14 @@ public partial class SettingsDialog : Form
     private Label lblTitle = null!;
     private Panel titleBar = null!;
     private CheckBox chkShowLaunchDialog = null!;
+    private TextBox txtSsmsPath = null!;
+    private Button btnSsmsBrowse = null!;
+    private Button btnSsmsClear = null!;
+    private TextBox txtTrayHotkey = null!;
+    private Label lblTrayHotkey = null!;
 
     public string AppDirectory { get; private set; } = string.Empty;
+    public string TrayShowHotkey { get; private set; } = "Ctrl+Shift+Z";
 
     public SettingsDialog()
     {
@@ -30,7 +36,7 @@ public partial class SettingsDialog : Form
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
-        this.ClientSize = new System.Drawing.Size(1152, 480);
+        this.ClientSize = new System.Drawing.Size(1152, 700);
         this.StartPosition = FormStartPosition.CenterParent;
         this.BackColor = System.Drawing.Color.White;
 
@@ -56,7 +62,7 @@ public partial class SettingsDialog : Form
         // 主内容
         var content = new Panel { Dock = DockStyle.Fill, BackColor = System.Drawing.Color.White, Padding = new Padding(36) };
 
-        // 应用目录
+        // === 应用程序目录 ===
         var lblAppDir = new Label
         {
             Text = "应用程序目录：",
@@ -96,12 +102,64 @@ public partial class SettingsDialog : Form
             ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
         };
 
-        // 启动选项设置区域
+        // === SSMS路径 ===
+        var lblSsmsPath = new Label
+        {
+            Text = "数据库管理器路径：",
+            Font = new System.Drawing.Font("微软雅黑", 11F),
+            Location = new System.Drawing.Point(0, 155),
+            Size = new System.Drawing.Size(200, 50),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+
+        txtSsmsPath = new TextBox
+        {
+            Location = new System.Drawing.Point(0, 210),
+            Size = new System.Drawing.Size(900, 42),
+            Font = new System.Drawing.Font("微软雅黑", 11F),
+            ReadOnly = true,
+            BackColor = System.Drawing.Color.FromArgb(248, 248, 248)
+        };
+
+        btnSsmsBrowse = new Button
+        {
+            Text = "浏览...",
+            Location = new System.Drawing.Point(912, 207),
+            Size = new System.Drawing.Size(144, 50),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = System.Drawing.Color.FromArgb(245, 245, 245),
+            Font = new System.Drawing.Font("微软雅黑", 10F),
+            Cursor = Cursors.Hand
+        };
+        btnSsmsBrowse.Click += BtnSsmsBrowse_Click;
+
+        btnSsmsClear = new Button
+        {
+            Text = "清除",
+            Location = new System.Drawing.Point(1062, 207),
+            Size = new System.Drawing.Size(54, 50),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = System.Drawing.Color.FromArgb(245, 245, 245),
+            Font = new System.Drawing.Font("微软雅黑", 10F),
+            Cursor = Cursors.Hand
+        };
+        btnSsmsClear.Click += (s, e) => txtSsmsPath.Text = "";
+
+        var hintSsms = new Label
+        {
+            Text = "设置SSMS可执行文件路径，为空则自动查找",
+            Location = new System.Drawing.Point(0, 270),
+            Size = new System.Drawing.Size(1080, 30),
+            Font = new System.Drawing.Font("微软雅黑", 9F),
+            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
+        };
+
+        // === 启动选项设置区域 ===
         var lblLaunchTitle = new Label
         {
             Text = "启动选项：",
             Font = new System.Drawing.Font("微软雅黑", 11F),
-            Location = new System.Drawing.Point(0, 155),
+            Location = new System.Drawing.Point(0, 310),
             Size = new System.Drawing.Size(180, 40),
             TextAlign = System.Drawing.ContentAlignment.MiddleLeft
         };
@@ -109,7 +167,7 @@ public partial class SettingsDialog : Form
         chkShowLaunchDialog = new CheckBox
         {
             Text = "启动时弹出启动选项选择窗口",
-            Location = new System.Drawing.Point(0, 200),
+            Location = new System.Drawing.Point(0, 355),
             Size = new System.Drawing.Size(400, 36),
             Font = new System.Drawing.Font("微软雅黑", 10F),
             Checked = true
@@ -118,14 +176,81 @@ public partial class SettingsDialog : Form
         var hintLaunch = new Label
         {
             Text = "不勾选则按上次选择直接启动（首次使用会弹出选择）",
-            Location = new System.Drawing.Point(0, 240),
+            Location = new System.Drawing.Point(0, 395),
             Size = new System.Drawing.Size(600, 30),
             Font = new System.Drawing.Font("微软雅黑", 9F),
             ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
         };
 
+        // === 托盘快捷键设置 ===
+        lblTrayHotkey = new Label
+        {
+            Text = "托盘快捷键：",
+            Font = new System.Drawing.Font("微软雅黑", 11F),
+            Location = new System.Drawing.Point(0, 430),
+            Size = new System.Drawing.Size(180, 50),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+
+        txtTrayHotkey = new TextBox
+        {
+            Location = new System.Drawing.Point(0, 485),
+            Size = new System.Drawing.Size(300, 42),
+            Font = new System.Drawing.Font("Consolas", 12F),
+            ReadOnly = true,
+            BackColor = System.Drawing.Color.FromArgb(248, 248, 248)
+        };
+
+        var hintHotkey = new Label
+        {
+            Text = "设置从托盘恢复显示窗体的快捷键，如 Ctrl+Shift+Z（点击后按组合键设置）",
+            Location = new System.Drawing.Point(310, 485),
+            Size = new System.Drawing.Size(600, 42),
+            Font = new System.Drawing.Font("微软雅黑", 9F),
+            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+
+        // 捕获快捷键
+        txtTrayHotkey.KeyDown += (s, e) =>
+        {
+            e.SuppressKeyPress = true;
+            var keys = new List<string>();
+            if (e.Modifiers.HasFlag(Keys.Control)) keys.Add("Ctrl");
+            if (e.Modifiers.HasFlag(Keys.Alt)) keys.Add("Alt");
+            if (e.Modifiers.HasFlag(Keys.Shift)) keys.Add("Shift");
+            if (e.KeyCode != Keys.ControlKey && e.KeyCode != Keys.Menu && e.KeyCode != Keys.ShiftKey)
+            {
+                keys.Add(e.KeyCode.ToString());
+            }
+            if (keys.Count > 0)
+                txtTrayHotkey.Text = string.Join("+", keys);
+        };
+
+        var btnClearHotkey = new Button
+        {
+            Text = "清除",
+            Location = new System.Drawing.Point(312, 483),
+            Size = new System.Drawing.Size(80, 46),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = System.Drawing.Color.FromArgb(245, 245, 245),
+            Font = new System.Drawing.Font("微软雅黑", 10F),
+            Cursor = Cursors.Hand
+        };
+        btnClearHotkey.Click += (s, e) => txtTrayHotkey.Text = "";
+
+        content.Controls.Add(btnClearHotkey);
+        content.Controls.Add(hintHotkey);
+        content.Controls.Add(txtTrayHotkey);
+        content.Controls.Add(lblTrayHotkey);
+
         content.Controls.Add(hint);
+        content.Controls.Add(hintSsms);
         content.Controls.Add(hintLaunch);
+        content.Controls.Add(btnSsmsClear);
+        content.Controls.Add(btnSsmsBrowse);
+        content.Controls.Add(txtSsmsPath);
+        content.Controls.Add(lblSsmsPath);
         content.Controls.Add(chkShowLaunchDialog);
         content.Controls.Add(lblLaunchTitle);
         content.Controls.Add(btnBrowse);
@@ -197,6 +322,9 @@ public partial class SettingsDialog : Form
         txtAppDir.Text = settings.AppDirectory;
         AppDirectory = settings.AppDirectory;
         chkShowLaunchDialog.Checked = settings.ShowLaunchOptionsDialog;
+        txtSsmsPath.Text = settings.SsmsPath;
+        txtTrayHotkey.Text = settings.TrayShowHotkey;
+        TrayShowHotkey = settings.TrayShowHotkey;
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -214,13 +342,32 @@ public partial class SettingsDialog : Form
             txtAppDir.Text = dialog.SelectedPath;
     }
 
+    private void BtnSsmsBrowse_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "选择SSMS可执行文件",
+            Filter = "可执行文件|*.exe",
+            FileName = "Ssms.exe"
+        };
+
+        if (!string.IsNullOrEmpty(txtSsmsPath.Text) && File.Exists(txtSsmsPath.Text))
+            dialog.InitialDirectory = Path.GetDirectoryName(txtSsmsPath.Text);
+
+        if (dialog.ShowDialog() == DialogResult.OK)
+            txtSsmsPath.Text = dialog.FileName;
+    }
+
     private void BtnOK_Click(object? sender, EventArgs e)
     {
         AppDirectory = txtAppDir.Text;
+        TrayShowHotkey = txtTrayHotkey.Text;
         var dataService = new DataService();
         var settings = dataService.LoadSettings();
         settings.AppDirectory = AppDirectory;
         settings.ShowLaunchOptionsDialog = chkShowLaunchDialog.Checked;
+        settings.SsmsPath = txtSsmsPath.Text;
+        settings.TrayShowHotkey = TrayShowHotkey;
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();
