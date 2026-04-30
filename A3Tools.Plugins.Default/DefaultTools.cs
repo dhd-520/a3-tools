@@ -142,3 +142,18 @@ public class CrossDbCopyAppFormTool
         form.ShowDialog();
     }
 }
+
+/// <summary>
+/// 搜索后台表单工具
+/// </summary>
+public class SearchBackendFormTool
+{
+    public string Name => "搜索后台表单";
+    public string Description => "搜索后台表单";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.SearchBackendForm(context);
+        form.ShowDialog();
+    }
+}

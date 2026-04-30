@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 复制到Plugins目录 -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>..\A3Tools\bin\Debug\net7.0-windows\Plugins\</OutputPath>
+    <OutputPath>$(MSBuildThisFileDirectory)..\A3Tools\bin\$(Configuration)\net7.0-windows\Plugins\</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
