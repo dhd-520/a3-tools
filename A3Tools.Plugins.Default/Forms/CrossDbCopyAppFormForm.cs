@@ -244,7 +244,7 @@ public partial class CrossDbCopyAppFormForm : Form
                     }));
 
                     // 复制S_APP_OBJECT表
-                    CopyTableData(srcConn, tgtConn, "S_APP_OBJECT", "OBJECTGUID", objectGuid, deleteFirst);
+                    CopyTableData(srcConn, tgtConn, "S_APP_OBJECT", "GUID", objectGuid, deleteFirst);
 
                     // 复制S_APP_DATA表
                     CopyTableData(srcConn, tgtConn, "S_APP_DATA", "OBJECTGUID", objectGuid, deleteFirst);
@@ -254,6 +254,13 @@ public partial class CrossDbCopyAppFormForm : Form
 
                     // 复制S_APP_FILTER表
                     CopyTableData(srcConn, tgtConn, "S_APP_FILTER", "OBJECTGUID", objectGuid, deleteFirst);
+
+                    // 复制S_OBJECTBAR表   扫码定义
+                    CopyTableData(srcConn, tgtConn, "S_OBJECTBAR", "OBJECTGUID", objectGuid, deleteFirst);
+
+                    // 复制S_APP_OBJECT_BACKGROUD表 颜色设置
+                    CopyTableData(srcConn, tgtConn, "S_APP_OBJECT_BACKGROUD", "OBJECTGUID", objectGuid, deleteFirst);
+
                 }
 
                 return true;
