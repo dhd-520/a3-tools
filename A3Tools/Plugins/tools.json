@@ -31,6 +31,26 @@
       "category": "跨库"
     },
     {
+      "name": "复制单据流转",
+      "description": "复制单据流转到目标账套（通过CODE）",
+      "library": "A3Tools.Plugins.Default.dll",
+      "className": "A3Tools.Plugins.Default.CrossDbCopyObjectLinkTool",
+      "methodName": "Execute",
+      "enabled": true,
+      "icon": "",
+      "category": "跨库"
+    },
+    {
+      "name": "复制报表",
+      "description": "复制报表到目标账套（通过CODE）",
+      "library": "A3Tools.Plugins.Default.dll",
+      "className": "A3Tools.Plugins.Default.CrossDbCopyReportTool",
+      "methodName": "Execute",
+      "enabled": true,
+      "icon": "",
+      "category": "跨库"
+    },
+    {
       "name": "搜索后台表单",
       "description": "搜索后台表单",
       "library": "A3Tools.Plugins.Default.dll",
