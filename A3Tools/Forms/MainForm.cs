@@ -38,6 +38,9 @@ public partial class MainForm : Form, IToolContext
         // 启动时更新所有现有账套的拼音
         _dataService.UpdateAllPinyin();
         InitializeComponent();
+        InitLaunchTabControls();
+        InitToolsTabControls();
+        InitStatusTabControls();
         WireUpEvents();
         LoadPlugins();
         LoadAccounts();
@@ -179,7 +182,7 @@ public partial class MainForm : Form, IToolContext
     {
         // 强制刷新 Fill 列的宽度
         if (this.dgvAccounts == null || this.dgvAccounts.IsDisposed) return;
-        
+
         foreach (DataGridViewColumn col in this.dgvAccounts.Columns)
         {
             if (col.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
@@ -233,7 +236,7 @@ public partial class MainForm : Form, IToolContext
     {
         // 初始化阶段跳过，避免与 HandleCreated 时的布局冲突
         if (_isInitializing) return;
-        
+
         // 用户手动调整列宽后，固定该列为手动模式
         var column = e.Column;
         if (column.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
@@ -293,7 +296,7 @@ public partial class MainForm : Form, IToolContext
     {
         this.dgvAccounts.AutoGenerateColumns = false;
         this.dgvAccounts.Columns.Clear();
-        
+
         var cols = new DataGridViewColumn[]
         {
             new DataGridViewTextBoxColumn { HeaderText = "代码", DataPropertyName = "Code", Name = "ColCode", Width = 120, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
@@ -384,7 +387,7 @@ public partial class MainForm : Form, IToolContext
                 string sqladdr = GetXmlField(block, "SQLADDRESS");
                 string usercode = GetXmlField(block, "USERCODE");
                 string userpwd = GetXmlField(block, "USERPWD");
-                string server = ztaddr.Replace("http://","").Replace("https://","").Replace("/","");
+                string server = ztaddr.Replace("http://", "").Replace("https://", "").Replace("/", "");
                 string dbAddr = sqladdr.Split(' ')[0].Trim();
                 string dbUser = usercode.Split(' ')[0].Trim();
                 if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(server)) continue;
@@ -393,9 +396,20 @@ public partial class MainForm : Form, IToolContext
                 string remark = block.Trim();
                 accounts.Add(new Account
                 {
-                    Code = "", Name = name, Pinyin = PinyinHelper.GetPinyinInitial(name), Server = serverUrl, ServerPassword = ztpwd,
-                    Database = dbAddr, DatabaseName = "", DbUser = dbUser, DbPassword = userpwd,
-                    RemoteType = "", RemoteAddress = "", RemoteUser = "", RemotePassword = "", Remark = remark
+                    Code = "",
+                    Name = name,
+                    Pinyin = PinyinHelper.GetPinyinInitial(name),
+                    Server = serverUrl,
+                    ServerPassword = ztpwd,
+                    Database = dbAddr,
+                    DatabaseName = "",
+                    DbUser = dbUser,
+                    DbPassword = userpwd,
+                    RemoteType = "",
+                    RemoteAddress = "",
+                    RemoteUser = "",
+                    RemotePassword = "",
+                    Remark = remark
                 });
             }
             if (accounts.Count == 0)
@@ -466,10 +480,10 @@ public partial class MainForm : Form, IToolContext
                 this.dgvAccounts.Rows[this.dgvAccounts.CurrentRow.Index].Selected = true;
             }
         }
-        
+
         if (this.dgvAccounts.SelectedRows.Count == 0) return;
         var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
-        if (account != null) 
+        if (account != null)
         {
             // 调试：显示Root模式状态
             // MessageBox.Show($"Root模式：{_isRootMode}", "调试");
@@ -565,7 +579,7 @@ public partial class MainForm : Form, IToolContext
             if (File.Exists(exe1))
             {
                 var p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
-                if (p != null) 
+                if (p != null)
                 {
                     _processIds.Add(p.Id);
                     RecordProcess(account.Code, p.Id, "client");
@@ -579,7 +593,7 @@ public partial class MainForm : Form, IToolContext
             if (File.Exists(exe2))
             {
                 var p = Process.Start(new ProcessStartInfo { FileName = exe2, WorkingDirectory = appDir, UseShellExecute = true });
-                if (p != null) 
+                if (p != null)
                 {
                     _processIds.Add(p.Id);
                     RecordProcess(account.Code, p.Id, "dev");
@@ -900,7 +914,7 @@ public partial class MainForm : Form, IToolContext
                 string tempRdp = Path.Combine(Path.GetTempPath(), $"remote_{DateTime.Now.Ticks}.rdp");
                 File.WriteAllText(tempRdp, rdpContent);
                 var p = Process.Start(new ProcessStartInfo { FileName = "mstsc.exe", Arguments = $"\"{tempRdp}\"", UseShellExecute = true });
-                if (p != null) 
+                if (p != null)
                 {
                     _processIds.Add(p.Id);
                     RecordProcess(account.Code, p.Id, "remote");
@@ -923,7 +937,7 @@ public partial class MainForm : Form, IToolContext
                 try
                 {
                     var p = Process.Start(new ProcessStartInfo { FileName = sunflowerPath, Arguments = $"--type=remote --code={account.RemoteAddress}", UseShellExecute = true });
-                    if (p != null) 
+                    if (p != null)
                     {
                         _processIds.Add(p.Id);
                         RecordProcess(account.Code, p.Id, "remote");
@@ -990,7 +1004,7 @@ public partial class MainForm : Form, IToolContext
     private void LoadTools()
     {
         _toolExecutorService.LoadTools(_toolsConfigService, this);
-        
+
         foreach (var tool in _toolExecutorService.Tools)
         {
             var btn = CreateToolCard("🔧", tool.Config.Name, tool.Config.Description);
@@ -1002,7 +1016,7 @@ public partial class MainForm : Form, IToolContext
             };
             this.flpTools.Controls.Add(btn);
         }
-        
+
         this.lblPluginStatus.Text = $"已加载 {_toolExecutorService.Tools.Count} 个工具";
     }
 
@@ -1117,7 +1131,7 @@ public partial class MainForm : Form, IToolContext
                 this.dgvAccounts.CurrentRow.Selected = true;
             }
         }
-        
+
         if (this.dgvAccounts.SelectedRows.Count == 0)
         {
             MessageBox.Show("请先在列表中选择要复制的账套！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1197,31 +1211,31 @@ public partial class MainForm : Form, IToolContext
             }
             foreach (var pid in deadPids)
                 kvp.Value.ProcessIds.Remove(pid);
-            
+
             if (kvp.Value.ProcessIds.Count == 0)
                 deadCodes.Add(kvp.Key);
         }
-        
+
         // 移除没有进程的账套
         foreach (var code in deadCodes)
             _accountStatuses.Remove(code);
-        
+
         RefreshStatusGrid();
     }
 
     private void RefreshStatusGrid()
     {
         if (dgvStatus == null || dgvStatus.IsDisposed) return;
-        
+
         var statusList = _accountStatuses.Values.ToList();
-        
+
         // 移除旧事件
         dgvStatus.CellFormatting -= DgvStatus_CellFormatting;
         dgvStatus.CellContentClick -= DgvStatus_CellContentClick;
-        
+
         dgvStatus.DataSource = null;
         dgvStatus.Columns.Clear();
-        
+
         // 设置列
         var cols = new DataGridViewColumn[]
         {
@@ -1235,10 +1249,10 @@ public partial class MainForm : Form, IToolContext
             new DataGridViewTextBoxColumn { HeaderText = "进程数", Name = "ColPidCount", Width = 70, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
             new DataGridViewButtonColumn { HeaderText = "操作", Name = "ColAction", Text = "关闭", UseColumnTextForButtonValue = true, Width = 80, AutoSizeMode = DataGridViewAutoSizeColumnMode.None }
         };
-        
+
         dgvStatus.Columns.AddRange(cols);
         dgvStatus.DataSource = statusList;
-        
+
         // 绑定事件
         dgvStatus.CellFormatting += DgvStatus_CellFormatting;
         dgvStatus.CellContentClick += DgvStatus_CellContentClick;
@@ -1271,12 +1285,12 @@ public partial class MainForm : Form, IToolContext
     private void CloseAccountProcesses(AccountStatus status)
     {
         if (status.ProcessIds.Count == 0) return;
-        
-        var result = MessageBox.Show($"确定要关闭账套【{status.Name}】的所有进程吗？\n共 {status.ProcessIds.Count} 个进程。", 
+
+        var result = MessageBox.Show($"确定要关闭账套【{status.Name}】的所有进程吗？\n共 {status.ProcessIds.Count} 个进程。",
             "确认关闭", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-        
+
         if (result != DialogResult.Yes) return;
-        
+
         foreach (var pid in status.ProcessIds.ToList())
         {
             try
@@ -1287,7 +1301,7 @@ public partial class MainForm : Form, IToolContext
             }
             catch { }
         }
-        
+
         status.ProcessIds.Clear();
         _accountStatuses.Remove(status.Code);
         RefreshStatusGrid();
@@ -1309,10 +1323,10 @@ public partial class MainForm : Form, IToolContext
                 Name = acc?.Name ?? code
             };
         }
-        
+
         if (!_accountStatuses[code].ProcessIds.Contains(processId))
             _accountStatuses[code].ProcessIds.Add(processId);
-        
+
         // 设置运行状态
         var status = _accountStatuses[code];
         switch (processType.ToLower())
@@ -1333,7 +1347,7 @@ public partial class MainForm : Form, IToolContext
                 status.IsRemoteConnected = true;
                 break;
         }
-        
+
         RefreshStatusGrid();
     }
 

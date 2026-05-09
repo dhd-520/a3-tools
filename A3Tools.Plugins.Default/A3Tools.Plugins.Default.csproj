@@ -10,6 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="nul" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\A3Tools.Common\A3Tools.Common.csproj" />
   </ItemGroup>
 

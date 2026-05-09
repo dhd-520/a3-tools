@@ -59,9 +59,10 @@ partial class MainForm
 
     private void InitializeComponent()
     {
+        components = new System.ComponentModel.Container();
         titleBar = new Panel();
-        lblTitle = new Label();
         lblVersion = new Label();
+        lblTitle = new Label();
         menuStrip = new MenuStrip();
         menuFile = new ToolStripMenuItem();
         menuCopyAccount = new ToolStripMenuItem();
@@ -72,66 +73,16 @@ partial class MainForm
         tabLaunch = new TabPage();
         tabTools = new TabPage();
         tabStatus = new TabPage();
-        menuStrip.SuspendLayout();
+        trayContextMenu = new ContextMenuStrip(components);
+        menuShow = new ToolStripMenuItem();
+        menuHide = new ToolStripMenuItem();
+        menuTrayExit = new ToolStripMenuItem();
+        notifyIcon = new NotifyIcon(components);
         titleBar.SuspendLayout();
+        menuStrip.SuspendLayout();
         tabControl.SuspendLayout();
+        trayContextMenu.SuspendLayout();
         SuspendLayout();
-        // 
-        // trayContextMenu
-        // 
-        trayContextMenu = new ContextMenuStrip();
-        menuShow = new ToolStripMenuItem("显示主窗体");
-        menuHide = new ToolStripMenuItem("隐藏到托盘");
-        menuTrayExit = new ToolStripMenuItem("退出");
-        trayContextMenu.Items.AddRange(new ToolStripItem[] { menuShow, menuHide, new ToolStripSeparator(), menuTrayExit });
-        // 
-        // notifyIcon
-        // 
-        notifyIcon = new NotifyIcon();
-        notifyIcon.Text = "A3工具箱";
-        notifyIcon.Visible = false;
-        notifyIcon.ContextMenuStrip = trayContextMenu;
-        // 
-        // menuStrip
-        // 
-        menuStrip.Items.AddRange(new ToolStripItem[] { menuFile, menuHelp });
-        menuStrip.Location = new Point(0, 0);
-        menuStrip.Name = "menuStrip";
-        menuStrip.Size = new Size(1100, 25);
-        menuStrip.TabIndex = 2;
-        menuStrip.Text = "menuStrip1";
-        // 
-        // menuFile
-        // 
-        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuExit });
-        menuFile.Name = "menuFile";
-        menuFile.Size = new Size(54, 21);
-        menuFile.Text = "文件(_F)";
-        // 
-        // menuCopyAccount
-        // 
-        menuCopyAccount.Name = "menuCopyAccount";
-        menuCopyAccount.Size = new Size(150, 22);
-        menuCopyAccount.Text = "复制账套信息";
-        // 
-        // menuExit
-        // 
-        menuExit.Name = "menuExit";
-        menuExit.Size = new Size(150, 22);
-        menuExit.Text = "退出(_X)";
-        // 
-        // menuHelp
-        // 
-        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuAbout });
-        menuHelp.Name = "menuHelp";
-        menuHelp.Size = new Size(57, 21);
-        menuHelp.Text = "帮助(_H)";
-        // 
-        // menuAbout
-        // 
-        menuAbout.Name = "menuAbout";
-        menuAbout.Size = new Size(122, 22);
-        menuAbout.Text = "关于";
         // 
         // titleBar
         // 
@@ -139,10 +90,22 @@ partial class MainForm
         titleBar.Controls.Add(lblVersion);
         titleBar.Controls.Add(lblTitle);
         titleBar.Dock = DockStyle.Top;
-        titleBar.Location = new Point(0, 0);
+        titleBar.Location = new Point(0, 36);
         titleBar.Name = "titleBar";
         titleBar.Size = new Size(1100, 55);
         titleBar.TabIndex = 1;
+        // 
+        // lblVersion
+        // 
+        lblVersion.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        lblVersion.AutoSize = true;
+        lblVersion.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        lblVersion.ForeColor = Color.FromArgb(200, 230, 240);
+        lblVersion.Location = new Point(0, 0);
+        lblVersion.Name = "lblVersion";
+        lblVersion.Size = new Size(69, 28);
+        lblVersion.TabIndex = 0;
+        lblVersion.Text = "v1.1.0";
         // 
         // lblTitle
         // 
@@ -151,20 +114,51 @@ partial class MainForm
         lblTitle.ForeColor = Color.White;
         lblTitle.Location = new Point(15, 10);
         lblTitle.Name = "lblTitle";
-        lblTitle.Size = new Size(188, 38);
+        lblTitle.Size = new Size(188, 50);
         lblTitle.TabIndex = 1;
         lblTitle.Text = "A3工具箱";
         // 
-        // lblVersion
+        // menuStrip
         // 
-        lblVersion.AutoSize = true;
-        lblVersion.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        lblVersion.ForeColor = Color.FromArgb(200, 230, 240);
-        lblVersion.Name = "lblVersion";
-        lblVersion.Size = new Size(69, 28);
-        lblVersion.TabIndex = 0;
-        lblVersion.Text = "v1.0.1";
-        lblVersion.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        menuStrip.ImageScalingSize = new Size(28, 28);
+        menuStrip.Items.AddRange(new ToolStripItem[] { menuFile, menuHelp });
+        menuStrip.Location = new Point(0, 0);
+        menuStrip.Name = "menuStrip";
+        menuStrip.Size = new Size(1100, 36);
+        menuStrip.TabIndex = 2;
+        menuStrip.Text = "menuStrip1";
+        // 
+        // menuFile
+        // 
+        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuExit });
+        menuFile.Name = "menuFile";
+        menuFile.Size = new Size(106, 32);
+        menuFile.Text = "文件(_F)";
+        // 
+        // menuCopyAccount
+        // 
+        menuCopyAccount.Name = "menuCopyAccount";
+        menuCopyAccount.Size = new Size(255, 40);
+        menuCopyAccount.Text = "复制账套信息";
+        // 
+        // menuExit
+        // 
+        menuExit.Name = "menuExit";
+        menuExit.Size = new Size(255, 40);
+        menuExit.Text = "退出(_X)";
+        // 
+        // menuHelp
+        // 
+        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuAbout });
+        menuHelp.Name = "menuHelp";
+        menuHelp.Size = new Size(111, 32);
+        menuHelp.Text = "帮助(_H)";
+        // 
+        // menuAbout
+        // 
+        menuAbout.Name = "menuAbout";
+        menuAbout.Size = new Size(171, 40);
+        menuAbout.Text = "关于";
         // 
         // tabControl
         // 
@@ -176,10 +170,10 @@ partial class MainForm
         tabControl.ForeColor = Color.FromArgb(60, 60, 60);
         tabControl.HotTrack = true;
         tabControl.ItemSize = new Size(150, 40);
-        tabControl.Location = new Point(0, 55);
+        tabControl.Location = new Point(0, 91);
         tabControl.Name = "tabControl";
         tabControl.SelectedIndex = 0;
-        tabControl.Size = new Size(1100, 645);
+        tabControl.Size = new Size(1100, 609);
         tabControl.SizeMode = TabSizeMode.Fixed;
         tabControl.TabIndex = 0;
         // 
@@ -188,7 +182,7 @@ partial class MainForm
         tabLaunch.BackColor = Color.White;
         tabLaunch.Location = new Point(4, 44);
         tabLaunch.Name = "tabLaunch";
-        tabLaunch.Size = new Size(1092, 597);
+        tabLaunch.Size = new Size(1092, 561);
         tabLaunch.TabIndex = 0;
         tabLaunch.Text = "  A3程序启动  ";
         // 
@@ -210,6 +204,36 @@ partial class MainForm
         tabStatus.TabIndex = 2;
         tabStatus.Text = "  账套运行情况  ";
         // 
+        // trayContextMenu
+        // 
+        trayContextMenu.ImageScalingSize = new Size(28, 28);
+        trayContextMenu.Items.AddRange(new ToolStripItem[] { menuShow, menuHide, menuTrayExit });
+        trayContextMenu.Name = "trayContextMenu";
+        trayContextMenu.Size = new Size(190, 112);
+        // 
+        // menuShow
+        // 
+        menuShow.Name = "menuShow";
+        menuShow.Size = new Size(189, 34);
+        menuShow.Text = "显示主窗体";
+        // 
+        // menuHide
+        // 
+        menuHide.Name = "menuHide";
+        menuHide.Size = new Size(189, 34);
+        menuHide.Text = "隐藏到托盘";
+        // 
+        // menuTrayExit
+        // 
+        menuTrayExit.Name = "menuTrayExit";
+        menuTrayExit.Size = new Size(189, 34);
+        menuTrayExit.Text = "退出";
+        // 
+        // notifyIcon
+        // 
+        notifyIcon.ContextMenuStrip = trayContextMenu;
+        notifyIcon.Text = "A3工具箱";
+        // 
         // MainForm
         // 
         AutoScaleMode = AutoScaleMode.None;
@@ -223,17 +247,14 @@ partial class MainForm
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
         Text = "A3工具箱";
-        menuStrip.ResumeLayout(false);
-        menuStrip.PerformLayout();
         titleBar.ResumeLayout(false);
         titleBar.PerformLayout();
+        menuStrip.ResumeLayout(false);
+        menuStrip.PerformLayout();
         tabControl.ResumeLayout(false);
+        trayContextMenu.ResumeLayout(false);
         ResumeLayout(false);
-
-        // 初始化Tab页控件
-        InitLaunchTabControls();
-        InitToolsTabControls();
-        InitStatusTabControls();
+        PerformLayout();
     }
 
     private void InitLaunchTabControls()
@@ -285,7 +306,7 @@ partial class MainForm
         buttonRow.WrapContents = false;
         buttonRow.Padding = new Padding(15, 10, 15, 0);
         buttonRow.AutoSize = false;
-        buttonRow.Size = new System.Drawing.Size(1000, 60);
+        buttonRow.Size = new Size(1000, 60);
         buttonRow.Name = "buttonRow";
 
         // 按钮高度 34*1.2 = 41
