@@ -157,3 +157,33 @@ public class SearchBackendFormTool
         form.ShowDialog();
     }
 }
+
+/// <summary>
+/// 跨库复制单据流转工具
+/// </summary>
+public class CrossDbCopyObjectLinkTool
+{
+    public string Name => "复制单据流转";
+    public string Description => "复制单据流转到目标账套（通过CODE）";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyObjectLinkForm(context, account);
+        form.ShowDialog();
+    }
+}
+
+/// <summary>
+/// 跨库复制报表工具
+/// </summary>
+public class CrossDbCopyReportTool
+{
+    public string Name => "复制报表";
+    public string Description => "复制报表到目标账套（通过CODE）";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyReportForm(context, account);
+        form.ShowDialog();
+    }
+}
