@@ -19,6 +19,7 @@ public partial class SettingsDialog : Form
     private Button btnSsmsClear = null!;
     private TextBox txtTrayHotkey = null!;
     private Label lblTrayHotkey = null!;
+    private CheckBox chkBrowserNewWindow = null!;
 
     public string AppDirectory { get; private set; } = string.Empty;
     public string TrayShowHotkey { get; private set; } = "Ctrl+Shift+Z";
@@ -36,7 +37,7 @@ public partial class SettingsDialog : Form
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
-        this.ClientSize = new System.Drawing.Size(1152, 700);
+        this.ClientSize = new System.Drawing.Size(1152, 780);
         this.StartPosition = FormStartPosition.CenterParent;
         this.BackColor = System.Drawing.Color.White;
 
@@ -201,6 +202,34 @@ public partial class SettingsDialog : Form
             BackColor = System.Drawing.Color.FromArgb(248, 248, 248)
         };
 
+        // === 浏览器启动方式 ===
+        var lblBrowserLaunch = new Label
+        {
+            Text = "浏览器启动方式：",
+            Font = new System.Drawing.Font("微软雅黑", 11F),
+            Location = new System.Drawing.Point(0, 540),
+            Size = new System.Drawing.Size(180, 50),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+
+        chkBrowserNewWindow = new CheckBox
+        {
+            Text = "启动新窗口（不勾选则在当前浏览器中打开新Tab）",
+            Location = new System.Drawing.Point(0, 595),
+            Size = new System.Drawing.Size(600, 36),
+            Font = new System.Drawing.Font("微软雅黑", 10F),
+            Checked = true
+        };
+
+        var hintBrowserLaunch = new Label
+        {
+            Text = "设置启动浏览器时是在新窗口打开还是在当前浏览器中打开新Tab",
+            Location = new System.Drawing.Point(0, 635),
+            Size = new System.Drawing.Size(600, 30),
+            Font = new System.Drawing.Font("微软雅黑", 9F),
+            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
+        };
+
         var hintHotkey = new Label
         {
             Text = "设置从托盘恢复显示窗体的快捷键，如 Ctrl+Shift+Z（点击后按组合键设置）",
@@ -243,6 +272,9 @@ public partial class SettingsDialog : Form
         content.Controls.Add(hintHotkey);
         content.Controls.Add(txtTrayHotkey);
         content.Controls.Add(lblTrayHotkey);
+        content.Controls.Add(hintBrowserLaunch);
+        content.Controls.Add(chkBrowserNewWindow);
+        content.Controls.Add(lblBrowserLaunch);
 
         content.Controls.Add(hint);
         content.Controls.Add(hintSsms);
@@ -325,6 +357,7 @@ public partial class SettingsDialog : Form
         txtSsmsPath.Text = settings.SsmsPath;
         txtTrayHotkey.Text = settings.TrayShowHotkey;
         TrayShowHotkey = settings.TrayShowHotkey;
+        chkBrowserNewWindow.Checked = settings.BrowserNewWindow;
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -368,6 +401,7 @@ public partial class SettingsDialog : Form
         settings.ShowLaunchOptionsDialog = chkShowLaunchDialog.Checked;
         settings.SsmsPath = txtSsmsPath.Text;
         settings.TrayShowHotkey = TrayShowHotkey;
+        settings.BrowserNewWindow = chkBrowserNewWindow.Checked;
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();

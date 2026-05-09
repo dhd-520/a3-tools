@@ -31,6 +31,7 @@ partial class CrossDbCopyFormForm
     private System.Windows.Forms.TextBox txtObjectGuids;
     private System.Windows.Forms.Label lblObjectGuidsHint;
     private System.Windows.Forms.CheckBox chkDeleteFirst;
+    private System.Windows.Forms.CheckBox chkCopyStoredProcs;
     private System.Windows.Forms.Button btnConfirm;
     private System.Windows.Forms.Button btnCancel;
     private System.Windows.Forms.ProgressBar progressBar;
@@ -74,6 +75,7 @@ partial class CrossDbCopyFormForm
         this.txtObjectGuids = new System.Windows.Forms.TextBox();
         this.lblObjectGuidsHint = new System.Windows.Forms.Label();
         this.chkDeleteFirst = new System.Windows.Forms.CheckBox();
+        this.chkCopyStoredProcs = new System.Windows.Forms.CheckBox();
         this.btnConfirm = new System.Windows.Forms.Button();
         this.btnCancel = new System.Windows.Forms.Button();
         this.progressBar = new System.Windows.Forms.ProgressBar();
@@ -95,24 +97,26 @@ partial class CrossDbCopyFormForm
         this.tableLayoutPanel1.SetColumnSpan(this.txtObjectGuids, 2);
         this.tableLayoutPanel1.Controls.Add(this.lblObjectGuidsHint, 0, 3);
         this.tableLayoutPanel1.Controls.Add(this.chkDeleteFirst, 1, 3);
-        this.tableLayoutPanel1.Controls.Add(this.btnConfirm, 0, 4);
-        this.tableLayoutPanel1.Controls.Add(this.btnCancel, 1, 4);
-        this.tableLayoutPanel1.Controls.Add(this.progressBar, 0, 5);
-        this.tableLayoutPanel1.Controls.Add(this.lblProgress, 1, 5);
+        this.tableLayoutPanel1.Controls.Add(this.chkCopyStoredProcs, 0, 4);
+        this.tableLayoutPanel1.Controls.Add(this.btnConfirm, 0, 5);
+        this.tableLayoutPanel1.Controls.Add(this.btnCancel, 1, 5);
+        this.tableLayoutPanel1.Controls.Add(this.progressBar, 0, 6);
+        this.tableLayoutPanel1.Controls.Add(this.lblProgress, 1, 6);
         this.tableLayoutPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
         this.tableLayoutPanel1.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.tableLayoutPanel1.Location = new System.Drawing.Point(0, 0);
         this.tableLayoutPanel1.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
         this.tableLayoutPanel1.Name = "tableLayoutPanel1";
         this.tableLayoutPanel1.Padding = new System.Windows.Forms.Padding(10);
-        this.tableLayoutPanel1.RowCount = 6;
+        this.tableLayoutPanel1.RowCount = 7;
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.tableLayoutPanel1.Size = new System.Drawing.Size(873, 690);
+        this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+        this.tableLayoutPanel1.Size = new System.Drawing.Size(873, 730);
         this.tableLayoutPanel1.TabIndex = 0;
         //
         // sourceLayout
@@ -453,6 +457,18 @@ partial class CrossDbCopyFormForm
         this.chkDeleteFirst.Text = "先删除目标数据";
         this.chkDeleteFirst.UseVisualStyleBackColor = true;
         //
+        // chkCopyStoredProcs
+        //
+        this.chkCopyStoredProcs.AutoSize = true;
+        this.chkCopyStoredProcs.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.chkCopyStoredProcs.Location = new System.Drawing.Point(16, 330);
+        this.chkCopyStoredProcs.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
+        this.chkCopyStoredProcs.Name = "chkCopyStoredProcs";
+        this.chkCopyStoredProcs.Size = new System.Drawing.Size(200, 24);
+        this.chkCopyStoredProcs.TabIndex = 24;
+        this.chkCopyStoredProcs.Text = "同时复制关联存储过程";
+        this.chkCopyStoredProcs.UseVisualStyleBackColor = true;
+        //
         // btnConfirm
         //
         this.btnConfirm.BackColor = System.Drawing.Color.FromArgb(24, 145, 176);
@@ -460,7 +476,7 @@ partial class CrossDbCopyFormForm
         this.btnConfirm.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         this.btnConfirm.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.btnConfirm.ForeColor = System.Drawing.Color.White;
-        this.btnConfirm.Location = new System.Drawing.Point(133, 335);
+        this.btnConfirm.Location = new System.Drawing.Point(133, 365);
         this.btnConfirm.Name = "btnConfirm";
         this.btnConfirm.Size = new System.Drawing.Size(180, 40);
         this.btnConfirm.TabIndex = 16;
@@ -475,7 +491,7 @@ partial class CrossDbCopyFormForm
         this.btnCancel.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         this.btnCancel.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.btnCancel.ForeColor = System.Drawing.Color.Gray;
-        this.btnCancel.Location = new System.Drawing.Point(567, 335);
+        this.btnCancel.Location = new System.Drawing.Point(567, 365);
         this.btnCancel.Name = "btnCancel";
         this.btnCancel.Size = new System.Drawing.Size(180, 40);
         this.btnCancel.TabIndex = 17;
@@ -485,7 +501,7 @@ partial class CrossDbCopyFormForm
         //
         // progressBar
         //
-        this.progressBar.Location = new System.Drawing.Point(23, 385);
+        this.progressBar.Location = new System.Drawing.Point(23, 415);
         this.progressBar.Name = "progressBar";
         this.progressBar.Size = new System.Drawing.Size(400, 25);
         this.progressBar.TabIndex = 18;
@@ -495,7 +511,7 @@ partial class CrossDbCopyFormForm
         this.lblProgress.AutoSize = true;
         this.lblProgress.Font = new System.Drawing.Font("微软雅黑", 9F);
         this.lblProgress.ForeColor = System.Drawing.Color.Gray;
-        this.lblProgress.Location = new System.Drawing.Point(567, 385);
+        this.lblProgress.Location = new System.Drawing.Point(567, 415);
         this.lblProgress.Name = "lblProgress";
         this.lblProgress.Size = new System.Drawing.Size(50, 18);
         this.lblProgress.TabIndex = 19;
@@ -505,7 +521,7 @@ partial class CrossDbCopyFormForm
         //
         this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 30F);
         this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-        this.ClientSize = new System.Drawing.Size(873, 690);
+        this.ClientSize = new System.Drawing.Size(873, 730);
         this.Controls.Add(this.tableLayoutPanel1);
         this.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;

@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 using System.Xml.Linq;
+using Microsoft.Win32;
 using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
@@ -595,24 +596,43 @@ public partial class MainForm : Form, IToolContext
 
     private void LaunchWebBrowser(string url, string browser, string accountCode)
     {
+        var settings = _dataService.LoadSettings();
+        bool newWindow = settings.BrowserNewWindow;
         string browserPath = GetBrowserPath(browser);
 
         if (!string.IsNullOrEmpty(browserPath) && File.Exists(browserPath))
         {
-            // 根据浏览器类型使用不同的启动参数
-            string args = browser switch
+            // 根据浏览器类型和设置使用不同的启动参数
+            string args;
+            if (newWindow)
             {
-                // Chrome 效能优化参数
-                "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding \"{url}\"",
-                // Edge 使用简单参数（Edge对参数更严格）
-                "msedge" => $"--new-window \"{url}\"",
-                // Firefox 参数
-                "firefox" => $"-new-window \"{url}\"",
-                // 360浏览器
-                "360se" => $"--new-window \"{url}\"",
-                // 其他浏览器使用默认参数
-                _ => $"--new-window \"{url}\""
-            };
+                // 新窗口模式
+                args = browser switch
+                {
+                    // Chrome 效能优化参数
+                    "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding \"{url}\"",
+                    // Edge 使用简单参数（Edge对参数更严格）
+                    "msedge" => $"--new-window \"{url}\"",
+                    // Firefox 参数
+                    "firefox" => $"-new-window \"{url}\"",
+                    // 360浏览器
+                    "360se" => $"--new-window \"{url}\"",
+                    // 其他浏览器使用默认参数
+                    _ => $"--new-window \"{url}\""
+                };
+            }
+            else
+            {
+                // 当前Tab模式
+                args = browser switch
+                {
+                    "chrome" => $"\"{url}\"",
+                    "msedge" => $"\"{url}\"",
+                    "firefox" => $"\"{url}\"",
+                    "360se" => $"\"{url}\"",
+                    _ => $"\"{url}\""
+                };
+            }
 
             // Edge 和 Firefox 使用 ShellExecute 更可靠
             bool useShellExecute = browser == "msedge" || browser == "firefox";
@@ -640,26 +660,120 @@ public partial class MainForm : Form, IToolContext
         }
         else
         {
-            // 浏览器未找到，使用系统默认浏览器
-            try
+            // 浏览器未找到，尝试从注册表查找
+            string? foundPath = FindBrowserFromRegistry(browser);
+            if (!string.IsNullOrEmpty(foundPath) && File.Exists(foundPath))
             {
-                var startInfo = new ProcessStartInfo
+                // 使用注册表找到的路径启动
+                string args = BuildBrowserArgs(url, browser, newWindow);
+                bool useShellExecute = browser == "msedge" || browser == "firefox";
+                try
                 {
-                    FileName = url,
-                    UseShellExecute = true
-                };
-                var p = Process.Start(startInfo);
-                if (p != null)
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = foundPath,
+                        Arguments = args,
+                        UseShellExecute = useShellExecute,
+                        CreateNoWindow = !useShellExecute
+                    };
+                    var p = Process.Start(startInfo);
+                    if (p != null)
+                    {
+                        _processIds.Add(p.Id);
+                        RecordProcess(accountCode, p.Id, "web");
+                    }
+                }
+                catch (Exception ex)
                 {
-                    _processIds.Add(p.Id);
-                    RecordProcess(accountCode, p.Id, "web");
+                    MessageBox.Show($"启动{browser}失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
-            catch (Exception ex)
+            else
             {
-                MessageBox.Show($"启动浏览器失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // 完全找不到，使用默认浏览器但仍尝试 --new-window
+                try
+                {
+                    string defaultArgs = browser switch
+                    {
+                        "chrome" => $"--new-window \"{url}\"",
+                        "msedge" => $"--new-window \"{url}\"",
+                        "firefox" => $"-new-window \"{url}\"",
+                        "360se" => $"--new-window \"{url}\"",
+                        // 系统默认浏览器无法加参数
+                        _ => $"\"{url}\""
+                    };
+                    // 直接用 URL 让系统处理
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true,
+                        Arguments = defaultArgs
+                    };
+                    var p = Process.Start(startInfo);
+                    if (p != null)
+                    {
+                        _processIds.Add(p.Id);
+                        RecordProcess(accountCode, p.Id, "web");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"启动浏览器失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
         }
+    }
+
+    private string BuildBrowserArgs(string url, string browser, bool newWindow)
+    {
+        if (newWindow)
+        {
+            return browser switch
+            {
+                "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding \"{url}\"",
+                "msedge" => $"--new-window \"{url}\"",
+                "firefox" => $"-new-window \"{url}\"",
+                "360se" => $"--new-window \"{url}\"",
+                _ => $"--new-window \"{url}\""
+            };
+        }
+        else
+        {
+            return $"\"{url}\"";
+        }
+    }
+
+    private string? FindBrowserFromRegistry(string browser)
+    {
+        // 从注册表查找浏览器路径
+        string keyPath = browser switch
+        {
+            "chrome" => @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
+            "msedge" => @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe",
+            "firefox" => @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe",
+            "360se" => @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\sechrome.exe",
+            _ => ""
+        };
+
+        if (string.IsNullOrEmpty(keyPath)) return null;
+
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(keyPath);
+            if (key != null)
+                return key.GetValue("") as string;
+        }
+        catch { }
+
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+            if (key != null)
+                return key.GetValue("") as string;
+        }
+        catch { }
+
+        return null;
     }
 
     private string GetBrowserPath(string browser)
@@ -1047,7 +1161,7 @@ public partial class MainForm : Form, IToolContext
 
     private void MenuAbout_Click(object? sender, EventArgs e)
     {
-        MessageBox.Show("A3工具箱 v1.0.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问等功能。", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show("A3工具箱 v1.1.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问等功能。", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     #endregion

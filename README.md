@@ -207,6 +207,15 @@ dotnet run --project A3Tools\A3Tools.csproj
 
 ## 版本历史
 
+### v1.1.0 (2026-05-09)
+
+- **跨库复制表单增强**：
+  - 新增「同时复制关联存储过程」选项：勾选后自动复制 S_OBJECT 中 AUDITINGPROCNAME/DELETEPROCNAME/UNAUDITINGPROCNAME 指向的存储过程
+  - 新增编码规则复制：自动识别 S_CONTROL 中 DATANAME=CODE/BILLNO 的扩展字段，复制对应的 S_BILLCODERULE 和 S_BILLCODERULEDETAIL
+  - 新增标准查询复制：自动识别 S_CONTROL 中 CONTROLTYPE=A3Text/GridColumn 的扩展字段，复制对应的 S_DATASELECT
+- **浏览器启动优化**：修复设置中「启动新窗口」选项不生效的问题；增加注册表浏览器路径查找；修复选择特定浏览器不生效的问题
+- **设置窗口优化**：窗体高度从 700px 调整为 780px
+
 ### v1.0.2 (2026-04-30)
 
 - **新增搜索后台表单工具**：可搜索账套数据库中的 S_OBJECT 表，查询表单信息（GUID、代码、名称、解决方案、业务分组等）

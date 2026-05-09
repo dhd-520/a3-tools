@@ -36,6 +36,11 @@ public class AppSettings
     public string SelectedBrowser { get; set; } = "chrome";
 
     /// <summary>
+    /// 浏览器启动方式：true=新窗口，false=在当前Tab打开
+    /// </summary>
+    public bool BrowserNewWindow { get; set; } = true;
+
+    /// <summary>
     /// 启动时是否弹出启动选项对话框（默认true）
     /// </summary>
     public bool ShowLaunchOptionsDialog { get; set; } = true;
