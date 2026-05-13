@@ -207,6 +207,14 @@ dotnet run --project A3Tools\A3Tools.csproj
 
 ## 版本历史
 
+### v1.1.1 (2026-05-13)
+
+- **浏览器进程管理修复**：
+  - 修复 Chrome/Edge/Firefox 启动时记录 PID 不正确的问题，统一使用 `UseShellExecute=false` 确保获取真实浏览器进程 ID
+  - 关闭账套 Web 时能正确 Kill 对应的浏览器进程
+  - 新增 `_processLaunchModes` 记录启动模式（窗口/Tab），标签页模式支持优雅关闭（保留窗口）
+- **新增快捷键**：按 Escape 键最小化窗体
+
 ### v1.1.0 (2026-05-09)
 
 - **跨库复制表单增强**：

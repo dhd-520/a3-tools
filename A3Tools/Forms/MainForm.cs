@@ -17,6 +17,7 @@ public partial class MainForm : Form, IToolContext
     private readonly ToolExecutorService _toolExecutorService;
     private readonly List<IPlugin> _plugins = new();
     private readonly List<int> _processIds = new();
+    private readonly Dictionary<int, bool> _processLaunchModes = new(); // PID -> 是否新窗口模式
     private readonly Dictionary<string, AccountStatus> _accountStatuses = new();
     private EdgeDockManager? _edgeDockManager;
     private HotkeyManager? _hotkeyManager;
@@ -648,8 +649,9 @@ public partial class MainForm : Form, IToolContext
                 };
             }
 
-            // Edge 和 Firefox 使用 ShellExecute 更可靠
-            bool useShellExecute = browser == "msedge" || browser == "firefox";
+            // Chrome/360 直接启动，UseShellExecute=false 可获取真实 PID
+            // Edge/Firefox 也去掉 ShellExecute，用 --new-window 参数保证新窗口
+            bool useShellExecute = false;
 
             var startInfo = new ProcessStartInfo
             {
@@ -660,11 +662,27 @@ public partial class MainForm : Form, IToolContext
             };
             try
             {
+                // Edge/Firefox 用 ShellExecute，Process.Start 返回 null 或立即退出的进程
+                var existingPids = useShellExecute ? GetExistingBrowserPids(browser) : null;
+
                 var p = Process.Start(startInfo);
-                if (p != null)
+                if (p != null && !p.HasExited)
                 {
                     _processIds.Add(p.Id);
+                    _processLaunchModes[p.Id] = newWindow;
                     RecordProcess(accountCode, p.Id, "web");
+                }
+                else if (useShellExecute && existingPids != null)
+                {
+                    // ShellExecute 模式：等待浏览器启动，然后查找新进程
+                    System.Threading.Thread.Sleep(500);
+                    var newPids = GetNewBrowserPids(browser, existingPids);
+                    foreach (var newPid in newPids)
+                    {
+                        _processIds.Add(newPid);
+                        _processLaunchModes[newPid] = newWindow;
+                        RecordProcess(accountCode, newPid, "web");
+                    }
                 }
             }
             catch (Exception ex)
@@ -694,6 +712,7 @@ public partial class MainForm : Form, IToolContext
                     if (p != null)
                     {
                         _processIds.Add(p.Id);
+                        _processLaunchModes[p.Id] = newWindow;
                         RecordProcess(accountCode, p.Id, "web");
                     }
                 }
@@ -727,6 +746,7 @@ public partial class MainForm : Form, IToolContext
                     if (p != null)
                     {
                         _processIds.Add(p.Id);
+                        _processLaunchModes[p.Id] = newWindow;
                         RecordProcess(accountCode, p.Id, "web");
                     }
                 }
@@ -1282,6 +1302,46 @@ public partial class MainForm : Form, IToolContext
         }
     }
 
+
+    /// <summary>
+    /// 获取现有浏览器进程的 PID 列表
+    /// </summary>
+    private HashSet<int> GetExistingBrowserPids(string browser)
+    {
+        var pids = new HashSet<int>();
+        try
+        {
+            var procName = browser == "msedge" ? "msedge" : (browser == "chrome" ? "chrome" : browser);
+            foreach (var p in Process.GetProcessesByName(procName))
+            {
+                pids.Add(p.Id);
+            }
+        }
+        catch { }
+        return pids;
+    }
+
+    /// <summary>
+    /// 获取新增的浏览器进程 PID（排除已存在的）
+    /// </summary>
+    private List<int> GetNewBrowserPids(string browser, HashSet<int> existingPids)
+    {
+        var newPids = new List<int>();
+        try
+        {
+            var procName = browser == "msedge" ? "msedge" : (browser == "chrome" ? "chrome" : browser);
+            foreach (var p in Process.GetProcessesByName(procName))
+            {
+                if (!existingPids.Contains(p.Id))
+                {
+                    newPids.Add(p.Id);
+                }
+            }
+        }
+        catch { }
+        return newPids;
+    }
+
     private void CloseAccountProcesses(AccountStatus status)
     {
         if (status.ProcessIds.Count == 0) return;
@@ -1296,15 +1356,38 @@ public partial class MainForm : Form, IToolContext
             try
             {
                 var p = Process.GetProcessById(pid);
-                if (!p.HasExited)
+                if (p != null && !p.HasExited)
+                {
                     p.Kill();
+                }
             }
             catch { }
+            _processLaunchModes.Remove(pid);
         }
 
         status.ProcessIds.Clear();
         _accountStatuses.Remove(status.Code);
         RefreshStatusGrid();
+    }
+
+    /// <summary>
+    /// 尝试优雅关闭浏览器标签页（保留窗口）
+    /// </summary>
+    private bool TryCloseBrowserTab(int pid)
+    {
+        try
+        {
+            var p = Process.GetProcessById(pid);
+            if (p == null || p.HasExited) return true;
+            // 先尝试发送 CloseMainWindow（相当于点击浏览器窗口的关闭按钮）
+            if (p.CloseMainWindow())
+            {
+                p.WaitForExit(500);
+                return !p.HasExited;
+            }
+        }
+        catch { }
+        return false;
     }
 
     /// <summary>
@@ -1402,6 +1485,16 @@ public partial class MainForm : Form, IToolContext
     /// <summary>
     /// 拦截窗体消息，处理托盘模式下的最小化
     /// </summary>
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape)
+        {
+            this.WindowState = FormWindowState.Minimized;
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
     protected override void WndProc(ref Message m)
     {
         // 当隐藏到托盘时，拦截最小化消息，直接隐藏到托盘

@@ -245,6 +245,7 @@ partial class MainForm
         MainMenuStrip = menuStrip;
         MinimumSize = new Size(900, 600);
         Name = "MainForm";
+        KeyPreview = true;
         StartPosition = FormStartPosition.CenterScreen;
         Text = "A3工具箱";
         titleBar.ResumeLayout(false);
