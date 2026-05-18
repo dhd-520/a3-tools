@@ -59,6 +59,16 @@
       "enabled": true,
       "icon": "",
       "category": "跨库"
+    },
+    {
+      "name": "搜索前台菜单",
+      "description": "搜索前台菜单（S_MENU表）",
+      "library": "A3Tools.Plugins.Default.dll",
+      "className": "A3Tools.Plugins.Default.SearchFrontendMenuTool",
+      "methodName": "Execute",
+      "enabled": true,
+      "icon": "",
+      "category": "跨库"
     }
   ]
 }

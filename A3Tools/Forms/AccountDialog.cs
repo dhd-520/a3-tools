@@ -20,6 +20,8 @@ public partial class AccountDialog : Form
         _original = account;
         ShowPasswords = showPasswords;
         InitializeComponent();
+        this.KeyPreview = true;
+        this.KeyDown += AccountDialog_KeyDown;
         if (account != null)
             LoadAccount(account);
         else
@@ -108,6 +110,20 @@ public partial class AccountDialog : Form
     {
         this.DialogResult = DialogResult.Cancel;
         this.Close();
+    }
+
+    private void AccountDialog_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Enter)
+        {
+            btnSave.PerformClick();
+            e.SuppressKeyPress = true;
+        }
+        else if (e.KeyCode == Keys.Escape)
+        {
+            btnCancel.PerformClick();
+            e.SuppressKeyPress = true;
+        }
     }
 
     public Account GetAccount()

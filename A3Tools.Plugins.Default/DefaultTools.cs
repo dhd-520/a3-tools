@@ -159,6 +159,21 @@ public class SearchBackendFormTool
 }
 
 /// <summary>
+/// 搜索前台菜单工具
+/// </summary>
+public class SearchFrontendMenuTool
+{
+    public string Name => "搜索前台菜单";
+    public string Description => "搜索前台菜单";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.SearchFrontendMenuForm(context);
+        form.ShowDialog();
+    }
+}
+
+/// <summary>
 /// 跨库复制单据流转工具
 /// </summary>
 public class CrossDbCopyObjectLinkTool

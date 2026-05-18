@@ -318,6 +318,13 @@ public partial class CrossDbCopyFormForm : Form
             }
         }
         reader.Close();
+
+        // 调试输出
+        foreach (var (fn, pn) in result)
+        {
+            Debug.WriteLine($"[GetStoredProcNames] {fn} -> {pn}");
+        }
+
         return result;
     }
 
@@ -338,10 +345,23 @@ public partial class CrossDbCopyFormForm : Form
     /// </summary>
     private string GetProcDefinition(SqlConnection srcConn, string procName)
     {
-        var sql = @"SELECT OBJECT_DEFINITION(OBJECT_ID('" + procName + "'))";
+        // 先尝试直接查询 sys.sql_modules（更可靠，支持含特殊字符的名称）
+        var sql = @"SELECT definition FROM sys.sql_modules
+                    WHERE object_id = OBJECT_ID(@procName, 'P')";
         using var cmd = new SqlCommand(sql, srcConn);
+        cmd.Parameters.AddWithValue("@procName", procName);
         var result = cmd.ExecuteScalar();
-        return result as string ?? "";
+        if (result == null || result == DBNull.Value)
+        {
+            // 兼容旧方式（加密的存储过程OBJECT_DEFINITION也可能返回null）
+            var sql2 = @"SELECT OBJECT_DEFINITION(OBJECT_ID(@procName, 'P'))";
+            using var cmd2 = new SqlCommand(sql2, srcConn);
+            cmd2.Parameters.AddWithValue("@procName", procName);
+            result = cmd2.ExecuteScalar();
+        }
+        var text = result as string ?? "";
+        Debug.WriteLine($"[GetProcDefinition] procName={procName}, definition length={text.Length}");
+        return text;
     }
 
     /// <summary>
@@ -349,6 +369,8 @@ public partial class CrossDbCopyFormForm : Form
     /// </summary>
     private void CreateProcInTarget(SqlConnection tgtConn, string procName, string definition)
     {
+        Debug.WriteLine($"[CreateProcInTarget] procName={procName}, definition length={definition?.Length ?? -1}");
+
         // 先删除已存在的同名存储过程
         if (ProcExistsInTarget(tgtConn, procName))
         {
@@ -358,42 +380,56 @@ public partial class CrossDbCopyFormForm : Form
 
         // 创建存储过程（移除原库的USE语句和创建语句头部）
         var createSql = NormalizeProcDefinition(definition, procName);
+        Debug.WriteLine($"[CreateProcInTarget] createSql length={createSql.Length}");
+        Debug.WriteLine($"[CreateProcInTarget] createSql preview: {createSql.Substring(0, Math.Min(200, createSql.Length))}");
         using var createCmd = new SqlCommand(createSql, tgtConn);
         createCmd.ExecuteNonQuery();
     }
 
     /// <summary>
-    /// 清理存储过程定义：去掉头部的CREATE PROCEDURE/ALTER PROCEDURE语句
-    /// 统一用ALTER PROCEDURE包装
+    /// 清理存储过程定义：去掉头部的USE和SET语句，保留CREATE PROCEDURE行（含参数）
+    /// 替换为ALTER PROCEDURE以适配目标库
     /// </summary>
     private string NormalizeProcDefinition(string definition, string procName)
     {
         if (string.IsNullOrWhiteSpace(definition)) return "";
 
-        // 去掉可能的 USE [dbname] 语句
-        var lines = definition.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        var lines = definition.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
         var sb = new System.Text.StringBuilder();
-        bool skipHeader = false;
+        bool headerDone = false;
+
         foreach (var line in lines)
         {
             var trimmed = line.Trim();
-            if (trimmed.StartsWith("USE ", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("SET ANSI_NULLS", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("SET QUOTED_IDENTIFIER", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("CREATE PROCEDURE", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("ALTER PROCEDURE", StringComparison.OrdinalIgnoreCase))
+
+            if (!headerDone)
             {
-                if (!skipHeader)
-                    skipHeader = true;
+                // 跳过 USE 语句
+                if (trimmed.StartsWith("USE ", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // 跳过 SET 语句（ANSI_NULLS / QUOTED_IDENTIFIER）
+                if (trimmed.StartsWith("SET ", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // 找到 CREATE/ALTER PROCEDURE 行（含参数签名），替换为 ALTER
                 if (trimmed.StartsWith("CREATE PROCEDURE", StringComparison.OrdinalIgnoreCase) ||
                     trimmed.StartsWith("ALTER PROCEDURE", StringComparison.OrdinalIgnoreCase))
-                    skipHeader = true;
-                continue;
+                {
+                    // 替换 CREATE PROCEDURE 为 ALTER PROCEDURE，保留后面的参数和AS
+                    var normalizedLine = System.Text.RegularExpressions.Regex.Replace(
+                        trimmed, @"^\s*(CREATE|ALTER)\s+PROCEDURE\s+",
+                        "ALTER PROCEDURE ",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    sb.AppendLine(normalizedLine);
+                    headerDone = true;
+                    continue;
+                }
             }
+
             sb.AppendLine(line);
         }
 
-        return $"ALTER PROCEDURE [{procName}] AS\n" + sb.ToString();
+        return sb.ToString();
     }
 
     /// <summary>
@@ -409,11 +445,23 @@ public partial class CrossDbCopyFormForm : Form
                 if (!ProcExistsInTarget(tgtConn, procName))
                 {
                     var definition = GetProcDefinition(srcConn, procName);
-                    if (!string.IsNullOrWhiteSpace(definition))
+                    if (string.IsNullOrWhiteSpace(definition))
                     {
-                        CreateProcInTarget(tgtConn, procName, definition);
-                        Debug.WriteLine($"[存储过程] {procName} 复制成功（字段：{fieldName}）");
+                        Debug.WriteLine($"[存储过程] {procName} 无法获取定义（可能加密或不存在）");
+                        this.Invoke(new Action(() =>
+                        {
+                            lblProgress.Text = $"⚠ {procName} 无法获取定义（加密或不存在）";
+                            lblProgress.ForeColor = Color.Orange;
+                        }));
+                        continue;
                     }
+                    CreateProcInTarget(tgtConn, procName, definition);
+                    Debug.WriteLine($"[存储过程] {procName} 复制成功（字段：{fieldName}）");
+                    this.Invoke(new Action(() =>
+                    {
+                        lblProgress.Text = $"✓ {procName} 复制成功";
+                        lblProgress.ForeColor = Color.Green;
+                    }));
                 }
                 else
                 {
@@ -422,8 +470,12 @@ public partial class CrossDbCopyFormForm : Form
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[存储过程] {procName} 复制失败：" + ex.Message);
-                // 不中断主流程，仅记录日志
+                Debug.WriteLine($"[存储过程] {procName} 复制失败：{ex.Message}");
+                this.Invoke(new Action(() =>
+                {
+                    lblProgress.Text = $"✗ {procName} 复制失败：{ex.Message}";
+                    lblProgress.ForeColor = Color.Red;
+                }));
             }
         }
     }
