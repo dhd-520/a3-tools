@@ -17,8 +17,6 @@ public partial class SettingsDialog : Form
     private TextBox txtSsmsPath = null!;
     private Button btnSsmsBrowse = null!;
     private Button btnSsmsClear = null!;
-    private TextBox txtTrayHotkey = null!;
-    private Label lblTrayHotkey = null!;
     private CheckBox chkBrowserNewWindow = null!;
 
     public string AppDirectory { get; private set; } = string.Empty;
@@ -60,251 +58,107 @@ public partial class SettingsDialog : Form
         };
         titleBar.Controls.Add(lblTitle);
 
-        // 主内容
-        var content = new Panel { Dock = DockStyle.Fill, BackColor = System.Drawing.Color.White, Padding = new Padding(36) };
+        // 主内容 - 使用 TableLayoutPanel 实现垂直排列 + 列布局
+        var content = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = System.Drawing.Color.White,
+            Padding = new Padding(36, 20, 36, 20),
+            RowCount = 0,
+            ColumnCount = 2,
+            ColumnStyles = {
+                new ColumnStyle(SizeType.Absolute, 220),
+                new ColumnStyle(SizeType.Percent, 100)
+            }
+        };
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
 
         // === 应用程序目录 ===
-        var lblAppDir = new Label
-        {
-            Text = "应用程序目录：",
-            Font = new System.Drawing.Font("微软雅黑", 11F),
-            Location = new System.Drawing.Point(0, 0),
-            Size = new System.Drawing.Size(180, 50),
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        var lblAppDir = new Label { Text = "应用程序目录：", Font = new System.Drawing.Font("微软雅黑", 11F), TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Dock = DockStyle.Fill };
+        content.Controls.Add(lblAppDir, 0, content.RowCount - 1);
 
-        txtAppDir = new TextBox
-        {
-            Location = new System.Drawing.Point(0, 55),
-            Size = new System.Drawing.Size(900, 42),
-            Font = new System.Drawing.Font("微软雅黑", 11F),
-            ReadOnly = true,
-            BackColor = System.Drawing.Color.FromArgb(248, 248, 248)
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        txtAppDir = new TextBox { Font = new System.Drawing.Font("微软雅黑", 11F), ReadOnly = true, BackColor = System.Drawing.Color.FromArgb(248, 248, 248), Dock = DockStyle.Fill };
+        content.Controls.Add(txtAppDir, 0, content.RowCount - 1);
 
-        btnBrowse = new Button
-        {
-            Text = "浏览...",
-            Location = new System.Drawing.Point(912, 52),
-            Size = new System.Drawing.Size(144, 50),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = System.Drawing.Color.FromArgb(245, 245, 245),
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Cursor = Cursors.Hand
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        btnBrowse = new Button { Text = "浏览...", FlatStyle = FlatStyle.Flat, BackColor = System.Drawing.Color.FromArgb(245, 245, 245), Font = new System.Drawing.Font("微软雅黑", 10F), Cursor = Cursors.Hand, Dock = DockStyle.Left };
         btnBrowse.Click += BtnBrowse_Click;
+        content.Controls.Add(btnBrowse, 0, content.RowCount - 1);
 
-        var hint = new Label
-        {
-            Text = "设置A3应用程序所在目录，用于启动账套时定位程序",
-            Location = new System.Drawing.Point(0, 115),
-            Size = new System.Drawing.Size(1080, 30),
-            Font = new System.Drawing.Font("微软雅黑", 9F),
-            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
-        };
+        var hint = new Label { Text = "设置A3应用程序所在目录，用于启动账套时定位程序", Font = new System.Drawing.Font("微软雅黑", 9F), ForeColor = System.Drawing.Color.FromArgb(150, 150, 150), Dock = DockStyle.Fill };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        content.Controls.Add(hint, 0, content.RowCount - 1);
+        content.SetColumnSpan(hint, 2);
 
         // === SSMS路径 ===
-        var lblSsmsPath = new Label
-        {
-            Text = "数据库管理器路径：",
-            Font = new System.Drawing.Font("微软雅黑", 11F),
-            Location = new System.Drawing.Point(0, 155),
-            Size = new System.Drawing.Size(200, 50),
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        var lblSsmsPath = new Label { Text = "数据库管理器路径：", Font = new System.Drawing.Font("微软雅黑", 11F), TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Dock = DockStyle.Fill };
+        content.Controls.Add(lblSsmsPath, 0, content.RowCount - 1);
 
-        txtSsmsPath = new TextBox
-        {
-            Location = new System.Drawing.Point(0, 210),
-            Size = new System.Drawing.Size(900, 42),
-            Font = new System.Drawing.Font("微软雅黑", 11F),
-            ReadOnly = true,
-            BackColor = System.Drawing.Color.FromArgb(248, 248, 248)
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        txtSsmsPath = new TextBox { Font = new System.Drawing.Font("微软雅黑", 11F), ReadOnly = true, BackColor = System.Drawing.Color.FromArgb(248, 248, 248), Dock = DockStyle.Fill };
+        content.Controls.Add(txtSsmsPath, 0, content.RowCount - 1);
 
-        btnSsmsBrowse = new Button
-        {
-            Text = "浏览...",
-            Location = new System.Drawing.Point(912, 207),
-            Size = new System.Drawing.Size(144, 50),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = System.Drawing.Color.FromArgb(245, 245, 245),
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Cursor = Cursors.Hand
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        var btnSsmsRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+        btnSsmsBrowse = new Button { Text = "浏览...", FlatStyle = FlatStyle.Flat, BackColor = System.Drawing.Color.FromArgb(245, 245, 245), Font = new System.Drawing.Font("微软雅黑", 10F), Cursor = Cursors.Hand };
         btnSsmsBrowse.Click += BtnSsmsBrowse_Click;
-
-        btnSsmsClear = new Button
-        {
-            Text = "清除",
-            Location = new System.Drawing.Point(1062, 207),
-            Size = new System.Drawing.Size(54, 50),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = System.Drawing.Color.FromArgb(245, 245, 245),
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Cursor = Cursors.Hand
-        };
+        btnSsmsClear = new Button { Text = "清除", FlatStyle = FlatStyle.Flat, BackColor = System.Drawing.Color.FromArgb(245, 245, 245), Font = new System.Drawing.Font("微软雅黑", 10F), Cursor = Cursors.Hand };
         btnSsmsClear.Click += (s, e) => txtSsmsPath.Text = "";
+        btnSsmsRow.Controls.Add(btnSsmsBrowse);
+        btnSsmsRow.Controls.Add(btnSsmsClear);
+        content.Controls.Add(btnSsmsRow, 0, content.RowCount - 1);
 
-        var hintSsms = new Label
-        {
-            Text = "设置SSMS可执行文件路径，为空则自动查找",
-            Location = new System.Drawing.Point(0, 270),
-            Size = new System.Drawing.Size(1080, 30),
-            Font = new System.Drawing.Font("微软雅黑", 9F),
-            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
-        };
+        var hintSsms = new Label { Text = "设置SSMS可执行文件路径，为空则自动查找", Font = new System.Drawing.Font("微软雅黑", 9F), ForeColor = System.Drawing.Color.FromArgb(150, 150, 150), Dock = DockStyle.Fill };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        content.Controls.Add(hintSsms, 0, content.RowCount - 1);
+        content.SetColumnSpan(hintSsms, 2);
 
-        // === 启动选项设置区域 ===
-        var lblLaunchTitle = new Label
-        {
-            Text = "启动选项：",
-            Font = new System.Drawing.Font("微软雅黑", 11F),
-            Location = new System.Drawing.Point(0, 310),
-            Size = new System.Drawing.Size(180, 40),
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
-        };
+        // === 启动选项 ===
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        var lblLaunchTitle = new Label { Text = "启动选项：", Font = new System.Drawing.Font("微软雅黑", 11F), TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Dock = DockStyle.Fill };
+        content.Controls.Add(lblLaunchTitle, 0, content.RowCount - 1);
 
-        chkShowLaunchDialog = new CheckBox
-        {
-            Text = "启动时弹出启动选项选择窗口",
-            Location = new System.Drawing.Point(0, 355),
-            Size = new System.Drawing.Size(400, 36),
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Checked = true
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        chkShowLaunchDialog = new CheckBox { Text = "启动时弹出启动选项选择窗口", Font = new System.Drawing.Font("微软雅黑", 10F), Checked = true, Dock = DockStyle.Fill };
+        content.Controls.Add(chkShowLaunchDialog, 0, content.RowCount - 1);
 
-        var hintLaunch = new Label
-        {
-            Text = "不勾选则按上次选择直接启动（首次使用会弹出选择）",
-            Location = new System.Drawing.Point(0, 395),
-            Size = new System.Drawing.Size(600, 30),
-            Font = new System.Drawing.Font("微软雅黑", 9F),
-            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
-        };
-
-        // === 托盘快捷键设置 ===
-        lblTrayHotkey = new Label
-        {
-            Text = "托盘快捷键：",
-            Font = new System.Drawing.Font("微软雅黑", 11F),
-            Location = new System.Drawing.Point(0, 430),
-            Size = new System.Drawing.Size(180, 50),
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
-        };
-
-        txtTrayHotkey = new TextBox
-        {
-            Location = new System.Drawing.Point(0, 485),
-            Size = new System.Drawing.Size(300, 42),
-            Font = new System.Drawing.Font("Consolas", 12F),
-            ReadOnly = true,
-            BackColor = System.Drawing.Color.FromArgb(248, 248, 248)
-        };
+        var hintLaunch = new Label { Text = "不勾选则按上次选择直接启动（首次使用会弹出选择）", Font = new System.Drawing.Font("微软雅黑", 9F), ForeColor = System.Drawing.Color.FromArgb(150, 150, 150), Dock = DockStyle.Fill };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        content.Controls.Add(hintLaunch, 0, content.RowCount - 1);
+        content.SetColumnSpan(hintLaunch, 2);
 
         // === 浏览器启动方式 ===
-        var lblBrowserLaunch = new Label
-        {
-            Text = "浏览器启动方式：",
-            Font = new System.Drawing.Font("微软雅黑", 11F),
-            Location = new System.Drawing.Point(0, 540),
-            Size = new System.Drawing.Size(180, 50),
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
-        };
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        var lblBrowserLaunch = new Label { Text = "浏览器启动方式：", Font = new System.Drawing.Font("微软雅黑", 11F), TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Dock = DockStyle.Fill };
+        content.Controls.Add(lblBrowserLaunch, 0, content.RowCount - 1);
 
-        chkBrowserNewWindow = new CheckBox
-        {
-            Text = "启动新窗口（不勾选则在当前浏览器中打开新Tab）",
-            Location = new System.Drawing.Point(0, 595),
-            Size = new System.Drawing.Size(600, 36),
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Checked = true
-        };
-
-        var hintBrowserLaunch = new Label
-        {
-            Text = "设置启动浏览器时是在新窗口打开还是在当前浏览器中打开新Tab",
-            Location = new System.Drawing.Point(0, 635),
-            Size = new System.Drawing.Size(600, 30),
-            Font = new System.Drawing.Font("微软雅黑", 9F),
-            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150)
-        };
-
-        var hintHotkey = new Label
-        {
-            Text = "设置从托盘恢复显示窗体的快捷键，如 Ctrl+Shift+Z（点击后按组合键设置）",
-            Location = new System.Drawing.Point(310, 485),
-            Size = new System.Drawing.Size(600, 42),
-            Font = new System.Drawing.Font("微软雅黑", 9F),
-            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150),
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
-        };
-
-        // 捕获快捷键
-        txtTrayHotkey.KeyDown += (s, e) =>
-        {
-            e.SuppressKeyPress = true;
-            var keys = new List<string>();
-            if (e.Modifiers.HasFlag(Keys.Control)) keys.Add("Ctrl");
-            if (e.Modifiers.HasFlag(Keys.Alt)) keys.Add("Alt");
-            if (e.Modifiers.HasFlag(Keys.Shift)) keys.Add("Shift");
-            if (e.KeyCode != Keys.ControlKey && e.KeyCode != Keys.Menu && e.KeyCode != Keys.ShiftKey)
-            {
-                keys.Add(e.KeyCode.ToString());
-            }
-            if (keys.Count > 0)
-                txtTrayHotkey.Text = string.Join("+", keys);
-        };
-
-        var btnClearHotkey = new Button
-        {
-            Text = "清除",
-            Location = new System.Drawing.Point(312, 483),
-            Size = new System.Drawing.Size(80, 46),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = System.Drawing.Color.FromArgb(245, 245, 245),
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Cursor = Cursors.Hand
-        };
-        btnClearHotkey.Click += (s, e) => txtTrayHotkey.Text = "";
-
-        content.Controls.Add(btnClearHotkey);
-        content.Controls.Add(hintHotkey);
-        content.Controls.Add(txtTrayHotkey);
-        content.Controls.Add(lblTrayHotkey);
-        content.Controls.Add(hintBrowserLaunch);
-        content.Controls.Add(chkBrowserNewWindow);
-        content.Controls.Add(lblBrowserLaunch);
-
-        content.Controls.Add(hint);
-        content.Controls.Add(hintSsms);
-        content.Controls.Add(hintLaunch);
-        content.Controls.Add(btnSsmsClear);
-        content.Controls.Add(btnSsmsBrowse);
-        content.Controls.Add(txtSsmsPath);
-        content.Controls.Add(lblSsmsPath);
-        content.Controls.Add(chkShowLaunchDialog);
-        content.Controls.Add(lblLaunchTitle);
-        content.Controls.Add(btnBrowse);
-        content.Controls.Add(txtAppDir);
-        content.Controls.Add(lblAppDir);
+        content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        chkBrowserNewWindow = new CheckBox { Text = "启动新窗口（不勾选则在当前浏览器中打开新Tab）", Font = new System.Drawing.Font("微软雅黑", 10F), Checked = true, Dock = DockStyle.Fill };
+        content.Controls.Add(chkBrowserNewWindow, 0, content.RowCount - 1);
 
         // 底部按钮
-        var bottom = new Panel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 78,
-            BackColor = System.Drawing.Color.FromArgb(248, 248, 248)
-        };
+        var bottom = new Panel { Dock = DockStyle.Bottom, Height = 78, BackColor = System.Drawing.Color.FromArgb(248, 248, 248) };
 
         btnCancel = new Button
         {
-            Text = "取消",
-            Size = new System.Drawing.Size(132, 46),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = System.Drawing.Color.White,
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Cursor = Cursors.Hand,
+            Text = "取消", Size = new System.Drawing.Size(132, 46), FlatStyle = FlatStyle.Flat,
+            BackColor = System.Drawing.Color.White, Font = new System.Drawing.Font("微软雅黑", 10F), Cursor = Cursors.Hand,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         btnCancel.FlatAppearance.BorderSize = 1;
@@ -313,13 +167,9 @@ public partial class SettingsDialog : Form
 
         btnOK = new Button
         {
-            Text = "确定",
-            Size = new System.Drawing.Size(132, 46),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = System.Drawing.Color.FromArgb(24, 145, 176),
-            ForeColor = System.Drawing.Color.White,
-            Font = new System.Drawing.Font("微软雅黑", 10F),
-            Cursor = Cursors.Hand,
+            Text = "确定", Size = new System.Drawing.Size(132, 46), FlatStyle = FlatStyle.Flat,
+            BackColor = System.Drawing.Color.FromArgb(24, 145, 176), ForeColor = System.Drawing.Color.White,
+            Font = new System.Drawing.Font("微软雅黑", 10F), Cursor = Cursors.Hand,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         btnOK.FlatAppearance.BorderSize = 0;
@@ -328,7 +178,6 @@ public partial class SettingsDialog : Form
 
         bottom.Controls.Add(btnOK);
         bottom.Controls.Add(btnCancel);
-
         bottom.Resize += (s, e) =>
         {
             btnCancel.Left = bottom.Width - 36 - btnCancel.Width;
@@ -340,10 +189,8 @@ public partial class SettingsDialog : Form
         this.Controls.Add(bottom);
         this.Controls.Add(content);
         this.Controls.Add(titleBar);
-
         this.AcceptButton = btnOK;
         this.CancelButton = btnCancel;
-
         this.ResumeLayout(false);
     }
 
@@ -355,38 +202,23 @@ public partial class SettingsDialog : Form
         AppDirectory = settings.AppDirectory;
         chkShowLaunchDialog.Checked = settings.ShowLaunchOptionsDialog;
         txtSsmsPath.Text = settings.SsmsPath;
-        txtTrayHotkey.Text = settings.TrayShowHotkey;
-        TrayShowHotkey = settings.TrayShowHotkey;
         chkBrowserNewWindow.Checked = settings.BrowserNewWindow;
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
     {
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "选择A3应用程序目录",
-            ShowNewFolderButton = false
-        };
-
+        using var dialog = new FolderBrowserDialog { Description = "选择A3应用程序目录", ShowNewFolderButton = false };
         if (!string.IsNullOrEmpty(txtAppDir.Text) && Directory.Exists(txtAppDir.Text))
             dialog.SelectedPath = txtAppDir.Text;
-
         if (dialog.ShowDialog() == DialogResult.OK)
             txtAppDir.Text = dialog.SelectedPath;
     }
 
     private void BtnSsmsBrowse_Click(object? sender, EventArgs e)
     {
-        using var dialog = new OpenFileDialog
-        {
-            Title = "选择SSMS可执行文件",
-            Filter = "可执行文件|*.exe",
-            FileName = "Ssms.exe"
-        };
-
+        using var dialog = new OpenFileDialog { Title = "选择SSMS可执行文件", Filter = "可执行文件|*.exe", FileName = "Ssms.exe" };
         if (!string.IsNullOrEmpty(txtSsmsPath.Text) && File.Exists(txtSsmsPath.Text))
             dialog.InitialDirectory = Path.GetDirectoryName(txtSsmsPath.Text);
-
         if (dialog.ShowDialog() == DialogResult.OK)
             txtSsmsPath.Text = dialog.FileName;
     }
@@ -394,13 +226,11 @@ public partial class SettingsDialog : Form
     private void BtnOK_Click(object? sender, EventArgs e)
     {
         AppDirectory = txtAppDir.Text;
-        TrayShowHotkey = txtTrayHotkey.Text;
         var dataService = new DataService();
         var settings = dataService.LoadSettings();
         settings.AppDirectory = AppDirectory;
         settings.ShowLaunchOptionsDialog = chkShowLaunchDialog.Checked;
         settings.SsmsPath = txtSsmsPath.Text;
-        settings.TrayShowHotkey = TrayShowHotkey;
         settings.BrowserNewWindow = chkBrowserNewWindow.Checked;
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;

@@ -16,6 +16,7 @@ partial class MainForm
     private MenuStrip menuStrip = null!;
     private ToolStripMenuItem menuFile = null!;
     private ToolStripMenuItem menuHelp = null!;
+    private ToolStripMenuItem menuHotkeySettings = null!;
     private ToolStripMenuItem menuExit = null!;
     private ToolStripMenuItem menuAbout = null!;
     private ToolStripMenuItem menuCopyAccount = null!;
@@ -30,7 +31,6 @@ partial class MainForm
     private Button btnAdd = null!;
     private Button btnEdit = null!;
     private Button btnDelete = null!;
-    private Button btnRefresh = null!;
     private Button btnLaunch = null!;
     private Button btnSettings = null!;
     private Button btnImport = null!;
@@ -66,6 +66,7 @@ partial class MainForm
         menuStrip = new MenuStrip();
         menuFile = new ToolStripMenuItem();
         menuCopyAccount = new ToolStripMenuItem();
+        menuHotkeySettings = new ToolStripMenuItem();
         menuExit = new ToolStripMenuItem();
         menuHelp = new ToolStripMenuItem();
         menuAbout = new ToolStripMenuItem();
@@ -101,11 +102,11 @@ partial class MainForm
         lblVersion.AutoSize = true;
         lblVersion.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         lblVersion.ForeColor = Color.FromArgb(200, 230, 240);
-        lblVersion.Location = new Point(0, 0);
+        lblVersion.Location = new Point(1019, 24);
         lblVersion.Name = "lblVersion";
         lblVersion.Size = new Size(69, 28);
         lblVersion.TabIndex = 0;
-        lblVersion.Text = "v1.1.0";
+        lblVersion.Text = "v1.2.0";
         // 
         // lblTitle
         // 
@@ -130,7 +131,7 @@ partial class MainForm
         // 
         // menuFile
         // 
-        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuExit });
+        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuHotkeySettings, menuExit });
         menuFile.Name = "menuFile";
         menuFile.Size = new Size(106, 32);
         menuFile.Text = "文件(_F)";
@@ -138,13 +139,19 @@ partial class MainForm
         // menuCopyAccount
         // 
         menuCopyAccount.Name = "menuCopyAccount";
-        menuCopyAccount.Size = new Size(255, 40);
+        menuCopyAccount.Size = new Size(270, 40);
         menuCopyAccount.Text = "复制账套信息";
+        // 
+        // menuHotkeySettings
+        // 
+        menuHotkeySettings.Name = "menuHotkeySettings";
+        menuHotkeySettings.Size = new Size(270, 40);
+        menuHotkeySettings.Text = "快捷键设置(_K)";
         // 
         // menuExit
         // 
         menuExit.Name = "menuExit";
-        menuExit.Size = new Size(255, 40);
+        menuExit.Size = new Size(270, 40);
         menuExit.Text = "退出(_X)";
         // 
         // menuHelp
@@ -191,7 +198,7 @@ partial class MainForm
         tabTools.BackColor = Color.White;
         tabTools.Location = new Point(4, 44);
         tabTools.Name = "tabTools";
-        tabTools.Size = new Size(1092, 597);
+        tabTools.Size = new Size(1092, 561);
         tabTools.TabIndex = 1;
         tabTools.Text = "  工具箱  ";
         // 
@@ -200,7 +207,7 @@ partial class MainForm
         tabStatus.BackColor = Color.White;
         tabStatus.Location = new Point(4, 44);
         tabStatus.Name = "tabStatus";
-        tabStatus.Size = new Size(1092, 597);
+        tabStatus.Size = new Size(1092, 561);
         tabStatus.TabIndex = 2;
         tabStatus.Text = "  账套运行情况  ";
         // 
@@ -209,7 +216,7 @@ partial class MainForm
         trayContextMenu.ImageScalingSize = new Size(28, 28);
         trayContextMenu.Items.AddRange(new ToolStripItem[] { menuShow, menuHide, menuTrayExit });
         trayContextMenu.Name = "trayContextMenu";
-        trayContextMenu.Size = new Size(190, 112);
+        trayContextMenu.Size = new Size(190, 106);
         // 
         // menuShow
         // 
@@ -242,10 +249,10 @@ partial class MainForm
         Controls.Add(tabControl);
         Controls.Add(titleBar);
         Controls.Add(menuStrip);
+        KeyPreview = true;
         MainMenuStrip = menuStrip;
         MinimumSize = new Size(900, 600);
         Name = "MainForm";
-        KeyPreview = true;
         StartPosition = FormStartPosition.CenterScreen;
         Text = "A3工具箱";
         titleBar.ResumeLayout(false);
@@ -361,18 +368,6 @@ partial class MainForm
         btnDelete.Name = "btnDelete";
         btnDelete.Margin = new Padding(0, 0, 10, 0);
 
-        btnRefresh = new Button();
-        btnRefresh.Text = "🔄 刷新";
-        btnRefresh.Size = new Size(110, btnHeight);
-        btnRefresh.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-        btnRefresh.FlatAppearance.BorderSize = 1;
-        btnRefresh.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
-        btnRefresh.BackColor = System.Drawing.Color.White;
-        btnRefresh.Font = new Font("微软雅黑", 10F);
-        btnRefresh.Cursor = System.Windows.Forms.Cursors.Hand;
-        btnRefresh.Name = "btnRefresh";
-        btnRefresh.Margin = new Padding(0, 0, 10, 0);
-
         btnLaunch = new Button();
         btnLaunch.Text = "🚀 启动";
         btnLaunch.Size = new Size(110, btnHeight);
@@ -425,7 +420,6 @@ partial class MainForm
         buttonRow.Controls.Add(btnImport);
         buttonRow.Controls.Add(btnEdit);
         buttonRow.Controls.Add(btnDelete);
-        buttonRow.Controls.Add(btnRefresh);
         buttonRow.Controls.Add(btnLaunch);
         buttonRow.Controls.Add(btnSettings);
         buttonRow.Controls.Add(btnConnectDB);

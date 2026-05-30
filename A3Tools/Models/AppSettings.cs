@@ -54,4 +54,23 @@ public class AppSettings
     /// 从托盘恢复显示的快捷键（如 "Ctrl+Shift+Z"，为空表示不启用）
     /// </summary>
     public string TrayShowHotkey { get; set; } = "Ctrl+Shift+Z";
+
+    /// <summary>新增账套快捷键（如 "Ctrl+N"，为空表示不启用）</summary>
+    public string AddHotkey { get; set; } = string.Empty;
+
+    /// <summary>删除账套快捷键（如 "Delete"，为空表示不启用）</summary>
+    public string DeleteHotkey { get; set; } = string.Empty;
+
+    /// <summary>启动账套快捷键（如 "Enter"，为空表示不启用）</summary>
+    public string LaunchHotkey { get; set; } = string.Empty;
+
+
+    /// <summary>设置快捷键（如 "Ctrl+, "，为空表示不启用）</summary>
+    public string SettingsHotkey { get; set; } = string.Empty;
+
+    /// <summary>链接数据库快捷键（如 "Ctrl+K"，为空表示不启用）</summary>
+    public string ConnectDBHotkey { get; set; } = string.Empty;
+
+    /// <summary>远程连接快捷键（如 "Ctrl+R"，为空表示不启用）</summary>
+    public string RemoteHotkey { get; set; } = string.Empty;
 }

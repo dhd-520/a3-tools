@@ -31,84 +31,6 @@ public partial class MainForm : Form, IToolContext
     private const int SC_MINIMIZE = 0xF020;
     private const int SC_RESTORE = 0xF120;
 
-    public MainForm()
-    {
-        _dataService = new DataService();
-        _toolsConfigService = new ToolsConfigService();
-        _toolExecutorService = new ToolExecutorService();
-        // 启动时更新所有现有账套的拼音
-        _dataService.UpdateAllPinyin();
-        InitializeComponent();
-        InitLaunchTabControls();
-        InitToolsTabControls();
-        InitStatusTabControls();
-        WireUpEvents();
-        LoadPlugins();
-        LoadAccounts();
-        LoadAccountStatuses();
-        this.scrollPanel?.BringToFront();
-        this.Resize += MainForm_Resize;
-        UpdateVersionPosition();
-        _isInitializing = false;
-        UpdateRootModeUI();
-        _edgeDockManager = new EdgeDockManager(this);
-        _edgeDockManager.OnHideToTray = HideToTray;
-        _edgeDockManager.OnShowFromTray = ShowFromTray;
-        _edgeDockManager.OnShowFromEdge = ShowFromTray;
-
-        // 设置托盘图标
-        SetTrayIcon();
-
-        // 监听窗体大小变化，处理最小化
-        this.Resize += MainForm_ResizeForMinimize;
-
-        // 初始化快捷键管理器（延迟到窗体显示后注册，确保Handle已创建）
-        this.Shown += (s, e) => InitHotkey();
-    }
-
-    private void InitHotkey()
-    {
-        _hotkeyManager = new HotkeyManager();
-        RegisterTrayHotkey();
-    }
-
-    /// <summary>
-    /// 注册托盘显示快捷键
-    /// </summary>
-    public void RegisterTrayHotkey()
-    {
-        var settings = _dataService.LoadSettings();
-        if (!string.IsNullOrEmpty(settings.TrayShowHotkey))
-        {
-            _hotkeyManager?.UnregisterCurrentHotkey();
-            if (_hotkeyManager?.RegisterHotkey(settings.TrayShowHotkey) == true)
-            {
-                // 订阅快捷键事件
-                _hotkeyManager.HotkeyPressed -= OnHotkeyPressed;
-                _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
-            }
-        }
-        else
-        {
-            _hotkeyManager?.UnregisterCurrentHotkey();
-        }
-    }
-
-    private void OnHotkeyPressed(object? sender, EventArgs e)
-    {
-        // 在UI线程上执行
-        this.BeginInvoke(new Action(() => ShowFromTray()));
-    }
-
-    private void MainForm_ResizeForMinimize(object? sender, EventArgs e)
-    {
-        // 如果窗体已隐藏到托盘，点击最小化按钮时恢复正常显示
-        if (_isHiddenToTray && this.WindowState == FormWindowState.Minimized)
-        {
-            ShowFromTray();
-        }
-    }
-
     private void SetTrayIcon()
     {
         try
@@ -173,6 +95,134 @@ public partial class MainForm : Form, IToolContext
 
     #endregion
 
+    public MainForm()
+    {
+        _dataService = new DataService();
+        _toolsConfigService = new ToolsConfigService();
+        _toolExecutorService = new ToolExecutorService();
+        // 启动时更新所有现有账套的拼音
+        _dataService.UpdateAllPinyin();
+        InitializeComponent();
+        InitLaunchTabControls();
+        InitToolsTabControls();
+        InitStatusTabControls();
+        WireUpEvents();
+        LoadPlugins();
+        LoadAccounts();
+        LoadAccountStatuses();
+        this.scrollPanel?.BringToFront();
+        this.Resize += MainForm_Resize;
+        UpdateVersionPosition();
+        _isInitializing = false;
+        UpdateRootModeUI();
+        _edgeDockManager = new EdgeDockManager(this);
+        _edgeDockManager.OnHideToTray = HideToTray;
+        _edgeDockManager.OnShowFromTray = ShowFromTray;
+        _edgeDockManager.OnShowFromEdge = ShowFromTray;
+
+        // 设置托盘图标
+        SetTrayIcon();
+
+        // 监听窗体大小变化，处理最小化
+        this.Resize += MainForm_ResizeForMinimize;
+
+        // 初始化快捷键管理器（延迟到窗体显示后注册，确保Handle已创建）
+        this.Shown += (s, e) => InitHotkey();
+    }
+
+    private void InitHotkey()
+    {
+        if (_hotkeyManager != null) return;
+        _hotkeyManager = new HotkeyManager();
+        _hotkeyManager.EnsureReceiver();
+        _hotkeyManager.HotkeyPressed -= OnHotkeyPressed;
+        _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
+        RegisterAllHotkeys();
+    }
+
+    private void MainForm_ResizeForMinimize(object? sender, EventArgs e)
+    {
+        if (_isHiddenToTray && this.WindowState == FormWindowState.Minimized)
+        {
+            ShowFromTray();
+        }
+    }
+
+    /// <summary>
+    /// 注册所有全局快捷键
+    /// </summary>
+    public void RegisterAllHotkeys()
+    {
+        if (_hotkeyManager == null) return;
+
+
+        var settings = _dataService.LoadSettings();
+        _hotkeyManager.UnregisterAll();
+
+        // 托盘显示
+        if (!string.IsNullOrEmpty(settings.TrayShowHotkey))
+            _hotkeyManager.ReregisterHotkey(1, settings.TrayShowHotkey);
+
+        // 新增
+        if (!string.IsNullOrEmpty(settings.AddHotkey))
+            _hotkeyManager.ReregisterHotkey(2, settings.AddHotkey);
+
+
+        // 删除
+        if (!string.IsNullOrEmpty(settings.DeleteHotkey))
+            _hotkeyManager.ReregisterHotkey(3, settings.DeleteHotkey);
+
+        // 启动
+        if (!string.IsNullOrEmpty(settings.LaunchHotkey))
+            _hotkeyManager.ReregisterHotkey(4, settings.LaunchHotkey);
+
+
+        // 设置
+        if (!string.IsNullOrEmpty(settings.SettingsHotkey))
+            _hotkeyManager.ReregisterHotkey(5, settings.SettingsHotkey);
+
+
+        // 链接数据库
+        if (!string.IsNullOrEmpty(settings.ConnectDBHotkey))
+            _hotkeyManager.ReregisterHotkey(6, settings.ConnectDBHotkey);
+
+
+        // 远程连接
+        if (!string.IsNullOrEmpty(settings.RemoteHotkey))
+            _hotkeyManager.ReregisterHotkey(7, settings.RemoteHotkey);
+    }
+
+    private void OnHotkeyPressed(object? sender, int hotkeyId)
+    {
+        this.BeginInvoke(new Action(() =>
+        {
+            switch (hotkeyId)
+            {
+                case 1:
+                    ShowFromTray();
+                    break;
+                case 2:
+                    if (tabControl.SelectedTab == tabLaunch) ShowAccountDialog(null);
+                    break;
+                case 3:
+                    if (tabControl.SelectedTab == tabLaunch) DeleteSelectedAccount();
+                    break;
+                case 4:
+                    if (tabControl.SelectedTab == tabLaunch) LaunchSelectedAccount();
+                    break;
+                case 5:
+                    BtnSettings_Click(null, EventArgs.Empty);
+                    break;
+                case 6:
+                    if (tabControl.SelectedTab == tabLaunch) BtnConnectDB_Click(null, EventArgs.Empty);
+                    break;
+                case 7:
+                    if (tabControl.SelectedTab == tabLaunch) BtnRemote_Click(null, EventArgs.Empty);
+                    break;
+            }
+        }));
+    }
+
     private void MainForm_Resize(object? sender, EventArgs e)
     {
         UpdateVersionPosition();
@@ -216,19 +266,22 @@ public partial class MainForm : Form, IToolContext
         this.menuExit.Click += MenuExit_Click;
 
         this.txtSearch.TextChanged += TxtSearch_TextChanged;
+        this.txtSearch.KeyDown += TxtSearch_KeyDown;
         this.btnAdd.Click += BtnAdd_Click;
         this.btnImport.Click += BtnImport_Click;
         this.btnEdit.Click += BtnEdit_Click;
         this.btnDelete.Click += BtnDelete_Click;
-        this.btnRefresh.Click += BtnRefresh_Click;
+
         this.btnLaunch.Click += BtnLaunch_Click;
         this.btnSettings.Click += BtnSettings_Click;
         this.btnConnectDB.Click += BtnConnectDB_Click;
         this.btnRemote.Click += BtnRemote_Click;
         this.tabControl.SelectedIndexChanged += TabControl_SelectedIndexChanged;
         this.dgvAccounts.DoubleClick += DgvAccounts_DoubleClick;
+        this.dgvAccounts.KeyDown += DgvAccounts_KeyDown;
         this.dgvAccounts.ColumnWidthChanged += DgvAccounts_ColumnWidthChanged;
         this.menuCopyAccount.Click += MenuCopyAccount_Click;
+        this.menuHotkeySettings.Click += MenuHotkeySettings_Click;
         this.menuAbout.Click += MenuAbout_Click;
         this.lblTitle.Click += LblTitle_Click;
     }
@@ -450,9 +503,96 @@ public partial class MainForm : Form, IToolContext
 
     private void BtnEdit_Click(object? sender, EventArgs e) => EditSelectedAccount();
     private void BtnDelete_Click(object? sender, EventArgs e) => DeleteSelectedAccount();
-    private void BtnRefresh_Click(object? sender, EventArgs e) => LoadAccounts();
     private void BtnLaunch_Click(object? sender, EventArgs e) => LaunchSelectedAccount();
+
     private void DgvAccounts_DoubleClick(object? sender, EventArgs e) => EditSelectedAccount();
+
+    private void DgvAccounts_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (dgvAccounts.DataSource == null || dgvAccounts.Rows.Count == 0) return;
+
+        if (e.KeyData == Keys.Up || e.KeyData == Keys.Down || e.KeyData == Keys.Enter)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+
+            int currentIdx = dgvAccounts.CurrentRow?.Index ?? -1;
+
+            if (e.KeyData == Keys.Up)
+            {
+                if (currentIdx > 0)
+                {
+                    dgvAccounts.CurrentCell = dgvAccounts.Rows[currentIdx - 1].Cells[0];
+                    dgvAccounts.Rows[currentIdx - 1].Selected = true;
+                    dgvAccounts.FirstDisplayedScrollingRowIndex = Math.Max(0, currentIdx - 2);
+                }
+            }
+            else if (e.KeyData == Keys.Down)
+            {
+                if (currentIdx < 0) currentIdx = 0;
+                if (currentIdx < dgvAccounts.Rows.Count - 1)
+                {
+                    dgvAccounts.CurrentCell = dgvAccounts.Rows[currentIdx + 1].Cells[0];
+                    dgvAccounts.Rows[currentIdx + 1].Selected = true;
+                    dgvAccounts.FirstDisplayedScrollingRowIndex = Math.Min(dgvAccounts.Rows.Count - 1, currentIdx);
+                }
+            }
+            else if (e.KeyData == Keys.Enter)
+            {
+                if (dgvAccounts.SelectedRows.Count > 0)
+                    LaunchSelectedAccount();
+            }
+        }
+    }
+
+    private void FocusSearchBox()
+    {
+        if (txtSearch != null && !txtSearch.IsDisposed)
+        {
+            txtSearch.Focus();
+            txtSearch.Select(txtSearch.Text.Length, 0);
+        }
+    }
+
+    private void TxtSearch_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (dgvAccounts.DataSource == null || dgvAccounts.Rows.Count == 0) return;
+
+
+        if (e.KeyData == Keys.Up || e.KeyData == Keys.Down || e.KeyData == Keys.Enter)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+
+            // 先让搜索框失去焦点并选中当前行，确保视觉一致
+            int currentIdx = dgvAccounts.CurrentRow?.Index ?? -1;
+
+            if (e.KeyData == Keys.Up)
+            {
+                if (currentIdx > 0)
+                {
+                    dgvAccounts.CurrentCell = dgvAccounts.Rows[currentIdx - 1].Cells[0];
+                    dgvAccounts.Rows[currentIdx - 1].Selected = true;
+                    dgvAccounts.FirstDisplayedScrollingRowIndex = Math.Max(0, currentIdx - 2);
+                }
+            }
+            else if (e.KeyData == Keys.Down)
+            {
+                if (currentIdx < 0) currentIdx = 0;
+                if (currentIdx < dgvAccounts.Rows.Count - 1)
+                {
+                    dgvAccounts.CurrentCell = dgvAccounts.Rows[currentIdx + 1].Cells[0];
+                    dgvAccounts.Rows[currentIdx + 1].Selected = true;
+                    dgvAccounts.FirstDisplayedScrollingRowIndex = Math.Min(dgvAccounts.Rows.Count - 1, currentIdx);
+                }
+            }
+            else if (e.KeyData == Keys.Enter)
+            {
+                if (dgvAccounts.SelectedRows.Count > 0)
+                    LaunchSelectedAccount();
+            }
+        }
+    }
 
     private void ShowAccountDialog(Account? account)
     {
@@ -844,8 +984,7 @@ public partial class MainForm : Form, IToolContext
         using var dialog = new SettingsDialog();
         if (dialog.ShowDialog() == DialogResult.OK)
         {
-            // 重新注册快捷键（如果设置改变了）
-            RegisterTrayHotkey();
+            RegisterAllHotkeys();
         }
     }
 
@@ -854,7 +993,10 @@ public partial class MainForm : Form, IToolContext
         if (this.tabControl.SelectedTab == this.tabTools)
             this.scrollPanel?.BringToFront();
         else if (this.tabControl.SelectedTab == this.tabLaunch)
+        {
             this.dgvAccounts?.BringToFront();
+            FocusSearchBox();
+        }
     }
 
     private void BtnConnectDB_Click(object? sender, EventArgs e)
@@ -1195,7 +1337,14 @@ public partial class MainForm : Form, IToolContext
 
     private void MenuAbout_Click(object? sender, EventArgs e)
     {
-        MessageBox.Show("A3工具箱 v1.1.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问等功能。", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show("A3工具箱 v1.2.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问等功能。", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void MenuHotkeySettings_Click(object? sender, EventArgs e)
+    {
+        using var form = new HotkeySettingsForm();
+        if (form.ShowDialog() == DialogResult.OK)
+            RegisterAllHotkeys();
     }
 
     #endregion
@@ -1463,25 +1612,18 @@ public partial class MainForm : Form, IToolContext
     {
         if (!_isHiddenToTray) return;
 
-        // 先设置 WindowState 再 Show，避免状态冲突
         this.WindowState = FormWindowState.Normal;
         this.ShowInTaskbar = true;
         this.Show();
         this.notifyIcon.Visible = false;
         _isHiddenToTray = false;
 
-        // 通知 EdgeDockManager 记录显示时间，防止立即被隐藏
         _edgeDockManager?.RecordShowTime();
-
-        // 重新注册快捷键（窗体重新显示后需要重新注册）
-        RegisterTrayHotkey();
-
-        // 更新托盘菜单文字
+        RegisterAllHotkeys();
         this.menuHide.Text = "隐藏到托盘";
 
         this.Activate();
     }
-
     /// <summary>
     /// 拦截窗体消息，处理托盘模式下的最小化
     /// </summary>
