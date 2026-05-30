@@ -1681,7 +1681,10 @@ public partial class MainForm : Form, IToolContext
 
     private void MenuHide_Click(object? sender, EventArgs e)
     {
-        HideToTray();
+        if (_isHiddenToTray)
+            ShowFromTray();
+        else
+            HideToTray();
     }
 
     private void MenuTrayExit_Click(object? sender, EventArgs e)

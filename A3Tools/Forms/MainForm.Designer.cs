@@ -214,9 +214,9 @@ partial class MainForm
         // trayContextMenu
         // 
         trayContextMenu.ImageScalingSize = new Size(28, 28);
-        trayContextMenu.Items.AddRange(new ToolStripItem[] { menuShow, menuHide, menuTrayExit });
+        trayContextMenu.Items.AddRange(new ToolStripItem[] { menuHide, menuTrayExit });
         trayContextMenu.Name = "trayContextMenu";
-        trayContextMenu.Size = new Size(190, 106);
+        trayContextMenu.Size = new Size(190, 72);
         // 
         // menuShow
         // 
