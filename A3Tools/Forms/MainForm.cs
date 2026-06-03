@@ -128,6 +128,9 @@ public partial class MainForm : Form, IToolContext
 
         // 初始化快捷键管理器（延迟到窗体显示后注册，确保Handle已创建）
         this.Shown += (s, e) => InitHotkey();
+
+        // 启用键盘预览，使F键能聚焦到搜索框
+        this.KeyPreview = true;
     }
 
     private void InitHotkey()
@@ -284,6 +287,17 @@ public partial class MainForm : Form, IToolContext
         this.menuHotkeySettings.Click += MenuHotkeySettings_Click;
         this.menuAbout.Click += MenuAbout_Click;
         this.lblTitle.Click += LblTitle_Click;
+
+        this.KeyDown += MainForm_KeyDown;
+    }
+
+    private void MainForm_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode == System.Windows.Forms.Keys.F)
+        {
+            FocusSearchBox();
+            e.SuppressKeyPress = true;
+        }
     }
 
     private void DgvAccounts_ColumnWidthChanged(object? sender, DataGridViewColumnEventArgs e)

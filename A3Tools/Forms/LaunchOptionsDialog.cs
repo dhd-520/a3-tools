@@ -196,7 +196,32 @@ public class LaunchOptionsDialog : Form
         this.AcceptButton = btnOK;
         this.CancelButton = btnCancel;
 
+        this.KeyPreview = true;
+        this.KeyDown += LaunchOptionsDialog_KeyDown;
+
         this.ResumeLayout(false);
+    }
+
+    private void LaunchOptionsDialog_KeyDown(object? sender, KeyEventArgs e)
+    {
+        switch (e.KeyCode)
+        {
+            case Keys.D1:
+            case Keys.NumPad1:
+                chkDesktop.Checked = !chkDesktop.Checked;
+                e.SuppressKeyPress = true;
+                break;
+            case Keys.D2:
+            case Keys.NumPad2:
+                chkDevTools.Checked = !chkDevTools.Checked;
+                e.SuppressKeyPress = true;
+                break;
+            case Keys.D3:
+            case Keys.NumPad3:
+                chkWeb.Checked = !chkWeb.Checked;
+                e.SuppressKeyPress = true;
+                break;
+        }
     }
 
     private void LoadDefaults()

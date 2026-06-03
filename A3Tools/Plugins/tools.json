@@ -1,8 +1,8 @@
 {
   "tools": [
     {
-      "name": "复制表结构",
-      "description": "复制表结构到目标数据库",
+      "name": "复制数据库对象",
+      "description": "跨库复制数据库对象（表结构/视图/函数/存储过程）",
       "library": "A3Tools.Plugins.Default.dll",
       "className": "A3Tools.Plugins.Default.CrossDbCopyTableTool",
       "methodName": "Execute",

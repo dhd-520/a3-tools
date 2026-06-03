@@ -1,4 +1,4 @@
-namespace A3Tools.Plugins.Default.Forms;
+﻿﻿﻿﻿namespace A3Tools.Plugins.Default.Forms;
 
 partial class CrossDbCopyTableForm
 {
@@ -27,9 +27,12 @@ partial class CrossDbCopyTableForm
     private Label lblTargetPassword;
     private TextBox txtTargetPassword;
     private Button btnSelectTarget;
-    private Label lblTables;
-    private TextBox txtTables;
-    private Label lblTableHint;
+    private Label lblObjectType;
+    private ComboBox cboObjectType;
+    private Label lblObjects;
+    private TextBox txtObjects;
+    private Label lblObjectsHint;
+    private CheckBox chkDeleteIfExists;
     private Panel spacerPanel;
     private Button btnConfirm;
     private Button btnCancel;
@@ -70,9 +73,12 @@ partial class CrossDbCopyTableForm
         lblTargetPassword = new Label();
         txtTargetPassword = new TextBox();
         btnSelectTarget = new Button();
-        lblTables = new Label();
-        txtTables = new TextBox();
-        lblTableHint = new Label();
+        lblObjectType = new Label();
+        cboObjectType = new ComboBox();
+        lblObjects = new Label();
+        txtObjects = new TextBox();
+        lblObjectsHint = new Label();
+        chkDeleteIfExists = new CheckBox();
         btnConfirm = new Button();
         btnCancel = new Button();
         lblProgress = new Label();
@@ -90,27 +96,36 @@ partial class CrossDbCopyTableForm
         tableLayoutPanel1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
         tableLayoutPanel1.Controls.Add(sourceLayout, 0, 0);
         tableLayoutPanel1.Controls.Add(targetLayout, 1, 0);
-        tableLayoutPanel1.Controls.Add(lblTables, 0, 1);
-        tableLayoutPanel1.Controls.Add(txtTables, 0, 2);
-        tableLayoutPanel1.Controls.Add(lblTableHint, 0, 3);
-        tableLayoutPanel1.Controls.Add(btnConfirm, 0, 4);
-        tableLayoutPanel1.Controls.Add(btnCancel, 1, 4);
-        tableLayoutPanel1.Controls.Add(lblProgress, 1, 5);
-        tableLayoutPanel1.Controls.Add(progressBar, 0, 5);
+        tableLayoutPanel1.Controls.Add(lblObjectType, 0, 1);
+        tableLayoutPanel1.Controls.Add(cboObjectType, 1, 1);
+        tableLayoutPanel1.Controls.Add(lblObjects, 0, 2);
+        tableLayoutPanel1.SetColumnSpan(lblObjects, 2);
+        tableLayoutPanel1.Controls.Add(txtObjects, 0, 3);
+        tableLayoutPanel1.SetColumnSpan(txtObjects, 2);
+        tableLayoutPanel1.Controls.Add(lblObjectsHint, 0, 4);
+        tableLayoutPanel1.SetColumnSpan(lblObjectsHint, 2);
+        tableLayoutPanel1.Controls.Add(chkDeleteIfExists, 0, 5);
+        tableLayoutPanel1.SetColumnSpan(chkDeleteIfExists, 2);
+        tableLayoutPanel1.Controls.Add(btnConfirm, 0, 6);
+        tableLayoutPanel1.Controls.Add(btnCancel, 1, 6);
+        tableLayoutPanel1.Controls.Add(lblProgress, 1, 7);
+        tableLayoutPanel1.Controls.Add(progressBar, 0, 7);
         tableLayoutPanel1.Dock = DockStyle.Fill;
         tableLayoutPanel1.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         tableLayoutPanel1.Location = new Point(0, 0);
         tableLayoutPanel1.Margin = new Padding(3, 10, 3, 3);
         tableLayoutPanel1.Name = "tableLayoutPanel1";
         tableLayoutPanel1.Padding = new Padding(10);
-        tableLayoutPanel1.RowCount = 6;
+        tableLayoutPanel1.RowCount = 8;
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
-        tableLayoutPanel1.Size = new Size(873, 690);
+        tableLayoutPanel1.RowStyles.Add(new RowStyle());
+        tableLayoutPanel1.RowStyles.Add(new RowStyle());
+        tableLayoutPanel1.Size = new Size(873, 750);
         tableLayoutPanel1.TabIndex = 0;
         // 
         // sourceLayout
@@ -403,41 +418,74 @@ partial class CrossDbCopyTableForm
         btnSelectTarget.UseVisualStyleBackColor = false;
         btnSelectTarget.Click += BtnSelectTarget_Click;
         // 
-        // lblTables
+        // lblObjectType
         // 
-        lblTables.AutoSize = true;
-        lblTables.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        lblTables.Location = new Point(13, 333);
-        lblTables.Margin = new Padding(3, 10, 3, 3);
-        lblTables.Name = "lblTables";
-        lblTables.Size = new Size(119, 35);
-        lblTables.TabIndex = 2;
-        lblTables.Text = "表名称：";
-        lblTables.TextAlign = ContentAlignment.MiddleLeft;
+        lblObjectType.Dock = DockStyle.Fill;
+        lblObjectType.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblObjectType.Location = new Point(13, 323);
+        lblObjectType.Margin = new Padding(3, 10, 3, 3);
+        lblObjectType.Name = "lblObjectType";
+        lblObjectType.Size = new Size(120, 35);
+        lblObjectType.TabIndex = 28;
+        lblObjectType.Text = "对象类型：";
+        lblObjectType.TextAlign = ContentAlignment.MiddleLeft;
         // 
-        // txtTables
+        // cboObjectType
         // 
-        tableLayoutPanel1.SetColumnSpan(txtTables, 2);
-        txtTables.Dock = DockStyle.Fill;
-        txtTables.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtTables.Location = new Point(13, 374);
-        txtTables.Multiline = true;
-        txtTables.Name = "txtTables";
-        txtTables.Size = new Size(847, 218);
-        txtTables.TabIndex = 14;
+        cboObjectType.Dock = DockStyle.Fill;
+        cboObjectType.DropDownStyle = ComboBoxStyle.DropDownList;
+        cboObjectType.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        cboObjectType.Location = new Point(139, 320);
+        cboObjectType.Margin = new Padding(3, 10, 3, 3);
+        cboObjectType.Name = "cboObjectType";
+        cboObjectType.Size = new Size(721, 38);
+        cboObjectType.TabIndex = 29;
         // 
-        // lblTableHint
+        // lblObjects
         // 
-        lblTableHint.AutoSize = true;
-        tableLayoutPanel1.SetColumnSpan(lblTableHint, 2);
-        lblTableHint.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        lblTableHint.ForeColor = Color.Gray;
-        lblTableHint.Location = new Point(13, 598);
-        lblTableHint.Margin = new Padding(3);
-        lblTableHint.Name = "lblTableHint";
-        lblTableHint.Size = new Size(557, 28);
-        lblTableHint.TabIndex = 3;
-        lblTableHint.Text = "提示：多张表用分号(;)分隔，例如：Table1;Table2;Table3";
+        lblObjects.AutoSize = true;
+        lblObjects.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblObjects.Location = new Point(13, 368);
+        lblObjects.Margin = new Padding(3, 3, 3, 3);
+        lblObjects.Name = "lblObjects";
+        lblObjects.Size = new Size(119, 35);
+        lblObjects.TabIndex = 2;
+        lblObjects.Text = "对象名称：";
+        lblObjects.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // txtObjects
+        // 
+        txtObjects.Dock = DockStyle.Fill;
+        txtObjects.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtObjects.Location = new Point(13, 409);
+        txtObjects.Multiline = true;
+        txtObjects.Name = "txtObjects";
+        txtObjects.Size = new Size(847, 150);
+        txtObjects.TabIndex = 14;
+        // 
+        // lblObjectsHint
+        // 
+        lblObjectsHint.AutoSize = true;
+        lblObjectsHint.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        lblObjectsHint.ForeColor = Color.Gray;
+        lblObjectsHint.Location = new Point(13, 565);
+        lblObjectsHint.Margin = new Padding(3);
+        lblObjectsHint.Name = "lblObjectsHint";
+        lblObjectsHint.Size = new Size(557, 28);
+        lblObjectsHint.TabIndex = 3;
+        lblObjectsHint.Text = "提示：多个对象用分号(;)分隔，例如：Table1;Table2;Table3";
+        // 
+        // chkDeleteIfExists
+        // 
+        chkDeleteIfExists.AutoSize = true;
+        chkDeleteIfExists.Dock = DockStyle.Left;
+        chkDeleteIfExists.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        chkDeleteIfExists.Location = new Point(13, 598);
+        chkDeleteIfExists.Name = "chkDeleteIfExists";
+        chkDeleteIfExists.Size = new Size(300, 35);
+        chkDeleteIfExists.TabIndex = 30;
+        chkDeleteIfExists.Text = "已存在对象先删除再创建";
+        chkDeleteIfExists.UseVisualStyleBackColor = true;
         // 
         // btnConfirm
         // 
@@ -446,7 +494,7 @@ partial class CrossDbCopyTableForm
         btnConfirm.FlatStyle = FlatStyle.Flat;
         btnConfirm.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         btnConfirm.ForeColor = Color.White;
-        btnConfirm.Location = new Point(13, 632);
+        btnConfirm.Location = new Point(13, 638);
         btnConfirm.Name = "btnConfirm";
         btnConfirm.Size = new Size(180, 40);
         btnConfirm.TabIndex = 16;
@@ -461,7 +509,7 @@ partial class CrossDbCopyTableForm
         btnCancel.FlatStyle = FlatStyle.Flat;
         btnCancel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         btnCancel.ForeColor = Color.Gray;
-        btnCancel.Location = new Point(439, 632);
+        btnCancel.Location = new Point(439, 638);
         btnCancel.Name = "btnCancel";
         btnCancel.Size = new Size(180, 40);
         btnCancel.TabIndex = 17;
@@ -474,7 +522,7 @@ partial class CrossDbCopyTableForm
         lblProgress.AutoSize = true;
         lblProgress.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         lblProgress.ForeColor = Color.Gray;
-        lblProgress.Location = new Point(439, 675);
+        lblProgress.Location = new Point(439, 685);
         lblProgress.Name = "lblProgress";
         lblProgress.Size = new Size(54, 28);
         lblProgress.TabIndex = 19;
@@ -482,7 +530,7 @@ partial class CrossDbCopyTableForm
         // 
         // progressBar
         // 
-        progressBar.Location = new Point(13, 678);
+        progressBar.Location = new Point(13, 688);
         progressBar.Name = "progressBar";
         progressBar.Size = new Size(400, 25);
         progressBar.TabIndex = 18;
@@ -498,7 +546,7 @@ partial class CrossDbCopyTableForm
         // 
         AutoScaleDimensions = new SizeF(14F, 30F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(873, 690);
+        ClientSize = new Size(873, 750);
         Controls.Add(tableLayoutPanel1);
         Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -506,7 +554,7 @@ partial class CrossDbCopyTableForm
         MinimizeBox = false;
         Name = "CrossDbCopyTableForm";
         StartPosition = FormStartPosition.CenterParent;
-        Text = "跨库复制表结构";
+        Text = "跨库复制对象";
         tableLayoutPanel1.ResumeLayout(false);
         tableLayoutPanel1.PerformLayout();
         sourceLayout.ResumeLayout(false);

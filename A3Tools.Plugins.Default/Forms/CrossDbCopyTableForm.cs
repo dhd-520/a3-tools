@@ -11,11 +11,34 @@ public partial class CrossDbCopyTableForm : Form
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
 
+    // 对象类型常量
+    private static readonly Dictionary<string, string> ObjectTypeMap = new()
+    {
+        { "U",   "表结构" },
+        { "V",   "视图" },
+        { "TF",  "表值函数" },
+        { "FN",  "标量值函数" },
+        { "P",   "存储过程" }
+    };
+
     public CrossDbCopyTableForm(IToolContext context, Account? currentAccount)
     {
         _context = context;
         _currentAccount = currentAccount;
         InitializeComponent();
+        InitObjectTypeCombo();
+    }
+
+    private void InitObjectTypeCombo()
+    {
+        cboObjectType.Items.Clear();
+        foreach (var kv in ObjectTypeMap)
+        {
+            cboObjectType.Items.Add(new ObjectTypeItem { Value = kv.Key, Display = kv.Value });
+        }
+        cboObjectType.DisplayMember = "Display";
+        cboObjectType.ValueMember = "Value";
+        cboObjectType.SelectedIndex = 0;
     }
 
     private void BtnSelectSource_Click(object? sender, EventArgs e)
@@ -38,6 +61,7 @@ public partial class CrossDbCopyTableForm : Form
         if (_currentAccount != null)
         {
             txtSourceServer.Text = _currentAccount.Database ?? "";
+            txtSourceDbName.Text = _currentAccount.DatabaseName ?? "";
             txtSourceUser.Text = _currentAccount.DbUser ?? "";
             txtSourcePassword.Text = _currentAccount.DbPassword ?? "";
         }
@@ -86,7 +110,6 @@ public partial class CrossDbCopyTableForm : Form
             foreach (var acc in accounts)
             {
                 var item = acc.Code + " - " + acc.Name;
-                // 支持编码、名称、拼音首字母搜索
                 bool matchCode = (acc.Code ?? "").Contains(filter, StringComparison.OrdinalIgnoreCase);
                 bool matchName = (acc.Name ?? "").Contains(filter, StringComparison.OrdinalIgnoreCase);
                 bool matchPinyin = (acc.Pinyin ?? "").Contains(filter.ToLower(), StringComparison.OrdinalIgnoreCase);
@@ -149,14 +172,22 @@ public partial class CrossDbCopyTableForm : Form
             MessageBox.Show("请填写目标数据库地址！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        if (string.IsNullOrWhiteSpace(txtTables.Text))
+        if (string.IsNullOrWhiteSpace(txtObjects.Text))
         {
-            MessageBox.Show("请输入要复制的表名称！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("请输入对象名称！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (cboObjectType.SelectedItem == null)
+        {
+            MessageBox.Show("请选择对象类型！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        var tableNames = txtTables.Text.Split(';', StringSplitOptions.RemoveEmptyEntries)
+        var objectNames = txtObjects.Text.Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Select(t => t.Trim()).ToList();
+
+        var objectType = ((ObjectTypeItem)cboObjectType.SelectedItem).Value;
+        var deleteIfExists = chkDeleteIfExists.Checked;
 
         lblProgress.Text = "正在连接源数据库...";
         progressBar.Value = 10;
@@ -180,19 +211,19 @@ public partial class CrossDbCopyTableForm : Form
             return;
         }
 
-        lblProgress.Text = "正在复制表结构...";
+        lblProgress.Text = "正在复制对象...";
         progressBar.Value = 50;
 
-        var success = await CopyTablesAsync(
+        var success = await CopyObjectsAsync(
             txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
             txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
-            tableNames);
+            objectNames, objectType, deleteIfExists);
 
         if (success)
         {
             progressBar.Value = 100;
             lblProgress.Text = "复制完成";
-            MessageBox.Show("成功复制 " + tableNames.Count + " 个表的结构！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("成功复制 " + objectNames.Count + " 个对象！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
             this.Close();
         }
         else
@@ -221,10 +252,10 @@ public partial class CrossDbCopyTableForm : Form
         });
     }
 
-    private async Task<bool> CopyTablesAsync(
+    private async Task<bool> CopyObjectsAsync(
         string srcServer, string srcDbName, string srcUser, string srcPassword,
         string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
-        List<string> tableNames)
+        List<string> objectNames, string objectType, bool deleteIfExists)
     {
         return await Task.Run(() =>
         {
@@ -238,25 +269,58 @@ public partial class CrossDbCopyTableForm : Form
                 srcConn.Open();
                 tgtConn.Open();
 
-                int total = tableNames.Count;
+                int total = objectNames.Count;
                 int current = 0;
 
-                foreach (var tableName in tableNames)
+                foreach (var objectName in objectNames)
                 {
                     current++;
                     var progress = 50 + (current * 50 / total);
                     this.Invoke(new Action(() =>
                     {
                         progressBar.Value = progress;
-                        lblProgress.Text = "正在复制：" + tableName + " (" + current + "/" + total + ")";
+                        lblProgress.Text = "正在复制：" + objectName + " (" + current + "/" + total + ")";
                     }));
 
-                    var scripts = GenerateCreateTableScripts(srcConn, tableName);
-                    foreach (var script in scripts)
+                    string? script = objectType switch
                     {
-                        using var cmd = new Microsoft.Data.SqlClient.SqlCommand(script, tgtConn);
-                        cmd.ExecuteNonQuery();
+                        "U" => GenerateCreateTableScript(srcConn, objectName),
+                        "V" => GenerateCreateViewScript(srcConn, objectName),
+                        "TF" => GenerateCreateFunctionScript(srcConn, objectName),
+                        "FN" => GenerateCreateFunctionScript(srcConn, objectName),
+                        "P" => GenerateCreateProcScript(srcConn, objectName),
+                        _ => null
+                    };
+
+                    if (string.IsNullOrEmpty(script))
+                    {
+                        this.Invoke(new Action(() =>
+                        {
+                            MessageBox.Show("无法获取 " + objectName + " 的定义（对象不存在或无权访问）。", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }));
+                        continue;
                     }
+
+                    // 删除目标已存在对象
+                    if (deleteIfExists)
+                    {
+                        var dropScript = GetDropScript(objectName, objectType);
+                        using var dropCmd = new Microsoft.Data.SqlClient.SqlCommand(dropScript, tgtConn);
+                        dropCmd.ExecuteNonQuery();
+                    }
+                    else
+                    {
+                        // 检查是否存在
+                        if (ObjectExists(tgtConn, objectName, objectType))
+                        {
+                            Debug.WriteLine($"跳过已存在的对象: {objectName}");
+                            continue;
+                        }
+                    }
+
+                    // 创建目标对象
+                    using var createCmd = new Microsoft.Data.SqlClient.SqlCommand(script, tgtConn);
+                    createCmd.ExecuteNonQuery();
                 }
 
                 return true;
@@ -272,9 +336,32 @@ public partial class CrossDbCopyTableForm : Form
         });
     }
 
-    private List<string> GenerateCreateTableScripts(Microsoft.Data.SqlClient.SqlConnection conn, string tableName)
+    private bool ObjectExists(Microsoft.Data.SqlClient.SqlConnection conn, string objectName, string type)
     {
-        var scripts = new List<string>();
+        var sql = "SELECT 1 FROM sys.objects WHERE name = @name AND type = @type";
+        using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@name", objectName);
+        cmd.Parameters.AddWithValue("@type", type);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read();
+    }
+
+    private string GetDropScript(string objectName, string type)
+    {
+        return type switch
+        {
+            "U" => $"IF OBJECT_ID('{objectName}', 'U') IS NOT NULL DROP TABLE [{objectName}]",
+            "V" => $"IF OBJECT_ID('{objectName}', 'V') IS NOT NULL DROP VIEW [{objectName}]",
+            "TF" => $"IF OBJECT_ID('{objectName}', 'TF') IS NOT NULL DROP FUNCTION [{objectName}]",
+            "FN" => $"IF OBJECT_ID('{objectName}', 'FN') IS NOT NULL DROP FUNCTION [{objectName}]",
+            "P" => $"IF OBJECT_ID('{objectName}', 'P') IS NOT NULL DROP PROCEDURE [{objectName}]",
+            _ => $"IF OBJECT_ID('{objectName}', 'U') IS NOT NULL DROP TABLE [{objectName}]"
+        };
+    }
+
+    // ========== 表结构 ==========
+    private string? GenerateCreateTableScript(Microsoft.Data.SqlClient.SqlConnection conn, string tableName)
+    {
         try
         {
             var columnsSql = @"
@@ -314,16 +401,68 @@ public partial class CrossDbCopyTableForm : Form
             }
             reader.Close();
 
-            if (columnDefs.Count == 0) return scripts;
+            if (columnDefs.Count == 0) return null;
 
-            scripts.Add("IF OBJECT_ID('" + tableName + "', 'U') IS NOT NULL DROP TABLE [" + tableName + "]");
-            scripts.Add("CREATE TABLE [" + tableName + "] (" + string.Join(", ", columnDefs) + ")");
-            return scripts;
+            return "CREATE TABLE [" + tableName + "] (" + string.Join(", ", columnDefs) + ")";
         }
         catch (Exception ex)
         {
             Debug.WriteLine("生成建表脚本失败: " + ex.Message);
-            return scripts;
+            return null;
+        }
+    }
+
+    // ========== 视图 ==========
+    private string? GenerateCreateViewScript(Microsoft.Data.SqlClient.SqlConnection conn, string viewName)
+    {
+        try
+        {
+            var sql = "SELECT definition FROM sys.sql_modules WHERE object_id = OBJECT_ID(@name)";
+            using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@name", viewName);
+            var result = cmd.ExecuteScalar();
+            return result?.ToString();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("生成视图脚本失败: " + ex.Message);
+            return null;
+        }
+    }
+
+    // ========== 函数（表值/标量值） ==========
+    private string? GenerateCreateFunctionScript(Microsoft.Data.SqlClient.SqlConnection conn, string funcName)
+    {
+        try
+        {
+            var sql = "SELECT definition FROM sys.sql_modules WHERE object_id = OBJECT_ID(@name)";
+            using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@name", funcName);
+            var result = cmd.ExecuteScalar();
+            return result?.ToString();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("生成函数脚本失败: " + ex.Message);
+            return null;
+        }
+    }
+
+    // ========== 存储过程 ==========
+    private string? GenerateCreateProcScript(Microsoft.Data.SqlClient.SqlConnection conn, string procName)
+    {
+        try
+        {
+            var sql = "SELECT definition FROM sys.sql_modules WHERE object_id = OBJECT_ID(@name)";
+            using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@name", procName);
+            var result = cmd.ExecuteScalar();
+            return result?.ToString();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("生成存储过程脚本失败: " + ex.Message);
+            return null;
         }
     }
 
@@ -339,5 +478,11 @@ public partial class CrossDbCopyTableForm : Form
             "numeric" => "NUMERIC(" + precision + ", " + scale + ")",
             _ => dataType
         };
+    }
+
+    private class ObjectTypeItem
+    {
+        public string Value { get; set; } = "";
+        public string Display { get; set; } = "";
     }
 }
