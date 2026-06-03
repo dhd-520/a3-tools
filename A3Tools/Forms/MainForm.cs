@@ -293,7 +293,7 @@ public partial class MainForm : Form, IToolContext
 
     private void MainForm_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.KeyCode == System.Windows.Forms.Keys.F)
+        if (e.KeyCode == System.Windows.Forms.Keys.Oem3)
         {
             FocusSearchBox();
             e.SuppressKeyPress = true;

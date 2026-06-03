@@ -36,6 +36,9 @@
     <None Update="Plugins\tools.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="Plugins\A3Tools.Plugins.Default.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <!-- 复制图标到输出目录（托盘图标用） -->

@@ -1,4 +1,4 @@
-# A3Tools 工作日志
+﻿# A3Tools 工作日志
 
 ## 2026-06-03
 
@@ -21,9 +21,9 @@
 
 ### 主窗体搜索框快捷键
 
-**功能：** 在主窗体任意位置按 `F` 键，自动聚焦到搜索框。
+**功能：** 在主窗体任意位置按 `` ` ``（反引号/Tab键上方）键，自动聚焦到搜索框。
 
-**实现：** 构造函数中设置 `KeyPreview = true`，`WireUpEvents` 中注册 `MainForm_KeyDown` 事件处理 `F` 键。
+**实现：** 构造函数中设置 `KeyPreview = true`，`WireUpEvents` 中注册 `MainForm_KeyDown` 事件处理 `` ` `` 键。
 
 **涉及文件：**
 - `MainForm.cs` - 新增 `KeyPreview = true` + `MainForm_KeyDown` 方法
