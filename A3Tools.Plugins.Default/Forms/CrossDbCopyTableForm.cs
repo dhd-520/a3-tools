@@ -4,6 +4,7 @@ using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
 
+
 namespace A3Tools.Plugins.Default.Forms;
 
 public partial class CrossDbCopyTableForm : Form
@@ -27,6 +28,15 @@ public partial class CrossDbCopyTableForm : Form
         _currentAccount = currentAccount;
         InitializeComponent();
         InitObjectTypeCombo();
+        
+        FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
+
+        // Ctrl+S 选择源账套，Ctrl+D 选择目标账套
+        this.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
+        };
     }
 
     private void InitObjectTypeCombo()
@@ -104,6 +114,30 @@ public partial class CrossDbCopyTableForm : Form
         var listBox = new ListBox { Left = 20, Top = 85, Width = 540, Height = 380, Font = new Font("微软雅黑", 11F) };
         dialog.Controls.Add(listBox);
 
+        // 快捷键：`键定位搜索框，上/下键快速进入列表选择，ESC关闭，Enter确认
+        dialog.KeyPreview = true;
+        bool justFocused = false;
+        dialog.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Oemtilde) { txtSearch.Focus(); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.Escape) { dialog.Close(); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.Enter) { if (listBox.SelectedIndex >= 0) btnOkClick(); e.SuppressKeyPress = true; }
+            else if ((e.KeyCode == Keys.Up || e.KeyCode == Keys.Down) && !listBox.Focused && listBox.Items.Count > 0)
+            {
+                listBox.Focus();
+                listBox.SelectedIndex = 0;
+                justFocused = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (justFocused && (e.KeyCode == Keys.Up || e.KeyCode == Keys.Down))
+            {
+                justFocused = false;
+                e.SuppressKeyPress = true;
+            }
+        };
+        // 搜索框也支持`键清空内容
+        txtSearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Oemtilde) { txtSearch.SelectionStart = 0; txtSearch.SelectionLength = txtSearch.Text.Length; e.SuppressKeyPress = true; } };
+
         void PopulateList(string filter)
         {
             listBox.Items.Clear();
@@ -126,7 +160,7 @@ public partial class CrossDbCopyTableForm : Form
         var btnOk = new Button { Text = "确定", Left = 170, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 145, 176), ForeColor = Color.White, Font = new Font("微软雅黑", 11F) };
         var btnCancelDialog = new Button { Text = "取消", Left = 310, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Color.Gray, Font = new Font("微软雅黑", 11F) };
 
-        btnOk.Click += (s, e) =>
+        void btnOkClick()
         {
             if (listBox.SelectedIndex >= 0)
             {
@@ -151,9 +185,10 @@ public partial class CrossDbCopyTableForm : Form
                     dialog.Close();
                 }
             }
-        };
+        }
+        btnOk.Click += (s, e) => btnOkClick();
         btnCancelDialog.Click += (s, e) => dialog.Close();
-        listBox.DoubleClick += (s, e) => btnOk.PerformClick();
+        listBox.DoubleClick += (s, e) => btnOkClick();
 
         dialog.Controls.Add(btnOk);
         dialog.Controls.Add(btnCancelDialog);
@@ -224,7 +259,7 @@ public partial class CrossDbCopyTableForm : Form
             progressBar.Value = 100;
             lblProgress.Text = "复制完成";
             MessageBox.Show("成功复制 " + objectNames.Count + " 个对象！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            this.Close();
+            // 不自动关闭，方便继续操作
         }
         else
         {
@@ -321,6 +356,38 @@ public partial class CrossDbCopyTableForm : Form
                     // 创建目标对象
                     using var createCmd = new Microsoft.Data.SqlClient.SqlCommand(script, tgtConn);
                     createCmd.ExecuteNonQuery();
+
+                    // 如果是表结构，同时复制触发器
+                    if (objectType == "U")
+                    {
+                        this.Invoke(new Action(() =>
+                        {
+                            lblProgress.Text = $"正在复制触发器... ({objectName})";
+                        }));
+                        
+                        var triggers = GetTriggersForTable(srcConn, objectName);
+                        Debug.WriteLine($"表 {objectName} 有 {triggers.Count} 个触发器");
+                        
+                        if (triggers.Count == 0)
+                        {
+                            Debug.WriteLine($"警告: 表 {objectName} 没有找到触发器（或查询失败）");
+                        }
+                        
+                        foreach (var triggerScript in triggers)
+                        {
+                            try
+                            {
+                                Debug.WriteLine($"完整触发器脚本:\n{triggerScript}\n=========");
+                                using var triggerCmd = new Microsoft.Data.SqlClient.SqlCommand(triggerScript, tgtConn);
+                                triggerCmd.ExecuteNonQuery();
+                                Debug.WriteLine("触发器执行成功");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"复制触发器失败: {ex.Message}");
+                            }
+                        }
+                    }
                 }
 
                 return true;
@@ -410,6 +477,89 @@ public partial class CrossDbCopyTableForm : Form
             Debug.WriteLine("生成建表脚本失败: " + ex.Message);
             return null;
         }
+    }
+
+    // ========== 触发器 ==========
+    private List<string> GetTriggersForTable(Microsoft.Data.SqlClient.SqlConnection conn, string tableName)
+    {
+        var triggers = new List<string>();
+        try
+        {
+            // sys.triggers 没有 schema_id，需要通过 sys.objects 获取
+            var sql = @"
+                SELECT 
+                    t.name AS trigger_name,
+                    o.type_desc AS trigger_type,
+                    m.definition
+                FROM sys.triggers t
+                JOIN sys.sql_modules m ON t.object_id = m.object_id
+                JOIN sys.objects o ON t.object_id = o.object_id
+                WHERE t.parent_id = OBJECT_ID(@tableName)"
+;
+            using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@tableName", tableName);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var triggerName = reader["trigger_name"]?.ToString() ?? "";
+                var triggerType = reader["trigger_type"]?.ToString() ?? "SQL_TRIGGER";
+                var triggerDef = reader["definition"]?.ToString();
+                
+                Debug.WriteLine($"触发器名称: {triggerName}, 类型: {triggerType}");
+                Debug.WriteLine($"触发器定义前100字符: {triggerDef?.Substring(0, Math.Min(100, triggerDef.Length))}");
+                
+                if (!string.IsNullOrEmpty(triggerDef))
+                {
+                    var trimmed = triggerDef.Trim();
+                    
+                    // 检查definition是否已包含CREATE TRIGGER头，可能嵌在注释中间（如 Author/Description 注释块之后）
+                    var createIdx = trimmed.ToUpperInvariant().IndexOf("CREATE TRIGGER");
+                    if (createIdx >= 0)
+                    {
+                        // 取从CREATE TRIGGER开始的部分（忽略前面的注释块）
+                        var actualScript = trimmed.Substring(createIdx).Trim();
+                        triggers.Add(actualScript);
+                    }
+                    else
+                    {
+                        // 没有CREATE TRIGGER，说明definition只有AS之后的部分，需要手动构建
+                        var eventSql = @"
+                            SELECT te.type_desc FROM sys.trigger_events te
+                            WHERE te.object_id = OBJECT_ID(@triggerName)"
+;
+                        using var evtCmd = new Microsoft.Data.SqlClient.SqlCommand(eventSql, conn);
+                        evtCmd.Parameters.AddWithValue("@triggerName", triggerName);
+                        var events = new List<string>();
+                        try
+                        {
+                            using var evtReader = evtCmd.ExecuteReader();
+                            while (evtReader.Read())
+                            {
+                                events.Add(evtReader["type_desc"]?.ToString() ?? "");
+                            }
+                            evtReader.Close();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"查触发器事件失败: {ex.Message}");
+                        }
+                        
+                        var eventClause = events.Count > 0 
+                            ? string.Join(", ", events.Select(e => e.Replace("SQL_TRIGGER_EVENT_", "").Replace("_", " ")).ToArray())
+                            : "INSERT";
+                        
+                        triggers.Add($"CREATE TRIGGER [{triggerName}] ON [{tableName}] FOR {eventClause} AS{trimmed}");
+                    }
+                }
+            }
+            reader.Close();
+            Debug.WriteLine($"找到 {triggers.Count} 个触发器 for {tableName}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"获取触发器失败: {ex.Message}");
+        }
+        return triggers;
     }
 
     // ========== 视图 ==========

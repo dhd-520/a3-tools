@@ -33,6 +33,8 @@ public partial class SearchFrontendMenuForm : Form
     {
         _context = context;
         InitializeComponent();
+        FormHotkeyHelper.Setup(this, () => BtnSearch_Click(this, EventArgs.Empty));
+        this.KeyDown += (s, e) => { if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { SelectAccount(); e.SuppressKeyPress = true; } };
     }
 
     private void InitializeComponent()
@@ -309,6 +311,11 @@ public partial class SearchFrontendMenuForm : Form
 
     private void BtnSelectSource_Click(object? sender, EventArgs e)
     {
+        SelectAccount();
+    }
+
+    private void SelectAccount()
+    {
         var accounts = _context.GetAllAccounts();
         if (accounts == null || accounts.Count == 0)
         {
@@ -316,15 +323,88 @@ public partial class SearchFrontendMenuForm : Form
             return;
         }
 
-        using var form = new AccountSelectForm(accounts);
-        if (form.ShowDialog() == DialogResult.OK && form.SelectedAccount != null)
+        using var dialog = new Form
         {
-            _selectedAccount = form.SelectedAccount;
-            txtSourceServer.Text = _selectedAccount.Database;
-            txtSourceDbName.Text = _selectedAccount.DatabaseName;
-            txtSourceUser.Text = _selectedAccount.DbUser;
-            txtSourcePassword.Text = _selectedAccount.DbPassword;
+            Text = "选择账套",
+            Size = new Size(600, 600),
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            BackColor = Color.White
+        };
+
+        var lbl = new Label { Text = "请选择账套（支持搜索）", Left = 20, Top = 15, Width = 540, Height = 25, Font = new Font("微软雅黑", 11F) };
+        dialog.Controls.Add(lbl);
+
+        var txtSearch = new TextBox
+        {
+            Left = 20, Top = 45, Width = 540, Height = 30,
+            Font = new Font("微软雅黑", 11F),
+            PlaceholderText = "输入账套编码或名称搜索..."
+        };
+        dialog.Controls.Add(txtSearch);
+
+        var listBox = new ListBox { Left = 20, Top = 85, Width = 540, Height = 380, Font = new Font("微软雅黑", 11F) };
+        dialog.Controls.Add(listBox);
+
+        void PopulateList(string filter)
+        {
+            listBox.Items.Clear();
+            foreach (var acc in accounts)
+            {
+                var item = acc.Code + " - " + acc.Name;
+                bool matchCode = (acc.Code ?? "").Contains(filter, StringComparison.OrdinalIgnoreCase);
+                bool matchName = (acc.Name ?? "").Contains(filter, StringComparison.OrdinalIgnoreCase);
+                bool matchPinyin = (acc.Pinyin ?? "").Contains(filter.ToLower(), StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrEmpty(filter) || matchCode || matchName || matchPinyin)
+                    listBox.Items.Add(item);
+            }
         }
+
+        PopulateList("");
+        txtSearch.TextChanged += (s, e) => PopulateList(txtSearch.Text);
+
+        // 快捷键
+        dialog.KeyPreview = true;
+        bool justFocused = false;
+        dialog.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Oemtilde) { txtSearch.Focus(); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.Escape) { dialog.Close(); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.Enter) { if (listBox.SelectedIndex >= 0) btnOkClick(); e.SuppressKeyPress = true; }
+            else if ((e.KeyCode == Keys.Up || e.KeyCode == Keys.Down) && !listBox.Focused && listBox.Items.Count > 0) { listBox.Focus(); listBox.SelectedIndex = 0; justFocused = true; e.SuppressKeyPress = true; }
+            else if (justFocused && (e.KeyCode == Keys.Up || e.KeyCode == Keys.Down)) { justFocused = false; e.SuppressKeyPress = true; }
+        };
+        txtSearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Oemtilde) { txtSearch.SelectionStart = 0; txtSearch.SelectionLength = txtSearch.Text.Length; e.SuppressKeyPress = true; } };
+
+        var btnOk = new Button { Text = "确定", Left = 170, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 145, 176), ForeColor = Color.White, Font = new Font("微软雅黑", 11F) };
+        var btnCancelDialog = new Button { Text = "取消", Left = 310, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Color.Gray, Font = new Font("微软雅黑", 11F) };
+
+        void btnOkClick()
+        {
+            if (listBox.SelectedIndex >= 0)
+            {
+                var selectedText = listBox.SelectedItem?.ToString() ?? "";
+                var selectedAcc = accounts.FirstOrDefault(a => (a.Code + " - " + a.Name) == selectedText);
+                if (selectedAcc != null)
+                {
+                    _selectedAccount = selectedAcc;
+                    txtSourceServer.Text = selectedAcc.Database ?? "";
+                    txtSourceDbName.Text = selectedAcc.DatabaseName ?? "";
+                    txtSourceUser.Text = selectedAcc.DbUser ?? "";
+                    txtSourcePassword.Text = selectedAcc.DbPassword ?? "";
+                    dialog.Close();
+                }
+            }
+        }
+        btnOk.Click += (s, e) => btnOkClick();
+        btnCancelDialog.Click += (s, e) => dialog.Close();
+        listBox.DoubleClick += (s, e) => btnOkClick();
+
+        dialog.Controls.Add(btnOk);
+        dialog.Controls.Add(btnCancelDialog);
+        dialog.ShowDialog();
     }
 
     private void BtnSearch_Click(object? sender, EventArgs e)

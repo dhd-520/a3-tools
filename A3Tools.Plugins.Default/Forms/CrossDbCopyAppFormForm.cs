@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
@@ -17,6 +17,11 @@ public partial class CrossDbCopyAppFormForm : Form
         _context = context;
         _currentAccount = currentAccount;
         InitializeComponent();
+        FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
+        this.KeyDown += (s, e) => {
+            if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
+        };
     }
 
     private void BtnSelectSource_Click(object? sender, EventArgs e)
@@ -90,8 +95,46 @@ public partial class CrossDbCopyAppFormForm : Form
 
         PopulateList("");
         txtSearch.TextChanged += (s, e) => PopulateList(txtSearch.Text);
-
+        // 快捷键：键定位搜索框，上/下键快速进入列表选择，ESC关闭，Enter确认
+        dialog.KeyPreview = true;
+        bool justFocused = false;
+        dialog.KeyDown += (s, e) => {
+            if (e.KeyCode == Keys.Oemtilde) { txtSearch.Focus(); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.Escape) { dialog.Close(); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.Enter) { if (listBox.SelectedIndex >= 0) btnOkClick(); e.SuppressKeyPress = true; }
+            else if ((e.KeyCode == Keys.Up || e.KeyCode == Keys.Down) && !listBox.Focused && listBox.Items.Count > 0) { listBox.Focus(); listBox.SelectedIndex = 0; justFocused = true; e.SuppressKeyPress = true; }
+            else if (justFocused && (e.KeyCode == Keys.Up || e.KeyCode == Keys.Down)) { justFocused = false; e.SuppressKeyPress = true; }
+        };
+        txtSearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Oemtilde) { txtSearch.SelectionStart = 0; txtSearch.SelectionLength = txtSearch.Text.Length; e.SuppressKeyPress = true; } };
         var btnOk = new Button { Text = "确定", Left = 170, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 145, 176), ForeColor = Color.White, Font = new Font("微软雅黑", 11F) };
+        
+        void btnOkClick()
+        {
+            if (listBox.SelectedIndex >= 0)
+            {
+                var selectedText = listBox.SelectedItem?.ToString() ?? "";
+                var selectedAcc = accounts.FirstOrDefault(a => (a.Code + " - " + a.Name) == selectedText);
+                if (selectedAcc != null)
+                {
+                    if (isSource)
+                    {
+                        txtSourceServer.Text = selectedAcc.Database ?? "";
+                        txtSourceDbName.Text = selectedAcc.DatabaseName ?? "";
+                        txtSourceUser.Text = selectedAcc.DbUser ?? "";
+                        txtSourcePassword.Text = selectedAcc.DbPassword ?? "";
+                    }
+                    else
+                    {
+                        txtTargetServer.Text = selectedAcc.Database ?? "";
+                        txtTargetDbName.Text = selectedAcc.DatabaseName ?? "";
+                        txtTargetUser.Text = selectedAcc.DbUser ?? "";
+                        txtTargetPassword.Text = selectedAcc.DbPassword ?? "";
+                    }
+                    dialog.Close();
+                }
+            }
+        }
+        btnOk.Click += (s, e) => btnOkClick();
         var btnCancelDialog = new Button { Text = "取消", Left = 310, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Color.Gray, Font = new Font("微软雅黑", 11F) };
 
         btnOk.Click += (s, e) =>
@@ -121,7 +164,7 @@ public partial class CrossDbCopyAppFormForm : Form
             }
         };
         btnCancelDialog.Click += (s, e) => dialog.Close();
-        listBox.DoubleClick += (s, e) => btnOk.PerformClick();
+        listBox.DoubleClick += (s, e) => btnOkClick();
 
         dialog.Controls.Add(btnOk);
         dialog.Controls.Add(btnCancelDialog);

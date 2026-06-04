@@ -298,6 +298,12 @@ public partial class MainForm : Form, IToolContext
             FocusSearchBox();
             e.SuppressKeyPress = true;
         }
+        // Root模式下Ctrl+C快速复制账套信息
+        else if (_isRootMode && e.KeyData == (Keys.C | Keys.Control))
+        {
+            CopySelectedAccountSilently();
+            e.SuppressKeyPress = true;
+        }
     }
 
     private void DgvAccounts_ColumnWidthChanged(object? sender, DataGridViewColumnEventArgs e)
@@ -1342,6 +1348,88 @@ public partial class MainForm : Form, IToolContext
 
         Clipboard.SetText(info.ToString());
         MessageBox.Show("账套信息已复制到剪贴板！" + (_isRootMode ? "（包含明文密码）" : ""), "复制成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    /// <summary>
+    /// Root模式快捷键复制：不弹窗，用Toast提示2秒后自动消失
+    /// </summary>
+    private void CopySelectedAccountSilently()
+    {
+        // 获取当前选中行
+        if (this.dgvAccounts.SelectedRows.Count == 0)
+        {
+            if (this.dgvAccounts.CurrentRow != null && this.dgvAccounts.CurrentRow.Index >= 0)
+                this.dgvAccounts.Rows[this.dgvAccounts.CurrentRow.Index].Selected = true;
+        }
+
+        if (this.dgvAccounts.SelectedRows.Count == 0) return;
+
+
+        var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
+        if (account == null) return;
+
+
+        var info = new System.Text.StringBuilder();
+        info.AppendLine($"代码：{account.Code}");
+        info.AppendLine($"名称：{account.Name}");
+        info.AppendLine($"账套地址：{account.Server}");
+        info.AppendLine($"账套密码：{account.ServerPassword}");
+        info.AppendLine($"数据库地址：{account.Database}");
+        info.AppendLine($"数据库名称：{account.DatabaseName}");
+        info.AppendLine($"DB用户：{account.DbUser}");
+        info.AppendLine($"DB密码：{account.DbPassword}");
+        info.AppendLine($"远程方式：{account.RemoteType}");
+        info.AppendLine($"远程地址：{account.RemoteAddress}");
+        info.AppendLine($"远程用户：{account.RemoteUser}");
+        info.AppendLine($"远程密码：{account.RemotePassword}");
+
+        Clipboard.SetText(info.ToString());
+        ShowToast("账套信息已复制（包含明文密码）");
+    }
+
+    /// <summary>
+    /// 显示Toast提示，2秒后自动消失
+    /// </summary>
+    private void ShowToast(string message, int durationMs = 2000)
+    {
+        var toast = new Form
+        {
+            FormBorderStyle = FormBorderStyle.None,
+            BackColor = Color.FromArgb(40, 40, 40),
+            Size = new Size(320, 40),
+            StartPosition = FormStartPosition.Manual,
+            ShowInTaskbar = false,
+            TopMost = true
+        };
+
+        // 定位到主窗体下方居中
+        var mainPos = this.Bounds;
+        toast.Location = new Point(
+            mainPos.Left + (mainPos.Width - toast.Width) / 2,
+            mainPos.Top + mainPos.Height - toast.Height - 60
+        );
+
+        var lbl = new Label
+        {
+            Text = message,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.White,
+            Font = new Font("微软雅黑", 10F)
+        };
+        toast.Controls.Add(lbl);
+
+
+        toast.Show();
+        var timer = new System.Windows.Forms.Timer { Interval = durationMs };
+        timer.Tick += (s, e) =>
+        {
+            timer.Stop();
+            timer.Dispose();
+            toast.Close();
+            toast.Dispose();
+        };
+        timer.Start();
     }
 
     private void MenuExit_Click(object? sender, EventArgs e)

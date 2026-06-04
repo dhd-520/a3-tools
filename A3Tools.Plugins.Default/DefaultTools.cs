@@ -109,7 +109,7 @@ public class CrossDbCopyTableTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyTableForm(context, account);
-        form.ShowDialog();
+        form.Show();
     }
 }
 
@@ -124,7 +124,7 @@ public class CrossDbCopyWinFormTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyFormForm(context, account);
-        form.ShowDialog();
+        form.Show();
     }
 }
 
@@ -139,7 +139,7 @@ public class CrossDbCopyAppFormTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyAppFormForm(context, account);
-        form.ShowDialog();
+        form.Show();
     }
 }
 
@@ -154,7 +154,7 @@ public class SearchBackendFormTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.SearchBackendForm(context);
-        form.ShowDialog();
+        form.Show();
     }
 }
 
@@ -169,7 +169,7 @@ public class SearchFrontendMenuTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.SearchFrontendMenuForm(context);
-        form.ShowDialog();
+        form.Show();
     }
 }
 
@@ -184,7 +184,7 @@ public class CrossDbCopyObjectLinkTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyObjectLinkForm(context, account);
-        form.ShowDialog();
+        form.Show();
     }
 }
 
@@ -199,6 +199,6 @@ public class CrossDbCopyReportTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyReportForm(context, account);
-        form.ShowDialog();
+        form.Show();
     }
 }
