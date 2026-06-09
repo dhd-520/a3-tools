@@ -1,4 +1,7 @@
 ﻿using System.Diagnostics;
+using System.Drawing;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
@@ -11,6 +14,7 @@ public partial class CrossDbCopyReportForm : Form
 {
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
+    private System.Data.DataTable? _searchResults;
 
     public CrossDbCopyReportForm(IToolContext context, Account? currentAccount)
     {
@@ -21,6 +25,49 @@ public partial class CrossDbCopyReportForm : Form
         this.KeyDown += (s, e) => {
             if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
+        };
+
+        // 数据网格视图支持多选
+        dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        dgvSearchResults.MultiSelect = true;
+
+        // 选中状态变化时，同步checkbox勾选状态
+        dgvSearchResults.SelectionChanged += (s, e) =>
+        {
+            if (!dgvSearchResults.Columns.Contains("chk")) return;
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null)
+                {
+                    checkCell.Value = row.Selected;
+                }
+            }
+        };
+
+        // 点击表头处理：点击checkbox列全选/取消全选
+        dgvSearchResults.ColumnHeaderMouseClick += (s, e) =>
+        {
+            if (!dgvSearchResults.Columns.Contains("chk") || e.ColumnIndex != 0) return;
+            var allChecked = true;
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell == null || checkCell.Value == null || !(bool)checkCell.Value)
+                {
+                    allChecked = false;
+                    break;
+                }
+            }
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null)
+                {
+                    checkCell.Value = !allChecked;
+                    row.Selected = !allChecked;
+                }
+            }
         };
     }
 
@@ -447,5 +494,181 @@ public partial class CrossDbCopyReportForm : Form
         }
         reader.Close();
         return columns;
+    }
+
+    private void BtnSearch_Click(object? sender, EventArgs e)
+    {
+        // 验证源数据库连接信息
+        if (string.IsNullOrWhiteSpace(txtSourceServer.Text))
+        {
+            MessageBox.Show("请填写源数据库地址！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(txtSourceDbName.Text))
+        {
+            MessageBox.Show("请填写源数据库名称！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var keyword = txtSearchKeyword.Text.Trim();
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            MessageBox.Show("请输入搜索关键字！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            txtSearchKeyword.Focus();
+            return;
+        }
+
+        lblSearchProgress.Text = "查询中...";
+        lblSearchProgress.ForeColor = Color.Blue;
+        dgvSearchResults.DataSource = null;
+        btnSearch.Enabled = false;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                var server = txtSourceServer.Text.Trim();
+                var dbName = txtSourceDbName.Text.Trim();
+                var user = txtSourceUser.Text.Trim();
+                var password = txtSourcePassword.Text;
+
+                var connString = string.IsNullOrEmpty(user)
+                    ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
+                    : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.Decrypt(password)};TrustServerCertificate=True;";
+
+                var sql = $"SELECT GUID, CODE, NAME, NOTES FROM S_REPORT WHERE CODE LIKE '%{keyword}%' OR NAME LIKE '%{keyword}%' ORDER BY NAME";
+
+                using var conn = new SqlConnection(connString);
+                using var cmd = new SqlCommand(sql, conn);
+                using var adapter = new SqlDataAdapter(cmd);
+                var dt = new System.Data.DataTable();
+                adapter.Fill(dt);
+
+                this.Invoke(new Action(() =>
+                {
+                    _searchResults = dt;
+                    // 先移除旧的选择列（如果存在）
+                    if (dgvSearchResults.Columns.Contains("chk"))
+                    {
+                        dgvSearchResults.Columns.Remove("chk");
+                    }
+                    // 先设置数据源
+                    dgvSearchResults.DataSource = dt;
+                    // 再插入checkbox列作为第一列
+                    var checkCol = new DataGridViewCheckBoxColumn();
+                    checkCol.HeaderText = "选择";
+                    checkCol.Width = 50;
+                    checkCol.Name = "chk";
+                    dgvSearchResults.Columns.Insert(0, checkCol);
+                    dgvSearchResults.AutoResizeColumns();
+                    // 隐藏GUID列
+                    if (dgvSearchResults.Columns.Contains("GUID"))
+                    {
+                        dgvSearchResults.Columns["GUID"].Visible = false;
+                    }
+                    // 重命名列标题
+                    if (dgvSearchResults.Columns.Contains("CODE"))
+                        dgvSearchResults.Columns["CODE"].HeaderText = "代码";
+                    if (dgvSearchResults.Columns.Contains("NAME"))
+                        dgvSearchResults.Columns["NAME"].HeaderText = "名称";
+                    if (dgvSearchResults.Columns.Contains("NOTES"))
+                        dgvSearchResults.Columns["NOTES"].HeaderText = "备注";
+                    // 默认选中第一行并同步checkbox
+                    if (dgvSearchResults.Rows.Count > 0)
+                    {
+                        dgvSearchResults.Rows[0].Selected = true;
+                    }
+                    // 同步所有选中行的checkbox状态
+                    foreach (DataGridViewRow row in dgvSearchResults.Rows)
+                    {
+                        var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                        if (checkCell != null) checkCell.Value = row.Selected;
+                    }
+                    lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
+                    lblSearchProgress.ForeColor = Color.Green;
+                }));
+            }
+            catch (Exception ex)
+            {
+                this.Invoke(new Action(() =>
+                {
+                    lblSearchProgress.Text = "查询失败";
+                    lblSearchProgress.ForeColor = Color.Red;
+                    MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }));
+            }
+            finally
+            {
+                this.Invoke(new Action(() =>
+                {
+                    btnSearch.Enabled = true;
+                }));
+            }
+        });
+    }
+
+    private void BtnAddSelected_Click(object? sender, EventArgs e)
+    {
+        if (dgvSearchResults.SelectedRows.Count == 0)
+        {
+            MessageBox.Show("请先选择要添加的报表！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var selectedCodes = new List<string>();
+        foreach (DataGridViewRow row in dgvSearchResults.SelectedRows)
+        {
+            var code = row.Cells["代码"].Value?.ToString();
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                selectedCodes.Add(code);
+            }
+        }
+
+        if (selectedCodes.Count == 0) return;
+
+        // 追加到现有内容
+        var currentText = txtReportCode.Text.Trim();
+        var separator = string.IsNullOrEmpty(currentText) ? "" : ";";
+
+        var existingCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(currentText))
+        {
+            currentText.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .ToList()
+                .ForEach(c => existingCodes.Add(c.Trim()));
+        }
+
+        var newCodes = selectedCodes.Where(c => !existingCodes.Contains(c)).ToList();
+        if (newCodes.Count == 0)
+        {
+            MessageBox.Show("选中的报表已全部添加！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var addedText = string.Join(";", newCodes);
+        txtReportCode.Text = currentText + separator + addedText;
+
+        lblSearchProgress.Text = $"已添加 {newCodes.Count} 个报表到列表";
+        lblSearchProgress.ForeColor = Color.Green;
+    }
+
+    private void BtnClearSelected_Click(object? sender, EventArgs e)
+    {
+        // 清空ReportCode
+        txtReportCode.Text = "";
+        // 清空选中状态
+        dgvSearchResults.ClearSelection();
+        // 同步checkbox
+        if (dgvSearchResults.Columns.Contains("chk"))
+        {
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null) checkCell.Value = false;
+            }
+        }
+        lblSearchProgress.Text = "已清空选项";
+        lblSearchProgress.ForeColor = Color.Gray;
     }
 }
