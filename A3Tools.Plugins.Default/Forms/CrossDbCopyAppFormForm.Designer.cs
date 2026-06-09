@@ -5,6 +5,14 @@ partial class CrossDbCopyAppFormForm
     private System.ComponentModel.IContainer components = null;
 
     private TableLayoutPanel tableLayoutPanel1;
+    private Panel pnlSearch;
+    private Label lblSearchKeyword;
+    private TextBox txtSearchKeyword;
+    private Button btnSearch;
+    private Button btnAddSelected;
+    private Button btnClearSelected;
+    private DataGridView dgvSearchResults;
+    private Label lblSearchProgress;
     private TableLayoutPanel sourceLayout;
     private Label lblSourceTitle;
     private Label lblSourceServer;
@@ -78,7 +86,17 @@ partial class CrossDbCopyAppFormForm
         btnCancel = new Button();
         progressBar = new ProgressBar();
         lblProgress = new Label();
+        pnlSearch = new Panel();
+        lblSearchKeyword = new Label();
+        txtSearchKeyword = new TextBox();
+        btnSearch = new Button();
+        btnAddSelected = new Button();
+        btnClearSelected = new Button();
+        dgvSearchResults = new DataGridView();
+        lblSearchProgress = new Label();
         tableLayoutPanel1.SuspendLayout();
+        pnlSearch.SuspendLayout();
+        ((System.ComponentModel.ISupportInitialize)dgvSearchResults).BeginInit();
         sourceLayout.SuspendLayout();
         targetLayout.SuspendLayout();
         SuspendLayout();
@@ -94,21 +112,24 @@ partial class CrossDbCopyAppFormForm
         tableLayoutPanel1.Controls.Add(txtObjectGuids, 0, 2);
         tableLayoutPanel1.Controls.Add(lblObjectGuidsHint, 0, 3);
         tableLayoutPanel1.Controls.Add(chkDeleteFirst, 1, 3);
-        tableLayoutPanel1.Controls.Add(btnConfirm, 0, 4);
-        tableLayoutPanel1.Controls.Add(btnCancel, 1, 4);
-        tableLayoutPanel1.Controls.Add(progressBar, 0, 5);
-        tableLayoutPanel1.Controls.Add(lblProgress, 1, 5);
+        tableLayoutPanel1.Controls.Add(pnlSearch, 0, 4);
+        tableLayoutPanel1.SetColumnSpan(pnlSearch, 2);
+        tableLayoutPanel1.Controls.Add(btnConfirm, 0, 5);
+        tableLayoutPanel1.Controls.Add(btnCancel, 1, 5);
+        tableLayoutPanel1.Controls.Add(progressBar, 0, 6);
+        tableLayoutPanel1.Controls.Add(lblProgress, 1, 6);
         tableLayoutPanel1.Dock = DockStyle.Fill;
         tableLayoutPanel1.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         tableLayoutPanel1.Location = new Point(0, 0);
         tableLayoutPanel1.Margin = new Padding(3, 10, 3, 3);
         tableLayoutPanel1.Name = "tableLayoutPanel1";
         tableLayoutPanel1.Padding = new Padding(10);
-        tableLayoutPanel1.RowCount = 6;
+        tableLayoutPanel1.RowCount = 7;
         tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
+        tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.Size = new Size(873, 690);
@@ -498,6 +519,110 @@ partial class CrossDbCopyAppFormForm
         lblProgress.TabIndex = 19;
         lblProgress.Text = "就绪";
         // 
+        // pnlSearch
+        // 
+        pnlSearch.Controls.Add(lblSearchKeyword);
+        pnlSearch.Controls.Add(txtSearchKeyword);
+        pnlSearch.Controls.Add(btnSearch);
+        pnlSearch.Controls.Add(btnAddSelected);
+        pnlSearch.Controls.Add(btnClearSelected);
+        pnlSearch.Controls.Add(lblSearchProgress);
+        pnlSearch.Controls.Add(dgvSearchResults);
+        pnlSearch.Dock = DockStyle.Fill;
+        pnlSearch.Location = new Point(3, 623);
+        pnlSearch.Name = "pnlSearch";
+        pnlSearch.Size = new Size(847, 200);
+        pnlSearch.TabIndex = 25;
+        // 
+        // lblSearchKeyword
+        // 
+        lblSearchKeyword.AutoSize = true;
+        lblSearchKeyword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSearchKeyword.Location = new Point(10, 10);
+        lblSearchKeyword.Name = "lblSearchKeyword";
+        lblSearchKeyword.Size = new Size(158, 31);
+        lblSearchKeyword.TabIndex = 26;
+        lblSearchKeyword.Text = "搜索关键字：";
+        // 
+        // txtSearchKeyword
+        // 
+        txtSearchKeyword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtSearchKeyword.Location = new Point(158, 7);
+        txtSearchKeyword.Name = "txtSearchKeyword";
+        txtSearchKeyword.PlaceholderText = "输入APP表单名称...";
+        txtSearchKeyword.Size = new Size(377, 38);
+        txtSearchKeyword.TabIndex = 27;
+        // 
+        // btnSearch
+        // 
+        btnSearch.BackColor = Color.FromArgb(24, 145, 176);
+        btnSearch.FlatAppearance.BorderSize = 0;
+        btnSearch.FlatStyle = FlatStyle.Flat;
+        btnSearch.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnSearch.ForeColor = Color.White;
+        btnSearch.Location = new Point(570, 5);
+        btnSearch.Name = "btnSearch";
+        btnSearch.Size = new Size(88, 41);
+        btnSearch.TabIndex = 28;
+        btnSearch.Text = "查询";
+        btnSearch.UseVisualStyleBackColor = false;
+        btnSearch.Click += BtnSearch_Click;
+        // 
+        // btnAddSelected
+        // 
+        btnAddSelected.BackColor = Color.FromArgb(57, 181, 74);
+        btnAddSelected.FlatAppearance.BorderSize = 0;
+        btnAddSelected.FlatStyle = FlatStyle.Flat;
+        btnAddSelected.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnAddSelected.ForeColor = Color.White;
+        btnAddSelected.Location = new Point(679, 4);
+        btnAddSelected.Name = "btnAddSelected";
+        btnAddSelected.Size = new Size(144, 41);
+        btnAddSelected.TabIndex = 29;
+        btnAddSelected.Text = "添加选中";
+        btnAddSelected.UseVisualStyleBackColor = false;
+        btnAddSelected.Click += BtnAddSelected_Click;
+        // 
+        // btnClearSelected
+        // 
+        btnClearSelected.BackColor = Color.FromArgb(200, 80, 80);
+        btnClearSelected.FlatAppearance.BorderSize = 0;
+        btnClearSelected.FlatStyle = FlatStyle.Flat;
+        btnClearSelected.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnClearSelected.ForeColor = Color.White;
+        btnClearSelected.Location = new Point(843, 4);
+        btnClearSelected.Name = "btnClearSelected";
+        btnClearSelected.Size = new Size(141, 41);
+        btnClearSelected.TabIndex = 32;
+        btnClearSelected.Text = "清空选项";
+        btnClearSelected.UseVisualStyleBackColor = false;
+        btnClearSelected.Click += BtnClearSelected_Click;
+        // 
+        // lblSearchProgress
+        // 
+        lblSearchProgress.AutoSize = true;
+        lblSearchProgress.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSearchProgress.ForeColor = Color.Gray;
+        lblSearchProgress.Location = new Point(605, 10);
+        lblSearchProgress.Name = "lblSearchProgress";
+        lblSearchProgress.Size = new Size(0, 28);
+        lblSearchProgress.TabIndex = 30;
+        // 
+        // dgvSearchResults
+        // 
+        dgvSearchResults.AllowUserToAddRows = false;
+        dgvSearchResults.AllowUserToDeleteRows = false;
+        dgvSearchResults.BackgroundColor = Color.White;
+        dgvSearchResults.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+        dgvSearchResults.Location = new Point(10, 50);
+        dgvSearchResults.Name = "dgvSearchResults";
+        dgvSearchResults.ReadOnly = true;
+        dgvSearchResults.RowHeadersWidth = 72;
+        dgvSearchResults.RowTemplate.Height = 25;
+        dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        dgvSearchResults.Size = new Size(825, 135);
+        dgvSearchResults.TabIndex = 31;
+        // 
         // CrossDbCopyAppFormForm
         // 
         AutoScaleDimensions = new SizeF(14F, 30F);
@@ -517,6 +642,9 @@ partial class CrossDbCopyAppFormForm
         sourceLayout.PerformLayout();
         targetLayout.ResumeLayout(false);
         targetLayout.PerformLayout();
+        pnlSearch.ResumeLayout(false);
+        pnlSearch.PerformLayout();
+        ((System.ComponentModel.ISupportInitialize)dgvSearchResults).EndInit();
         ResumeLayout(false);
     }
 }
