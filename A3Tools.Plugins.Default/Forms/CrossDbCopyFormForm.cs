@@ -21,7 +21,8 @@ public partial class CrossDbCopyFormForm : Form
         _currentAccount = currentAccount;
         InitializeComponent();
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
-        this.KeyDown += (s, e) => {
+        this.KeyDown += (s, e) =>
+        {
             if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
         };
@@ -29,6 +30,45 @@ public partial class CrossDbCopyFormForm : Form
         // 数据网格视图支持多选
         dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         dgvSearchResults.MultiSelect = true;
+
+        // 选中状态变化时，同步checkbox勾选状态
+        dgvSearchResults.SelectionChanged += (s, e) =>
+        {
+            if (!dgvSearchResults.Columns.Contains("chk")) return;
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null)
+                {
+                    checkCell.Value = row.Selected;
+                }
+            }
+        };
+
+        // 点击表头处理：点击checkbox列全选/取消全选
+        dgvSearchResults.ColumnHeaderMouseClick += (s, e) =>
+        {
+            if (!dgvSearchResults.Columns.Contains("chk") || e.ColumnIndex != 0) return;
+            var allChecked = true;
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell == null || checkCell.Value == null || !(bool)checkCell.Value)
+                {
+                    allChecked = false;
+                    break;
+                }
+            }
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null)
+                {
+                    checkCell.Value = !allChecked;
+                    row.Selected = !allChecked;
+                }
+            }
+        };
     }
 
     private void BtnSelectSource_Click(object? sender, EventArgs e)
@@ -71,7 +111,10 @@ public partial class CrossDbCopyFormForm : Form
 
         var txtSearch = new TextBox
         {
-            Left = 20, Top = 45, Width = 540, Height = 30,
+            Left = 20,
+            Top = 45,
+            Width = 540,
+            Height = 30,
             Font = new Font("微软雅黑", 11F),
             PlaceholderText = "输入账套编码或名称搜索..."
         };
@@ -106,7 +149,8 @@ public partial class CrossDbCopyFormForm : Form
         // 快捷键：键定位搜索框，上/下键快速进入列表选择，ESC关闭，Enter确认
         dialog.KeyPreview = true;
         bool justFocused = false;
-        dialog.KeyDown += (s, e) => {
+        dialog.KeyDown += (s, e) =>
+        {
             if (e.KeyCode == Keys.Oemtilde) { txtSearch.Focus(); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.Escape) { dialog.Close(); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.Enter) { if (listBox.SelectedIndex >= 0) btnOkClick(); e.SuppressKeyPress = true; }
@@ -115,7 +159,7 @@ public partial class CrossDbCopyFormForm : Form
         };
         txtSearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Oemtilde) { txtSearch.SelectionStart = 0; txtSearch.SelectionLength = txtSearch.Text.Length; e.SuppressKeyPress = true; } };
         var btnOk = new Button { Text = "确定", Left = 170, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 145, 176), ForeColor = Color.White, Font = new Font("微软雅黑", 11F) };
-        
+
         void btnOkClick()
         {
             if (listBox.SelectedIndex >= 0)
@@ -142,7 +186,7 @@ public partial class CrossDbCopyFormForm : Form
                 }
             }
         }
-        btnOk.Click += (s, e) => btnOkClick(); 
+        btnOk.Click += (s, e) => btnOkClick();
         var btnCancelDialog = new Button { Text = "取消", Left = 310, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Color.Gray, Font = new Font("微软雅黑", 11F) };
 
         btnOk.Click += (s, e) =>
@@ -242,8 +286,38 @@ ORDER BY A.NAME";
                 this.Invoke(new Action(() =>
                 {
                     _searchResults = dt;
+                    // 先移除旧的选择列（如果存在）
+                    if (dgvSearchResults.Columns.Contains("chk"))
+                    {
+                        dgvSearchResults.Columns.Remove("chk");
+                    }
+                    // 先设置数据源
                     dgvSearchResults.DataSource = dt;
+                    // 再插入checkbox列作为第一列
+                    var checkCol = new DataGridViewCheckBoxColumn();
+                    checkCol.HeaderText = "选择";
+                    checkCol.Width = 50;
+                    checkCol.Name = "chk";
+                    dgvSearchResults.Columns.Insert(0, checkCol);
                     dgvSearchResults.AutoResizeColumns();
+                    // 隐藏代码列
+                    if (dgvSearchResults.Columns.Contains("代码"))
+                    {
+                        dgvSearchResults.Columns["代码"].Visible = false;
+                    }
+                    // 默认选中第一行并同步checkbox
+                    if (dgvSearchResults.Rows.Count > 0)
+                    {
+                        dgvSearchResults.Rows[0].Selected = true;
+                    }
+                    // 同步所有选中行的checkbox状态
+                    foreach (DataGridViewRow row in dgvSearchResults.Rows)
+                    {
+                        var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                        if (checkCell != null) checkCell.Value = row.Selected;
+                    }
+                    // 将状态信息移到DataGridView下方
+                    lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
                     lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
                     lblSearchProgress.ForeColor = Color.Green;
                 }));
@@ -290,7 +364,7 @@ ORDER BY A.NAME";
         // 追加到现有内容
         var currentText = txtObjectGuids.Text.Trim();
         var separator = string.IsNullOrEmpty(currentText) ? "" : ";";
-        
+
         var existingGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(currentText))
         {
@@ -311,6 +385,14 @@ ORDER BY A.NAME";
 
         lblSearchProgress.Text = $"已添加 {newGuids.Count} 个表单到列表";
         lblSearchProgress.ForeColor = Color.Green;
+    }
+
+    private void BtnClearSelected_Click(object? sender, EventArgs e)
+    {
+        txtObjectGuids.Clear();
+        dgvSearchResults.ClearSelection();
+        lblSearchProgress.Text = "已清空选项";
+        lblSearchProgress.ForeColor = Color.Gray;
     }
 
     private async void BtnConfirm_Click(object? sender, EventArgs e)
