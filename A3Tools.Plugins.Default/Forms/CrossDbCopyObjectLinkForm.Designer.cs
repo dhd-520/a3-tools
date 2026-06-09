@@ -5,6 +5,14 @@ partial class CrossDbCopyObjectLinkForm
     private System.ComponentModel.IContainer components = null;
 
     private System.Windows.Forms.TableLayoutPanel tableLayoutPanel1;
+    private System.Windows.Forms.Panel pnlSearch;
+    private System.Windows.Forms.Label lblSearchKeyword;
+    private System.Windows.Forms.TextBox txtSearchKeyword;
+    private System.Windows.Forms.Button btnSearch;
+    private System.Windows.Forms.Button btnAddSelected;
+    private System.Windows.Forms.Button btnClearSelected;
+    private System.Windows.Forms.DataGridView dgvSearchResults;
+    private System.Windows.Forms.Label lblSearchProgress;
     private System.Windows.Forms.TableLayoutPanel sourceLayout;
     private System.Windows.Forms.Label lblSourceTitle;
     private System.Windows.Forms.Label lblSourceServer;
@@ -78,9 +86,19 @@ partial class CrossDbCopyObjectLinkForm
         this.btnCancel = new System.Windows.Forms.Button();
         this.progressBar = new System.Windows.Forms.ProgressBar();
         this.lblProgress = new System.Windows.Forms.Label();
+        this.pnlSearch = new System.Windows.Forms.Panel();
+        this.lblSearchKeyword = new System.Windows.Forms.Label();
+        this.txtSearchKeyword = new System.Windows.Forms.TextBox();
+        this.btnSearch = new System.Windows.Forms.Button();
+        this.btnAddSelected = new System.Windows.Forms.Button();
+        this.btnClearSelected = new System.Windows.Forms.Button();
+        this.dgvSearchResults = new System.Windows.Forms.DataGridView();
+        this.lblSearchProgress = new System.Windows.Forms.Label();
         this.tableLayoutPanel1.SuspendLayout();
         this.sourceLayout.SuspendLayout();
         this.targetLayout.SuspendLayout();
+        this.pnlSearch.SuspendLayout();
+        ((System.ComponentModel.ISupportInitialize)(this.dgvSearchResults)).BeginInit();
         this.SuspendLayout();
         // 
         // tableLayoutPanel1
@@ -94,24 +112,27 @@ partial class CrossDbCopyObjectLinkForm
         this.tableLayoutPanel1.Controls.Add(this.txtObjectLinkCode, 0, 2);
         this.tableLayoutPanel1.Controls.Add(this.lblObjectLinkCodeHint, 0, 3);
         this.tableLayoutPanel1.Controls.Add(this.chkDeleteFirst, 1, 3);
-        this.tableLayoutPanel1.Controls.Add(this.btnConfirm, 0, 4);
-        this.tableLayoutPanel1.Controls.Add(this.btnCancel, 1, 4);
-        this.tableLayoutPanel1.Controls.Add(this.progressBar, 0, 5);
-        this.tableLayoutPanel1.Controls.Add(this.lblProgress, 1, 5);
+        this.tableLayoutPanel1.Controls.Add(this.pnlSearch, 0, 4);
+        this.tableLayoutPanel1.SetColumnSpan(this.pnlSearch, 2);
+        this.tableLayoutPanel1.Controls.Add(this.btnConfirm, 0, 5);
+        this.tableLayoutPanel1.Controls.Add(this.btnCancel, 1, 5);
+        this.tableLayoutPanel1.Controls.Add(this.progressBar, 0, 6);
+        this.tableLayoutPanel1.Controls.Add(this.lblProgress, 1, 6);
         this.tableLayoutPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
         this.tableLayoutPanel1.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.tableLayoutPanel1.Location = new System.Drawing.Point(0, 0);
         this.tableLayoutPanel1.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
         this.tableLayoutPanel1.Name = "tableLayoutPanel1";
         this.tableLayoutPanel1.Padding = new System.Windows.Forms.Padding(10);
-        this.tableLayoutPanel1.RowCount = 6;
+        this.tableLayoutPanel1.RowCount = 7;
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+        this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.tableLayoutPanel1.Size = new System.Drawing.Size(873, 480);
+        this.tableLayoutPanel1.Size = new System.Drawing.Size(873, 700);
         this.tableLayoutPanel1.TabIndex = 0;
         // 
         // sourceLayout
@@ -500,6 +521,110 @@ partial class CrossDbCopyObjectLinkForm
         this.lblProgress.TabIndex = 19;
         this.lblProgress.Text = "就绪";
         // 
+        // pnlSearch
+        // 
+        this.pnlSearch.Controls.Add(this.lblSearchKeyword);
+        this.pnlSearch.Controls.Add(this.txtSearchKeyword);
+        this.pnlSearch.Controls.Add(this.btnSearch);
+        this.pnlSearch.Controls.Add(this.btnAddSelected);
+        this.pnlSearch.Controls.Add(this.btnClearSelected);
+        this.pnlSearch.Controls.Add(this.lblSearchProgress);
+        this.pnlSearch.Controls.Add(this.dgvSearchResults);
+        this.pnlSearch.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.pnlSearch.Location = new System.Drawing.Point(3, 553);
+        this.pnlSearch.Name = "pnlSearch";
+        this.pnlSearch.Size = new System.Drawing.Size(847, 150);
+        this.pnlSearch.TabIndex = 25;
+        // 
+        // lblSearchKeyword
+        // 
+        this.lblSearchKeyword.AutoSize = true;
+        this.lblSearchKeyword.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.lblSearchKeyword.Location = new System.Drawing.Point(10, 10);
+        this.lblSearchKeyword.Name = "lblSearchKeyword";
+        this.lblSearchKeyword.Size = new System.Drawing.Size(80, 20);
+        this.lblSearchKeyword.TabIndex = 26;
+        this.lblSearchKeyword.Text = "搜索关键字：";
+        // 
+        // txtSearchKeyword
+        // 
+        this.txtSearchKeyword.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.txtSearchKeyword.Location = new System.Drawing.Point(100, 7);
+        this.txtSearchKeyword.Name = "txtSearchKeyword";
+        this.txtSearchKeyword.PlaceholderText = "输入单据流转代码或名称...";
+        this.txtSearchKeyword.Size = new System.Drawing.Size(350, 25);
+        this.txtSearchKeyword.TabIndex = 27;
+        // 
+        // btnSearch
+        // 
+        this.btnSearch.BackColor = System.Drawing.Color.FromArgb(24, 145, 176);
+        this.btnSearch.FlatAppearance.BorderSize = 0;
+        this.btnSearch.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        this.btnSearch.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.btnSearch.ForeColor = System.Drawing.Color.White;
+        this.btnSearch.Location = new System.Drawing.Point(465, 5);
+        this.btnSearch.Name = "btnSearch";
+        this.btnSearch.Size = new System.Drawing.Size(88, 32);
+        this.btnSearch.TabIndex = 28;
+        this.btnSearch.Text = "查询";
+        this.btnSearch.UseVisualStyleBackColor = false;
+        this.btnSearch.Click += new System.EventHandler(this.BtnSearch_Click);
+        // 
+        // btnAddSelected
+        // 
+        this.btnAddSelected.BackColor = System.Drawing.Color.FromArgb(57, 181, 74);
+        this.btnAddSelected.FlatAppearance.BorderSize = 0;
+        this.btnAddSelected.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        this.btnAddSelected.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.btnAddSelected.ForeColor = System.Drawing.Color.White;
+        this.btnAddSelected.Location = new System.Drawing.Point(565, 5);
+        this.btnAddSelected.Name = "btnAddSelected";
+        this.btnAddSelected.Size = new System.Drawing.Size(100, 32);
+        this.btnAddSelected.TabIndex = 29;
+        this.btnAddSelected.Text = "添加选中";
+        this.btnAddSelected.UseVisualStyleBackColor = false;
+        this.btnAddSelected.Click += new System.EventHandler(this.BtnAddSelected_Click);
+        // 
+        // btnClearSelected
+        // 
+        this.btnClearSelected.BackColor = System.Drawing.Color.FromArgb(200, 80, 80);
+        this.btnClearSelected.FlatAppearance.BorderSize = 0;
+        this.btnClearSelected.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        this.btnClearSelected.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.btnClearSelected.ForeColor = System.Drawing.Color.White;
+        this.btnClearSelected.Location = new System.Drawing.Point(680, 5);
+        this.btnClearSelected.Name = "btnClearSelected";
+        this.btnClearSelected.Size = new System.Drawing.Size(100, 32);
+        this.btnClearSelected.TabIndex = 32;
+        this.btnClearSelected.Text = "清空选项";
+        this.btnClearSelected.UseVisualStyleBackColor = false;
+        this.btnClearSelected.Click += new System.EventHandler(this.BtnClearSelected_Click);
+        // 
+        // lblSearchProgress
+        // 
+        this.lblSearchProgress.AutoSize = true;
+        this.lblSearchProgress.Font = new System.Drawing.Font("微软雅黑", 9F);
+        this.lblSearchProgress.ForeColor = System.Drawing.Color.Gray;
+        this.lblSearchProgress.Location = new System.Drawing.Point(790, 10);
+        this.lblSearchProgress.Name = "lblSearchProgress";
+        this.lblSearchProgress.Size = new System.Drawing.Size(0, 17);
+        this.lblSearchProgress.TabIndex = 30;
+        // 
+        // dgvSearchResults
+        // 
+        this.dgvSearchResults.AllowUserToAddRows = false;
+        this.dgvSearchResults.AllowUserToDeleteRows = false;
+        this.dgvSearchResults.BackgroundColor = System.Drawing.Color.White;
+        this.dgvSearchResults.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+        this.dgvSearchResults.Location = new System.Drawing.Point(10, 45);
+        this.dgvSearchResults.Name = "dgvSearchResults";
+        this.dgvSearchResults.ReadOnly = true;
+        this.dgvSearchResults.RowHeadersWidth = 72;
+        this.dgvSearchResults.RowTemplate.Height = 25;
+        this.dgvSearchResults.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+        this.dgvSearchResults.Size = new System.Drawing.Size(825, 95);
+        this.dgvSearchResults.TabIndex = 31;
+        // 
         // CrossDbCopyObjectLinkForm
         // 
         this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 30F);
@@ -519,6 +644,9 @@ partial class CrossDbCopyObjectLinkForm
         this.sourceLayout.PerformLayout();
         this.targetLayout.ResumeLayout(false);
         this.targetLayout.PerformLayout();
+        this.pnlSearch.ResumeLayout(false);
+        this.pnlSearch.PerformLayout();
+        ((System.ComponentModel.ISupportInitialize)(this.dgvSearchResults)).EndInit();
         this.ResumeLayout(false);
     }
 }
