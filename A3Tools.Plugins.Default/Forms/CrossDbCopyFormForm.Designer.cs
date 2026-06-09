@@ -37,6 +37,15 @@ partial class CrossDbCopyFormForm
     private System.Windows.Forms.ProgressBar progressBar;
     private System.Windows.Forms.Label lblProgress;
 
+    // 搜索相关控件
+    private System.Windows.Forms.Label lblSearchTitle;
+    private System.Windows.Forms.Label lblSearchKeyword;
+    private System.Windows.Forms.TextBox txtSearchKeyword;
+    private System.Windows.Forms.Button btnSearch;
+    private System.Windows.Forms.DataGridView dgvSearchResults;
+    private System.Windows.Forms.Button btnAddSelected;
+    private System.Windows.Forms.Label lblSearchProgress;
+
     protected override void Dispose(bool disposing)
     {
         if (disposing && (components != null))
@@ -62,8 +71,8 @@ partial class CrossDbCopyFormForm
         this.btnSelectSource = new System.Windows.Forms.Button();
         this.targetLayout = new System.Windows.Forms.TableLayoutPanel();
         this.lblTargetTitle = new System.Windows.Forms.Label();
-        this.lblTargetServer = new System.Windows.Forms.Label();
         this.txtTargetServer = new System.Windows.Forms.TextBox();
+        this.lblTargetServer = new System.Windows.Forms.Label();
         this.lblTargetDbName = new System.Windows.Forms.Label();
         this.txtTargetDbName = new System.Windows.Forms.TextBox();
         this.lblTargetUser = new System.Windows.Forms.Label();
@@ -80,13 +89,24 @@ partial class CrossDbCopyFormForm
         this.btnCancel = new System.Windows.Forms.Button();
         this.progressBar = new System.Windows.Forms.ProgressBar();
         this.lblProgress = new System.Windows.Forms.Label();
+
+        // 搜索相关控件
+        this.lblSearchTitle = new System.Windows.Forms.Label();
+        this.lblSearchKeyword = new System.Windows.Forms.Label();
+        this.txtSearchKeyword = new System.Windows.Forms.TextBox();
+        this.btnSearch = new System.Windows.Forms.Button();
+        this.dgvSearchResults = new System.Windows.Forms.DataGridView();
+        this.btnAddSelected = new System.Windows.Forms.Button();
+        this.lblSearchProgress = new System.Windows.Forms.Label();
+
         this.tableLayoutPanel1.SuspendLayout();
         this.sourceLayout.SuspendLayout();
         this.targetLayout.SuspendLayout();
+        ((System.ComponentModel.ISupportInitialize)(this.dgvSearchResults)).BeginInit();
         this.SuspendLayout();
-        //
+        // 
         // tableLayoutPanel1
-        //
+        // 
         this.tableLayoutPanel1.ColumnCount = 2;
         this.tableLayoutPanel1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
         this.tableLayoutPanel1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
@@ -116,11 +136,11 @@ partial class CrossDbCopyFormForm
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.tableLayoutPanel1.Size = new System.Drawing.Size(873, 730);
+        this.tableLayoutPanel1.Size = new System.Drawing.Size(1200, 800);
         this.tableLayoutPanel1.TabIndex = 0;
-        //
+        // 
         // sourceLayout
-        //
+        // 
         this.sourceLayout.BackColor = System.Drawing.Color.FromArgb(245, 248, 250);
         this.sourceLayout.CellBorderStyle = System.Windows.Forms.TableLayoutPanelCellBorderStyle.Single;
         this.sourceLayout.ColumnCount = 2;
@@ -148,125 +168,125 @@ partial class CrossDbCopyFormForm
         this.sourceLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.sourceLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.sourceLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.sourceLayout.Size = new System.Drawing.Size(420, 300);
+        this.sourceLayout.Size = new System.Drawing.Size(570, 300);
         this.sourceLayout.TabIndex = 0;
-        //
+        // 
         // lblSourceTitle
-        //
+        // 
         this.lblSourceTitle.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblSourceTitle.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
         this.lblSourceTitle.ForeColor = System.Drawing.Color.FromArgb(24, 145, 176);
         this.lblSourceTitle.Location = new System.Drawing.Point(3, 3);
         this.lblSourceTitle.Margin = new System.Windows.Forms.Padding(3, 3, 3, 10);
         this.lblSourceTitle.Name = "lblSourceTitle";
-        this.lblSourceTitle.Size = new System.Drawing.Size(120, 30);
+        this.lblSourceTitle.Size = new System.Drawing.Size(165, 30);
         this.lblSourceTitle.TabIndex = 0;
         this.lblSourceTitle.Text = "源数据库";
         this.lblSourceTitle.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-        //
+        // 
         // lblSourceServer
-        //
+        // 
         this.lblSourceServer.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblSourceServer.Location = new System.Drawing.Point(3, 43);
         this.lblSourceServer.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblSourceServer.Name = "lblSourceServer";
-        this.lblSourceServer.Size = new System.Drawing.Size(120, 28);
+        this.lblSourceServer.Size = new System.Drawing.Size(165, 28);
         this.lblSourceServer.TabIndex = 1;
         this.lblSourceServer.Text = "服务器地址：";
         this.lblSourceServer.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtSourceServer
-        //
+        // 
         this.txtSourceServer.Name = "txtSourceServer";
         this.txtSourceServer.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtSourceServer.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.sourceLayout.SetColumnSpan(this.txtSourceServer, 1);
-        this.txtSourceServer.Location = new System.Drawing.Point(129, 43);
+        this.txtSourceServer.Location = new System.Drawing.Point(174, 43);
         this.txtSourceServer.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtSourceServer.Size = new System.Drawing.Size(284, 28);
+        this.txtSourceServer.Size = new System.Drawing.Size(389, 28);
         this.txtSourceServer.TabIndex = 2;
-        //
+        // 
         // lblSourceDbName
-        //
+        // 
         this.lblSourceDbName.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblSourceDbName.Location = new System.Drawing.Point(3, 79);
         this.lblSourceDbName.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblSourceDbName.Name = "lblSourceDbName";
-        this.lblSourceDbName.Size = new System.Drawing.Size(120, 28);
+        this.lblSourceDbName.Size = new System.Drawing.Size(165, 28);
         this.lblSourceDbName.TabIndex = 20;
         this.lblSourceDbName.Text = "数据库名称：";
         this.lblSourceDbName.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtSourceDbName
-        //
+        // 
         this.txtSourceDbName.Name = "txtSourceDbName";
         this.txtSourceDbName.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtSourceDbName.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtSourceDbName.Location = new System.Drawing.Point(129, 79);
+        this.txtSourceDbName.Location = new System.Drawing.Point(174, 79);
         this.txtSourceDbName.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtSourceDbName.Size = new System.Drawing.Size(284, 28);
+        this.txtSourceDbName.Size = new System.Drawing.Size(389, 28);
         this.txtSourceDbName.TabIndex = 21;
-        //
+        // 
         // lblSourceUser
-        //
+        // 
         this.lblSourceUser.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblSourceUser.Location = new System.Drawing.Point(3, 115);
         this.lblSourceUser.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblSourceUser.Name = "lblSourceUser";
-        this.lblSourceUser.Size = new System.Drawing.Size(120, 28);
+        this.lblSourceUser.Size = new System.Drawing.Size(165, 28);
         this.lblSourceUser.TabIndex = 3;
         this.lblSourceUser.Text = "用户名：";
         this.lblSourceUser.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtSourceUser
-        //
+        // 
         this.txtSourceUser.Name = "txtSourceUser";
         this.txtSourceUser.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtSourceUser.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtSourceUser.Location = new System.Drawing.Point(129, 115);
+        this.txtSourceUser.Location = new System.Drawing.Point(174, 115);
         this.txtSourceUser.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtSourceUser.Size = new System.Drawing.Size(284, 28);
+        this.txtSourceUser.Size = new System.Drawing.Size(389, 28);
         this.txtSourceUser.TabIndex = 4;
-        //
+        // 
         // lblSourcePassword
-        //
+        // 
         this.lblSourcePassword.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblSourcePassword.Location = new System.Drawing.Point(3, 151);
         this.lblSourcePassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblSourcePassword.Name = "lblSourcePassword";
-        this.lblSourcePassword.Size = new System.Drawing.Size(120, 28);
+        this.lblSourcePassword.Size = new System.Drawing.Size(165, 28);
         this.lblSourcePassword.TabIndex = 5;
         this.lblSourcePassword.Text = "密码：";
         this.lblSourcePassword.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtSourcePassword
-        //
+        // 
         this.txtSourcePassword.Name = "txtSourcePassword";
         this.txtSourcePassword.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtSourcePassword.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtSourcePassword.Location = new System.Drawing.Point(129, 151);
+        this.txtSourcePassword.Location = new System.Drawing.Point(174, 151);
         this.txtSourcePassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtSourcePassword.Size = new System.Drawing.Size(284, 28);
+        this.txtSourcePassword.Size = new System.Drawing.Size(389, 28);
         this.txtSourcePassword.TabIndex = 6;
         this.txtSourcePassword.UseSystemPasswordChar = true;
-        //
+        // 
         // btnSelectSource
-        //
+        // 
         this.btnSelectSource.BackColor = System.Drawing.Color.FromArgb(24, 145, 176);
         this.btnSelectSource.FlatAppearance.BorderSize = 0;
         this.btnSelectSource.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         this.btnSelectSource.Font = new System.Drawing.Font("微软雅黑", 9F);
         this.btnSelectSource.ForeColor = System.Drawing.Color.White;
-        this.btnSelectSource.Location = new System.Drawing.Point(129, 187);
+        this.btnSelectSource.Location = new System.Drawing.Point(174, 187);
         this.btnSelectSource.Name = "btnSelectSource";
         this.btnSelectSource.Size = new System.Drawing.Size(100, 32);
         this.btnSelectSource.TabIndex = 7;
         this.btnSelectSource.Text = "选择账套";
         this.btnSelectSource.UseVisualStyleBackColor = false;
         this.btnSelectSource.Click += new System.EventHandler(this.BtnSelectSource_Click);
-        //
+        // 
         // targetLayout
-        //
+        // 
         this.targetLayout.BackColor = System.Drawing.Color.FromArgb(250, 245, 245);
         this.targetLayout.CellBorderStyle = System.Windows.Forms.TableLayoutPanelCellBorderStyle.Single;
         this.targetLayout.ColumnCount = 2;
@@ -284,7 +304,7 @@ partial class CrossDbCopyFormForm
         this.targetLayout.Controls.Add(this.btnSelectTarget, 1, 5);
         this.targetLayout.Dock = System.Windows.Forms.DockStyle.Fill;
         this.targetLayout.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.targetLayout.Location = new System.Drawing.Point(447, 13);
+        this.targetLayout.Location = new System.Drawing.Point(597, 13);
         this.targetLayout.Margin = new System.Windows.Forms.Padding(3, 3, 3, 10);
         this.targetLayout.Name = "targetLayout";
         this.targetLayout.RowCount = 6;
@@ -294,235 +314,335 @@ partial class CrossDbCopyFormForm
         this.targetLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.targetLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         this.targetLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.targetLayout.Size = new System.Drawing.Size(420, 300);
+        this.targetLayout.Size = new System.Drawing.Size(590, 300);
         this.targetLayout.TabIndex = 1;
-        //
+        // 
         // lblTargetTitle
-        //
+        // 
         this.lblTargetTitle.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblTargetTitle.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
         this.lblTargetTitle.ForeColor = System.Drawing.Color.FromArgb(200, 80, 80);
         this.lblTargetTitle.Location = new System.Drawing.Point(3, 3);
         this.lblTargetTitle.Margin = new System.Windows.Forms.Padding(3, 3, 3, 10);
         this.lblTargetTitle.Name = "lblTargetTitle";
-        this.lblTargetTitle.Size = new System.Drawing.Size(120, 30);
+        this.lblTargetTitle.Size = new System.Drawing.Size(170, 30);
         this.lblTargetTitle.TabIndex = 0;
         this.lblTargetTitle.Text = "目标数据库";
         this.lblTargetTitle.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-        //
+        // 
         // lblTargetServer
-        //
+        // 
         this.lblTargetServer.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblTargetServer.Location = new System.Drawing.Point(3, 43);
         this.lblTargetServer.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblTargetServer.Name = "lblTargetServer";
-        this.lblTargetServer.Size = new System.Drawing.Size(120, 28);
+        this.lblTargetServer.Size = new System.Drawing.Size(170, 28);
         this.lblTargetServer.TabIndex = 1;
         this.lblTargetServer.Text = "服务器地址：";
         this.lblTargetServer.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtTargetServer
-        //
+        // 
         this.txtTargetServer.Name = "txtTargetServer";
         this.txtTargetServer.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtTargetServer.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtTargetServer.Location = new System.Drawing.Point(129, 43);
+        this.txtTargetServer.Location = new System.Drawing.Point(179, 43);
         this.txtTargetServer.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtTargetServer.Size = new System.Drawing.Size(284, 28);
+        this.txtTargetServer.Size = new System.Drawing.Size(404, 28);
         this.txtTargetServer.TabIndex = 8;
-        //
+        // 
         // lblTargetDbName
-        //
+        // 
         this.lblTargetDbName.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblTargetDbName.Location = new System.Drawing.Point(3, 79);
         this.lblTargetDbName.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblTargetDbName.Name = "lblTargetDbName";
-        this.lblTargetDbName.Size = new System.Drawing.Size(120, 28);
+        this.lblTargetDbName.Size = new System.Drawing.Size(170, 28);
         this.lblTargetDbName.TabIndex = 22;
         this.lblTargetDbName.Text = "数据库名称：";
         this.lblTargetDbName.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtTargetDbName
-        //
+        // 
         this.txtTargetDbName.Name = "txtTargetDbName";
         this.txtTargetDbName.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtTargetDbName.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtTargetDbName.Location = new System.Drawing.Point(129, 79);
+        this.txtTargetDbName.Location = new System.Drawing.Point(179, 79);
         this.txtTargetDbName.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtTargetDbName.Size = new System.Drawing.Size(284, 28);
+        this.txtTargetDbName.Size = new System.Drawing.Size(404, 28);
         this.txtTargetDbName.TabIndex = 23;
-        //
+        // 
         // lblTargetUser
-        //
+        // 
         this.lblTargetUser.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblTargetUser.Location = new System.Drawing.Point(3, 115);
         this.lblTargetUser.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblTargetUser.Name = "lblTargetUser";
-        this.lblTargetUser.Size = new System.Drawing.Size(120, 28);
+        this.lblTargetUser.Size = new System.Drawing.Size(170, 28);
         this.lblTargetUser.TabIndex = 9;
         this.lblTargetUser.Text = "用户名：";
         this.lblTargetUser.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtTargetUser
-        //
+        // 
         this.txtTargetUser.Name = "txtTargetUser";
         this.txtTargetUser.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtTargetUser.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtTargetUser.Location = new System.Drawing.Point(129, 115);
+        this.txtTargetUser.Location = new System.Drawing.Point(179, 115);
         this.txtTargetUser.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtTargetUser.Size = new System.Drawing.Size(284, 28);
+        this.txtTargetUser.Size = new System.Drawing.Size(404, 28);
         this.txtTargetUser.TabIndex = 10;
-        //
+        // 
         // lblTargetPassword
-        //
+        // 
         this.lblTargetPassword.Dock = System.Windows.Forms.DockStyle.Fill;
         this.lblTargetPassword.Location = new System.Drawing.Point(3, 151);
         this.lblTargetPassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
         this.lblTargetPassword.Name = "lblTargetPassword";
-        this.lblTargetPassword.Size = new System.Drawing.Size(120, 28);
+        this.lblTargetPassword.Size = new System.Drawing.Size(170, 28);
         this.lblTargetPassword.TabIndex = 11;
         this.lblTargetPassword.Text = "密码：";
         this.lblTargetPassword.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-        //
+        // 
         // txtTargetPassword
-        //
+        // 
         this.txtTargetPassword.Name = "txtTargetPassword";
         this.txtTargetPassword.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtTargetPassword.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtTargetPassword.Location = new System.Drawing.Point(129, 151);
+        this.txtTargetPassword.Location = new System.Drawing.Point(179, 151);
         this.txtTargetPassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 8);
-        this.txtTargetPassword.Size = new System.Drawing.Size(284, 28);
+        this.txtTargetPassword.Size = new System.Drawing.Size(404, 28);
         this.txtTargetPassword.TabIndex = 12;
         this.txtTargetPassword.UseSystemPasswordChar = true;
-        //
+        // 
         // btnSelectTarget
-        //
+        // 
         this.btnSelectTarget.BackColor = System.Drawing.Color.FromArgb(200, 80, 80);
         this.btnSelectTarget.FlatAppearance.BorderSize = 0;
         this.btnSelectTarget.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         this.btnSelectTarget.Font = new System.Drawing.Font("微软雅黑", 9F);
         this.btnSelectTarget.ForeColor = System.Drawing.Color.White;
-        this.btnSelectTarget.Location = new System.Drawing.Point(129, 187);
+        this.btnSelectTarget.Location = new System.Drawing.Point(179, 187);
         this.btnSelectTarget.Name = "btnSelectTarget";
         this.btnSelectTarget.Size = new System.Drawing.Size(100, 32);
         this.btnSelectTarget.TabIndex = 13;
         this.btnSelectTarget.Text = "选择账套";
         this.btnSelectTarget.UseVisualStyleBackColor = false;
         this.btnSelectTarget.Click += new System.EventHandler(this.BtnSelectTarget_Click);
-        //
+        // 
         // lblObjectGuids
-        //
+        // 
         this.lblObjectGuids.AutoSize = true;
         this.lblObjectGuids.Font = new System.Drawing.Font("微软雅黑", 11F);
-        this.lblObjectGuids.Location = new System.Drawing.Point(16, 241);
+        this.lblObjectGuids.Location = new System.Drawing.Point(16, 329);
         this.lblObjectGuids.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
         this.lblObjectGuids.Name = "lblObjectGuids";
         this.lblObjectGuids.Size = new System.Drawing.Size(150, 22);
         this.lblObjectGuids.TabIndex = 2;
         this.lblObjectGuids.Text = "表单OBJECTGUID：";
         this.lblObjectGuids.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-        //
+        // 
         // txtObjectGuids
-        //
+        // 
         this.txtObjectGuids.Dock = System.Windows.Forms.DockStyle.Fill;
         this.txtObjectGuids.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.txtObjectGuids.Location = new System.Drawing.Point(16, 271);
+        this.txtObjectGuids.Location = new System.Drawing.Point(16, 359);
         this.txtObjectGuids.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
         this.txtObjectGuids.Multiline = true;
         this.txtObjectGuids.Name = "txtObjectGuids";
-        this.txtObjectGuids.Size = new System.Drawing.Size(847, 120);
+        this.txtObjectGuids.Size = new System.Drawing.Size(1174, 60);
         this.txtObjectGuids.TabIndex = 14;
-        //
+        // 
         // lblObjectGuidsHint
-        //
+        // 
         this.lblObjectGuidsHint.AutoSize = true;
         this.lblObjectGuidsHint.Font = new System.Drawing.Font("微软雅黑", 9F);
         this.lblObjectGuidsHint.ForeColor = System.Drawing.Color.Gray;
-        this.lblObjectGuidsHint.Location = new System.Drawing.Point(16, 304);
+        this.lblObjectGuidsHint.Location = new System.Drawing.Point(16, 392);
         this.lblObjectGuidsHint.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
         this.lblObjectGuidsHint.Name = "lblObjectGuidsHint";
         this.lblObjectGuidsHint.Size = new System.Drawing.Size(350, 18);
         this.lblObjectGuidsHint.TabIndex = 3;
-        this.lblObjectGuidsHint.Text = "提示：多个OBJECTGUID用分号(;)分隔";
-        //
+        this.lblObjectGuidsHint.Text = "提示：多个OBJECTGUID用分号(;)分隔，可通过下方搜索添加";
+        // 
         // chkDeleteFirst
-        //
+        // 
         this.chkDeleteFirst.AutoSize = true;
         this.chkDeleteFirst.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.chkDeleteFirst.Location = new System.Drawing.Point(447, 300);
+        this.chkDeleteFirst.Location = new System.Drawing.Point(597, 419);
         this.chkDeleteFirst.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
         this.chkDeleteFirst.Name = "chkDeleteFirst";
         this.chkDeleteFirst.Size = new System.Drawing.Size(150, 24);
         this.chkDeleteFirst.TabIndex = 15;
         this.chkDeleteFirst.Text = "先删除目标数据";
         this.chkDeleteFirst.UseVisualStyleBackColor = true;
-        //
+        // 
         // chkCopyStoredProcs
-        //
+        // 
         this.chkCopyStoredProcs.AutoSize = true;
         this.chkCopyStoredProcs.Font = new System.Drawing.Font("微软雅黑", 10F);
-        this.chkCopyStoredProcs.Location = new System.Drawing.Point(16, 330);
+        this.chkCopyStoredProcs.Location = new System.Drawing.Point(16, 419);
         this.chkCopyStoredProcs.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
         this.chkCopyStoredProcs.Name = "chkCopyStoredProcs";
         this.chkCopyStoredProcs.Size = new System.Drawing.Size(200, 24);
         this.chkCopyStoredProcs.TabIndex = 24;
         this.chkCopyStoredProcs.Text = "同时复制关联存储过程";
         this.chkCopyStoredProcs.UseVisualStyleBackColor = true;
-        //
+        // 
         // btnConfirm
-        //
+        // 
         this.btnConfirm.BackColor = System.Drawing.Color.FromArgb(24, 145, 176);
         this.btnConfirm.FlatAppearance.BorderSize = 0;
         this.btnConfirm.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         this.btnConfirm.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.btnConfirm.ForeColor = System.Drawing.Color.White;
-        this.btnConfirm.Location = new System.Drawing.Point(133, 365);
+        this.btnConfirm.Location = new System.Drawing.Point(133, 454);
         this.btnConfirm.Name = "btnConfirm";
         this.btnConfirm.Size = new System.Drawing.Size(180, 40);
         this.btnConfirm.TabIndex = 16;
         this.btnConfirm.Text = "确认复制";
         this.btnConfirm.UseVisualStyleBackColor = false;
         this.btnConfirm.Click += new System.EventHandler(this.BtnConfirm_Click);
-        //
+        // 
         // btnCancel
-        //
+        // 
         this.btnCancel.BackColor = System.Drawing.Color.White;
         this.btnCancel.FlatAppearance.BorderColor = System.Drawing.Color.Gray;
         this.btnCancel.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         this.btnCancel.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.btnCancel.ForeColor = System.Drawing.Color.Gray;
-        this.btnCancel.Location = new System.Drawing.Point(567, 365);
+        this.btnCancel.Location = new System.Drawing.Point(900, 454);
         this.btnCancel.Name = "btnCancel";
         this.btnCancel.Size = new System.Drawing.Size(180, 40);
         this.btnCancel.TabIndex = 17;
         this.btnCancel.Text = "取消";
         this.btnCancel.UseVisualStyleBackColor = false;
         this.btnCancel.Click += new System.EventHandler(this.BtnCancel_Click);
-        //
+        // 
         // progressBar
-        //
-        this.progressBar.Location = new System.Drawing.Point(23, 415);
+        // 
+        this.progressBar.Location = new System.Drawing.Point(23, 504);
         this.progressBar.Name = "progressBar";
         this.progressBar.Size = new System.Drawing.Size(400, 25);
         this.progressBar.TabIndex = 18;
-        //
+        // 
         // lblProgress
-        //
+        // 
         this.lblProgress.AutoSize = true;
         this.lblProgress.Font = new System.Drawing.Font("微软雅黑", 9F);
         this.lblProgress.ForeColor = System.Drawing.Color.Gray;
-        this.lblProgress.Location = new System.Drawing.Point(567, 415);
+        this.lblProgress.Location = new System.Drawing.Point(597, 504);
         this.lblProgress.Name = "lblProgress";
         this.lblProgress.Size = new System.Drawing.Size(50, 18);
         this.lblProgress.TabIndex = 19;
         this.lblProgress.Text = "就绪";
-        //
+        // 
+        // ==================== 搜索区域 ====================
+        // 
+        // lblSearchTitle
+        // 
+        this.lblSearchTitle.BackColor = System.Drawing.Color.FromArgb(230, 245, 255);
+        this.lblSearchTitle.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+        this.lblSearchTitle.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.lblSearchTitle.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+        this.lblSearchTitle.ForeColor = System.Drawing.Color.FromArgb(24, 145, 176);
+        this.lblSearchTitle.Location = new System.Drawing.Point(16, 529);
+        this.lblSearchTitle.Name = "lblSearchTitle";
+        this.lblSearchTitle.Size = new System.Drawing.Size(1174, 30);
+        this.lblSearchTitle.TabIndex = 25;
+        this.lblSearchTitle.Text = "  📋 从源数据库搜索表单";
+        this.lblSearchTitle.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+        // 
+        // lblSearchKeyword
+        // 
+        this.lblSearchKeyword.AutoSize = true;
+        this.lblSearchKeyword.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.lblSearchKeyword.Location = new System.Drawing.Point(16, 569);
+        this.lblSearchKeyword.Margin = new System.Windows.Forms.Padding(3, 5, 3, 3);
+        this.lblSearchKeyword.Name = "lblSearchKeyword";
+        this.lblSearchKeyword.Size = new System.Drawing.Size(80, 20);
+        this.lblSearchKeyword.TabIndex = 26;
+        this.lblSearchKeyword.Text = "搜索关键字：";
+        // 
+        // txtSearchKeyword
+        // 
+        this.txtSearchKeyword.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.txtSearchKeyword.Location = new System.Drawing.Point(100, 566);
+        this.txtSearchKeyword.Name = "txtSearchKeyword";
+        this.txtSearchKeyword.Size = new System.Drawing.Size(300, 28);
+        this.txtSearchKeyword.TabIndex = 27;
+        this.txtSearchKeyword.PlaceholderText = "输入表单名称或代码...";
+        // 
+        // btnSearch
+        // 
+        this.btnSearch.BackColor = System.Drawing.Color.FromArgb(24, 145, 176);
+        this.btnSearch.FlatAppearance.BorderSize = 0;
+        this.btnSearch.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        this.btnSearch.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.btnSearch.ForeColor = System.Drawing.Color.White;
+        this.btnSearch.Location = new System.Drawing.Point(410, 564);
+        this.btnSearch.Name = "btnSearch";
+        this.btnSearch.Size = new System.Drawing.Size(100, 32);
+        this.btnSearch.TabIndex = 28;
+        this.btnSearch.Text = "查询";
+        this.btnSearch.UseVisualStyleBackColor = false;
+        this.btnSearch.Click += new System.EventHandler(this.BtnSearch_Click);
+        // 
+        // btnAddSelected
+        // 
+        this.btnAddSelected.BackColor = System.Drawing.Color.FromArgb(57, 181, 74);
+        this.btnAddSelected.FlatAppearance.BorderSize = 0;
+        this.btnAddSelected.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        this.btnAddSelected.Font = new System.Drawing.Font("微软雅黑", 10F);
+        this.btnAddSelected.ForeColor = System.Drawing.Color.White;
+        this.btnAddSelected.Location = new System.Drawing.Point(520, 564);
+        this.btnAddSelected.Name = "btnAddSelected";
+        this.btnAddSelected.Size = new System.Drawing.Size(120, 32);
+        this.btnAddSelected.TabIndex = 29;
+        this.btnAddSelected.Text = "添加选中";
+        this.btnAddSelected.UseVisualStyleBackColor = false;
+        this.btnAddSelected.Click += new System.EventHandler(this.BtnAddSelected_Click);
+        // 
+        // lblSearchProgress
+        // 
+        this.lblSearchProgress.AutoSize = true;
+        this.lblSearchProgress.Font = new System.Drawing.Font("微软雅黑", 9F);
+        this.lblSearchProgress.ForeColor = System.Drawing.Color.Gray;
+        this.lblSearchProgress.Location = new System.Drawing.Point(650, 570);
+        this.lblSearchProgress.Name = "lblSearchProgress";
+        this.lblSearchProgress.Size = new System.Drawing.Size(50, 18);
+        this.lblSearchProgress.TabIndex = 30;
+        this.lblSearchProgress.Text = "";
+        // 
+        // dgvSearchResults
+        // 
+        this.dgvSearchResults.AllowUserToAddRows = false;
+        this.dgvSearchResults.AllowUserToDeleteRows = false;
+        this.dgvSearchResults.BackgroundColor = System.Drawing.Color.White;
+        this.dgvSearchResults.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+        this.dgvSearchResults.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+        this.dgvSearchResults.Location = new System.Drawing.Point(16, 604);
+        this.dgvSearchResults.Name = "dgvSearchResults";
+        this.dgvSearchResults.ReadOnly = true;
+        this.dgvSearchResults.RowTemplate.Height = 28;
+        this.dgvSearchResults.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+        this.dgvSearchResults.Size = new System.Drawing.Size(1170, 180);
+        this.dgvSearchResults.TabIndex = 31;
+        this.dgvSearchResults.MultiSelect = true;
+        // 
         // CrossDbCopyFormForm
-        //
+        // 
         this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 30F);
         this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-        this.ClientSize = new System.Drawing.Size(873, 730);
+        this.ClientSize = new System.Drawing.Size(1200, 800);
         this.Controls.Add(this.tableLayoutPanel1);
+        this.Controls.Add(this.lblSearchTitle);
+        this.Controls.Add(this.lblSearchKeyword);
+        this.Controls.Add(this.txtSearchKeyword);
+        this.Controls.Add(this.btnSearch);
+        this.Controls.Add(this.btnAddSelected);
+        this.Controls.Add(this.lblSearchProgress);
+        this.Controls.Add(this.dgvSearchResults);
         this.Font = new System.Drawing.Font("微软雅黑", 10F);
         this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
@@ -536,6 +656,7 @@ partial class CrossDbCopyFormForm
         this.sourceLayout.PerformLayout();
         this.targetLayout.ResumeLayout(false);
         this.targetLayout.PerformLayout();
+        ((System.ComponentModel.ISupportInitialize)(this.dgvSearchResults)).EndInit();
         this.ResumeLayout(false);
         this.PerformLayout();
     }

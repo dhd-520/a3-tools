@@ -1,5 +1,24 @@
 ﻿# A3Tools 工作日志
 
+## 2026-06-09
+
+### 复制WIN表单集成搜索功能
+
+**功能：** 将搜索后台表单功能集成到复制WIN表单窗体下方，窗体变大，支持多选并自动拼接OBJECTGUID。
+
+**改进：**
+1. 窗体从 873x730 扩大到 1200x800，下方新增搜索区域
+2. 搜索区域包含：搜索关键字输入框、查询按钮、添加选中按钮、结果DataGridView
+3. DataGridView 支持多选（MultiSelect = true，SelectionMode = FullRowSelect）
+4. 点击「添加选中」按钮，自动将选中的 OBJECTGUID 追加到上方的 OBJECTGUID 输入框
+5. 自动过滤已添加的 GUID，避免重复
+
+**涉及文件：**
+- `CrossDbCopyFormForm.cs` - 新增 `BtnSearch_Click`、`BtnAddSelected_Click` 方法
+- `CrossDbCopyFormForm.Designer.cs` - 新增搜索相关控件（Label、TextBox、Button、DataGridView）
+
+---
+
 ## 2026-06-04
 
 ### 工具箱窗口改为非模态

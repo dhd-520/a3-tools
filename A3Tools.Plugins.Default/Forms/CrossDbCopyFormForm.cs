@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Data;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
@@ -12,6 +12,9 @@ public partial class CrossDbCopyFormForm : Form
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
 
+    // 用于存储搜索到的表单数据
+    private DataTable? _searchResults;
+
     public CrossDbCopyFormForm(IToolContext context, Account? currentAccount)
     {
         _context = context;
@@ -22,6 +25,10 @@ public partial class CrossDbCopyFormForm : Form
             if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
         };
+
+        // 数据网格视图支持多选
+        dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        dgvSearchResults.MultiSelect = true;
     }
 
     private void BtnSelectSource_Click(object? sender, EventArgs e)
@@ -37,16 +44,6 @@ public partial class CrossDbCopyFormForm : Form
     private void BtnCancel_Click(object? sender, EventArgs e)
     {
         this.Close();
-    }
-
-    private void LoadCurrentAccount()
-    {
-        if (_currentAccount != null)
-        {
-            txtSourceServer.Text = _currentAccount.Database ?? "";
-            txtSourceUser.Text = _currentAccount.DbUser ?? "";
-            txtSourcePassword.Text = _currentAccount.DbPassword ?? "";
-        }
     }
 
     private void SelectAccount(bool isSource)
@@ -145,7 +142,7 @@ public partial class CrossDbCopyFormForm : Form
                 }
             }
         }
-        btnOk.Click += (s, e) => btnOkClick();
+        btnOk.Click += (s, e) => btnOkClick(); 
         var btnCancelDialog = new Button { Text = "取消", Left = 310, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Color.Gray, Font = new Font("微软雅黑", 11F) };
 
         btnOk.Click += (s, e) =>
@@ -181,6 +178,139 @@ public partial class CrossDbCopyFormForm : Form
         dialog.Controls.Add(btnOk);
         dialog.Controls.Add(btnCancelDialog);
         dialog.ShowDialog();
+    }
+
+    private void BtnSearch_Click(object? sender, EventArgs e)
+    {
+        // 验证源数据库连接信息
+        if (string.IsNullOrWhiteSpace(txtSourceServer.Text))
+        {
+            MessageBox.Show("请填写源数据库地址！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(txtSourceDbName.Text))
+        {
+            MessageBox.Show("请填写源数据库名称！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var keyword = txtSearchKeyword.Text.Trim();
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            MessageBox.Show("请输入搜索关键字！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            txtSearchKeyword.Focus();
+            return;
+        }
+
+        lblSearchProgress.Text = "查询中...";
+        lblSearchProgress.ForeColor = Color.Blue;
+        dgvSearchResults.DataSource = null;
+        btnSearch.Enabled = false;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                var server = txtSourceServer.Text.Trim();
+                var dbName = txtSourceDbName.Text.Trim();
+                var user = txtSourceUser.Text.Trim();
+                var password = txtSourcePassword.Text;
+
+                var connString = string.IsNullOrEmpty(user)
+                    ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
+                    : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.Decrypt(password)};TrustServerCertificate=True;";
+
+                var sql = $@"
+SELECT A.GUID AS OBJECTGUID,
+       A.CODE AS 代码,
+       A.NAME AS 名称,
+       F.CODE AS 解决方案代码,
+       F.NAME AS 解决方案,
+       B.NAME AS 业务分组
+FROM S_OBJECT A
+LEFT JOIN S_SUBSYSTEM B ON A.SUBSYSTEMGUID = B.GUID
+LEFT JOIN S_BUSINESSTYPE F ON B.BUSINESSTYPEGUID = F.GUID
+WHERE A.NAME LIKE '%{keyword}%' OR A.CODE LIKE '%{keyword}%'
+ORDER BY A.NAME";
+
+                using var conn = new SqlConnection(connString);
+                using var cmd = new SqlCommand(sql, conn);
+                using var adapter = new SqlDataAdapter(cmd);
+                var dt = new DataTable();
+                adapter.Fill(dt);
+
+                this.Invoke(new Action(() =>
+                {
+                    _searchResults = dt;
+                    dgvSearchResults.DataSource = dt;
+                    dgvSearchResults.AutoResizeColumns();
+                    lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
+                    lblSearchProgress.ForeColor = Color.Green;
+                }));
+            }
+            catch (Exception ex)
+            {
+                this.Invoke(new Action(() =>
+                {
+                    lblSearchProgress.Text = "查询失败";
+                    lblSearchProgress.ForeColor = Color.Red;
+                    MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }));
+            }
+            finally
+            {
+                this.Invoke(new Action(() =>
+                {
+                    btnSearch.Enabled = true;
+                }));
+            }
+        });
+    }
+
+    private void BtnAddSelected_Click(object? sender, EventArgs e)
+    {
+        if (dgvSearchResults.SelectedRows.Count == 0)
+        {
+            MessageBox.Show("请先选择要添加的表单！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var selectedGuids = new List<string>();
+        foreach (DataGridViewRow row in dgvSearchResults.SelectedRows)
+        {
+            var guid = row.Cells["OBJECTGUID"].Value?.ToString();
+            if (!string.IsNullOrWhiteSpace(guid))
+            {
+                selectedGuids.Add(guid);
+            }
+        }
+
+        if (selectedGuids.Count == 0) return;
+
+        // 追加到现有内容
+        var currentText = txtObjectGuids.Text.Trim();
+        var separator = string.IsNullOrEmpty(currentText) ? "" : ";";
+        
+        var existingGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(currentText))
+        {
+            currentText.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .ToList()
+                .ForEach(g => existingGuids.Add(g.Trim()));
+        }
+
+        var newGuids = selectedGuids.Where(g => !existingGuids.Contains(g)).ToList();
+        if (newGuids.Count == 0)
+        {
+            MessageBox.Show("选中的表单已全部添加！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var addedText = string.Join(";", newGuids);
+        txtObjectGuids.Text = currentText + separator + addedText;
+
+        lblSearchProgress.Text = $"已添加 {newGuids.Count} 个表单到列表";
+        lblSearchProgress.ForeColor = Color.Green;
     }
 
     private async void BtnConfirm_Click(object? sender, EventArgs e)
@@ -258,7 +388,7 @@ public partial class CrossDbCopyFormForm : Form
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("连接测试失败: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("连接测试失败: " + ex.Message);
                 return false;
             }
         });
@@ -365,7 +495,7 @@ public partial class CrossDbCopyFormForm : Form
         // 调试输出
         foreach (var (fn, pn) in result)
         {
-            Debug.WriteLine($"[GetStoredProcNames] {fn} -> {pn}");
+            System.Diagnostics.Debug.WriteLine($"[GetStoredProcNames] {fn} -> {pn}");
         }
 
         return result;
@@ -403,7 +533,7 @@ public partial class CrossDbCopyFormForm : Form
             result = cmd2.ExecuteScalar();
         }
         var text = result as string ?? "";
-        Debug.WriteLine($"[GetProcDefinition] procName={procName}, definition length={text.Length}");
+        System.Diagnostics.Debug.WriteLine($"[GetProcDefinition] procName={procName}, definition length={text.Length}");
         return text;
     }
 
@@ -412,7 +542,7 @@ public partial class CrossDbCopyFormForm : Form
     /// </summary>
     private void CreateProcInTarget(SqlConnection tgtConn, string procName, string definition)
     {
-        Debug.WriteLine($"[CreateProcInTarget] procName={procName}, definition length={definition?.Length ?? -1}");
+        System.Diagnostics.Debug.WriteLine($"[CreateProcInTarget] procName={procName}, definition length={definition?.Length ?? -1}");
 
         // 先删除已存在的同名存储过程
         if (ProcExistsInTarget(tgtConn, procName))
@@ -423,8 +553,8 @@ public partial class CrossDbCopyFormForm : Form
 
         // 创建存储过程（移除原库的USE语句和创建语句头部）
         var createSql = NormalizeProcDefinition(definition, procName);
-        Debug.WriteLine($"[CreateProcInTarget] createSql length={createSql.Length}");
-        Debug.WriteLine($"[CreateProcInTarget] createSql preview: {createSql.Substring(0, Math.Min(200, createSql.Length))}");
+        System.Diagnostics.Debug.WriteLine($"[CreateProcInTarget] createSql length={createSql.Length}");
+        System.Diagnostics.Debug.WriteLine($"[CreateProcInTarget] createSql preview: {createSql.Substring(0, Math.Min(200, createSql.Length))}");
         using var createCmd = new SqlCommand(createSql, tgtConn);
         createCmd.ExecuteNonQuery();
     }
@@ -490,7 +620,7 @@ public partial class CrossDbCopyFormForm : Form
                     var definition = GetProcDefinition(srcConn, procName);
                     if (string.IsNullOrWhiteSpace(definition))
                     {
-                        Debug.WriteLine($"[存储过程] {procName} 无法获取定义（可能加密或不存在）");
+                        System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 无法获取定义（可能加密或不存在）");
                         this.Invoke(new Action(() =>
                         {
                             lblProgress.Text = $"⚠ {procName} 无法获取定义（加密或不存在）";
@@ -499,7 +629,7 @@ public partial class CrossDbCopyFormForm : Form
                         continue;
                     }
                     CreateProcInTarget(tgtConn, procName, definition);
-                    Debug.WriteLine($"[存储过程] {procName} 复制成功（字段：{fieldName}）");
+                    System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制成功（字段：{fieldName}）");
                     this.Invoke(new Action(() =>
                     {
                         lblProgress.Text = $"✓ {procName} 复制成功";
@@ -508,12 +638,12 @@ public partial class CrossDbCopyFormForm : Form
                 }
                 else
                 {
-                    Debug.WriteLine($"[存储过程] {procName} 目标库已存在，跳过");
+                    System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 目标库已存在，跳过");
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[存储过程] {procName} 复制失败：{ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制失败：{ex.Message}");
                 this.Invoke(new Action(() =>
                 {
                     lblProgress.Text = $"✗ {procName} 复制失败：{ex.Message}";
@@ -531,7 +661,7 @@ public partial class CrossDbCopyFormForm : Form
             var tgtColumns = GetTableColumns(tgtConn, tableName);
             if (tgtColumns.Count == 0)
             {
-                Debug.WriteLine($"目标表{tableName}不存在或没有列");
+                System.Diagnostics.Debug.WriteLine($"目标表{tableName}不存在或没有列");
                 return;
             }
 
@@ -550,7 +680,7 @@ public partial class CrossDbCopyFormForm : Form
             using var selectCmd = new SqlCommand(selectSql, srcConn);
             selectCmd.Parameters.AddWithValue("@value", whereValue);
 
-            var dataTable = new System.Data.DataTable();
+            var dataTable = new DataTable();
             using (var adapter = new SqlDataAdapter(selectCmd))
             {
                 adapter.Fill(dataTable);
@@ -567,7 +697,7 @@ public partial class CrossDbCopyFormForm : Form
                 var count = Convert.ToInt32(checkCmd.ExecuteScalar());
                 if (count > 0)
                 {
-                    Debug.WriteLine($"表{tableName}中{whereField}={whereValue}已存在，跳过");
+                    System.Diagnostics.Debug.WriteLine($"表{tableName}中{whereField}={whereValue}已存在，跳过");
                     return;
                 }
             }
@@ -583,7 +713,7 @@ public partial class CrossDbCopyFormForm : Form
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
             throw;
         }
     }
@@ -664,7 +794,7 @@ public partial class CrossDbCopyFormForm : Form
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[编码规则] 复制失败：" + ex.Message);
+            System.Diagnostics.Debug.WriteLine($"[编码规则] 复制失败：" + ex.Message);
         }
     }
 
@@ -678,7 +808,7 @@ public partial class CrossDbCopyFormForm : Form
             // 检查目标库是否已存在
             if (CodeRuleExistsInTarget(tgtConn, ruleCode))
             {
-                Debug.WriteLine($"[编码规则] {ruleCode} 目标库已存在，跳过");
+                System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 目标库已存在，跳过");
                 return;
             }
 
@@ -686,7 +816,7 @@ public partial class CrossDbCopyFormForm : Form
             var rule = GetCodeRuleFromSource(srcConn, ruleCode);
             if (rule == null)
             {
-                Debug.WriteLine($"[编码规则] {ruleCode} 在源库中未找到");
+                System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 在源库中未找到");
                 return;
             }
 
@@ -696,11 +826,11 @@ public partial class CrossDbCopyFormForm : Form
             // 复制明细表
             CopyTableDataByGuid(srcConn, tgtConn, "S_BILLCODERULEDETAIL", "BILLCODERULEGUID", rule.Item1, false);
 
-            Debug.WriteLine($"[编码规则] {ruleCode} 复制成功");
+            System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 复制成功");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[编码规则] {ruleCode} 复制失败：" + ex.Message);
+            System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 复制失败：" + ex.Message);
         }
     }
 
@@ -718,12 +848,12 @@ public partial class CrossDbCopyFormForm : Form
     /// <summary>
     /// 从源库获取编码规则的GUID
     /// </summary>
-    private Tuple<string, System.Data.DataTable>? GetCodeRuleFromSource(SqlConnection srcConn, string code)
+    private Tuple<string, DataTable>? GetCodeRuleFromSource(SqlConnection srcConn, string code)
     {
         var sql = "SELECT * FROM dbo.S_BILLCODERULE WHERE CODE = @code";
         using var cmd = new SqlCommand(sql, srcConn);
         cmd.Parameters.AddWithValue("@code", code);
-        var dt = new System.Data.DataTable();
+        var dt = new DataTable();
         using var adapter = new SqlDataAdapter(cmd);
         adapter.Fill(dt);
         if (dt.Rows.Count == 0) return null;
@@ -760,7 +890,7 @@ public partial class CrossDbCopyFormForm : Form
             var selSql = $"SELECT {cols} FROM dbo.[{tableName}] WHERE [{guidField}] = @guid";
             using var selCmd = new SqlCommand(selSql, srcConn);
             selCmd.Parameters.AddWithValue("@guid", guidValue);
-            var dt = new System.Data.DataTable();
+            var dt = new DataTable();
             using var adapter = new SqlDataAdapter(selCmd);
             adapter.Fill(dt);
             if (dt.Rows.Count == 0) return;
@@ -773,7 +903,7 @@ public partial class CrossDbCopyFormForm : Form
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[编码规则] 复制表{tableName}失败：" + ex.Message);
+            System.Diagnostics.Debug.WriteLine($"[编码规则] 复制表{tableName}失败：" + ex.Message);
         }
     }
 
@@ -814,7 +944,7 @@ public partial class CrossDbCopyFormForm : Form
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[标准查询] 复制失败：" + ex.Message);
+            System.Diagnostics.Debug.WriteLine($"[标准查询] 复制失败：" + ex.Message);
         }
     }
 
@@ -827,7 +957,7 @@ public partial class CrossDbCopyFormForm : Form
         {
             if (StandardQueryExistsInTarget(tgtConn, code))
             {
-                Debug.WriteLine($"[标准查询] {code} 目标库已存在，跳过");
+                System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 目标库已存在，跳过");
                 return;
             }
 
@@ -835,18 +965,18 @@ public partial class CrossDbCopyFormForm : Form
             var dt = GetStandardQueryFromSource(srcConn, code);
             if (dt == null || dt.Rows.Count == 0)
             {
-                Debug.WriteLine($"[标准查询] {code} 在源库中未找到");
+                System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 在源库中未找到");
                 return;
             }
 
             // 复制数据
             CopyTableDataByCode(srcConn, tgtConn, "S_DATASELECT", "CODE", code);
 
-            Debug.WriteLine($"[标准查询] {code} 复制成功");
+            System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 复制成功");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[标准查询] {code} 复制失败：" + ex.Message);
+            System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 复制失败：" + ex.Message);
         }
     }
 
@@ -864,12 +994,12 @@ public partial class CrossDbCopyFormForm : Form
     /// <summary>
     /// 从源库获取标准查询数据
     /// </summary>
-    private System.Data.DataTable? GetStandardQueryFromSource(SqlConnection srcConn, string code)
+    private DataTable? GetStandardQueryFromSource(SqlConnection srcConn, string code)
     {
         var sql = "SELECT * FROM dbo.S_DATASELECT WHERE CODE = @code";
         using var cmd = new SqlCommand(sql, srcConn);
         cmd.Parameters.AddWithValue("@code", code);
-        var dt = new System.Data.DataTable();
+        var dt = new DataTable();
         using var adapter = new SqlDataAdapter(cmd);
         adapter.Fill(dt);
         return dt.Rows.Count > 0 ? dt : null;
@@ -894,7 +1024,7 @@ public partial class CrossDbCopyFormForm : Form
             var selSql = $"SELECT {cols} FROM dbo.[{tableName}] WHERE [{codeField}] = @code";
             using var selCmd = new SqlCommand(selSql, srcConn);
             selCmd.Parameters.AddWithValue("@code", codeValue);
-            var dt = new System.Data.DataTable();
+            var dt = new DataTable();
             using var adapter = new SqlDataAdapter(selCmd);
             adapter.Fill(dt);
             if (dt.Rows.Count == 0) return;
@@ -907,7 +1037,7 @@ public partial class CrossDbCopyFormForm : Form
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[标准查询] 复制表{tableName}失败：" + ex.Message);
+            System.Diagnostics.Debug.WriteLine($"[标准查询] 复制表{tableName}失败：" + ex.Message);
         }
     }
 }
