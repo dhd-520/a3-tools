@@ -1,5 +1,39 @@
 ﻿# A3Tools 工作日志
 
+## 2026-06-04
+
+### 工具箱窗口改为非模态
+
+**问题：** 工具箱中的工具窗体（跨库复制表、跨库复制表单、搜索后台表单等）在执行完后自动关闭（模态对话框），每次想再次执行同一账套的工具时都需要重新打开窗体、重新选择账套。
+
+**修复：** 将 `DefaultTools.cs` 中所有工具窗体的 `ShowDialog()` 改为 `Show()`，改为非模态窗口，手动关闭才退出。
+
+**涉及文件：**
+- `DefaultTools.cs` - 7个工具方法 `ShowDialog()` → `Show()`
+
+### Root模式Ctrl+C快捷键复制
+
+**功能：** Root模式下按 `Ctrl+C` 快速复制当前选中账套的完整信息（含明文密码），不弹窗，显示2秒自动消失的Toast提示。
+
+**实现：** `MainForm_KeyDown` 中增加Root模式检测，`Ctrl+C` 时调用 `CopySelectedAccountSilently()`，复制后显示 `ShowToast()` 提示（深色背景居中文字，2秒后自动关闭）。
+
+
+**涉及文件：**
+- `MainForm.cs` - 新增 `CopySelectedAccountSilently()` 方法 + `ShowToast()` 方法
+
+### 复制表结构时同步复制触发器
+
+**功能：** 在跨库复制表结构时，将该表的所有触发器一并复制到目标数据库。
+
+**实现：**
+1. 新增 `GetTriggersForTable()` 方法，查询指定表的所有触发器定义（`sys.triggers` + `sys.sql_modules`）
+2. 表结构复制完成后，调用 `GetTriggersForTable()` 获取触发器脚本列表，逐个执行到目标库
+
+**涉及文件：**
+- `CrossDbCopyTableForm.cs` - 新增 `GetTriggersForTable()` 方法，复制表后自动同步触发器
+
+---
+
 ## 2026-06-03
 
 ### 启动选项对话框快捷键

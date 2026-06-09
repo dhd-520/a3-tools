@@ -65,8 +65,8 @@ public class AccountInfoTool
         info.AppendLine($"远程方式：{account.RemoteType}");
         info.AppendLine($"远程地址：{account.RemoteAddress}");
 
-        System.Windows.Forms.MessageBox.Show(info.ToString(), "账套信息", 
-            System.Windows.Forms.MessageBoxButtons.OK, 
+        System.Windows.Forms.MessageBox.Show(info.ToString(), "账套信息",
+            System.Windows.Forms.MessageBoxButtons.OK,
             System.Windows.Forms.MessageBoxIcon.Information);
     }
 }
@@ -77,7 +77,7 @@ public class AccountInfoTool
 public class RemoteConnectTool
 {
     public string Name => "远程连接";
-    public string Description => "快速连接到账套服务器";
+    public string Description => "快捷连接到账套服务器";
 
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
@@ -199,6 +199,36 @@ public class CrossDbCopyReportTool
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {
         var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyReportForm(context, account);
+        form.Show();
+    }
+}
+
+/// <summary>
+/// 跨库复制WEB看板工具
+/// </summary>
+public class CrossDbCopyWebObjectTool
+{
+    public string Name => "复制WEB看板";
+    public string Description => "复制WEB看板到目标账套（通过CODE）";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyWebObjectForm(context, account);
+        form.Show();
+    }
+}
+
+/// <summary>
+/// 跨库复制移动看板工具
+/// </summary>
+public class CrossDbCopyAppChartTool
+{
+    public string Name => "复制移动看板";
+    public string Description => "复制移动看板到目标账套（通过CODE）";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyAppChartForm(context, account);
         form.Show();
     }
 }
