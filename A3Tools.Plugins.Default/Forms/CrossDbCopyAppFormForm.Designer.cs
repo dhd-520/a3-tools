@@ -82,23 +82,23 @@ partial class CrossDbCopyAppFormForm
         txtObjectGuids = new TextBox();
         lblObjectGuidsHint = new Label();
         chkDeleteFirst = new CheckBox();
-        btnConfirm = new Button();
-        btnCancel = new Button();
-        progressBar = new ProgressBar();
-        lblProgress = new Label();
         pnlSearch = new Panel();
         lblSearchKeyword = new Label();
         txtSearchKeyword = new TextBox();
         btnSearch = new Button();
         btnAddSelected = new Button();
         btnClearSelected = new Button();
-        dgvSearchResults = new DataGridView();
         lblSearchProgress = new Label();
+        dgvSearchResults = new DataGridView();
+        btnConfirm = new Button();
+        btnCancel = new Button();
+        progressBar = new ProgressBar();
+        lblProgress = new Label();
         tableLayoutPanel1.SuspendLayout();
-        pnlSearch.SuspendLayout();
-        ((System.ComponentModel.ISupportInitialize)dgvSearchResults).BeginInit();
         sourceLayout.SuspendLayout();
         targetLayout.SuspendLayout();
+        pnlSearch.SuspendLayout();
+        ((System.ComponentModel.ISupportInitialize)dgvSearchResults).BeginInit();
         SuspendLayout();
         // 
         // tableLayoutPanel1
@@ -113,11 +113,10 @@ partial class CrossDbCopyAppFormForm
         tableLayoutPanel1.Controls.Add(lblObjectGuidsHint, 0, 3);
         tableLayoutPanel1.Controls.Add(chkDeleteFirst, 1, 3);
         tableLayoutPanel1.Controls.Add(pnlSearch, 0, 4);
-        tableLayoutPanel1.SetColumnSpan(pnlSearch, 2);
-        tableLayoutPanel1.Controls.Add(btnConfirm, 0, 5);
         tableLayoutPanel1.Controls.Add(btnCancel, 1, 5);
         tableLayoutPanel1.Controls.Add(progressBar, 0, 6);
         tableLayoutPanel1.Controls.Add(lblProgress, 1, 6);
+        tableLayoutPanel1.Controls.Add(btnConfirm, 0, 5);
         tableLayoutPanel1.Dock = DockStyle.Fill;
         tableLayoutPanel1.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         tableLayoutPanel1.Location = new Point(0, 0);
@@ -125,14 +124,14 @@ partial class CrossDbCopyAppFormForm
         tableLayoutPanel1.Name = "tableLayoutPanel1";
         tableLayoutPanel1.Padding = new Padding(10);
         tableLayoutPanel1.RowCount = 7;
-        tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+        tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Absolute, 350F));
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
-        tableLayoutPanel1.Size = new Size(873, 690);
+        tableLayoutPanel1.Size = new Size(1240, 1022);
         tableLayoutPanel1.TabIndex = 0;
         // 
         // sourceLayout
@@ -164,7 +163,7 @@ partial class CrossDbCopyAppFormForm
         sourceLayout.RowStyles.Add(new RowStyle());
         sourceLayout.RowStyles.Add(new RowStyle());
         sourceLayout.RowStyles.Add(new RowStyle());
-        sourceLayout.Size = new Size(413, 300);
+        sourceLayout.Size = new Size(597, 223);
         sourceLayout.TabIndex = 0;
         // 
         // lblSourceTitle
@@ -175,7 +174,7 @@ partial class CrossDbCopyAppFormForm
         lblSourceTitle.Location = new Point(4, 4);
         lblSourceTitle.Margin = new Padding(3, 3, 3, 10);
         lblSourceTitle.Name = "lblSourceTitle";
-        lblSourceTitle.Size = new Size(117, 30);
+        lblSourceTitle.Size = new Size(172, 1);
         lblSourceTitle.TabIndex = 0;
         lblSourceTitle.Text = "源数据库";
         lblSourceTitle.TextAlign = ContentAlignment.MiddleCenter;
@@ -183,10 +182,10 @@ partial class CrossDbCopyAppFormForm
         // lblSourceServer
         // 
         lblSourceServer.Dock = DockStyle.Fill;
-        lblSourceServer.Location = new Point(4, 189);
+        lblSourceServer.Location = new Point(4, -13);
         lblSourceServer.Margin = new Padding(3, 3, 3, 8);
         lblSourceServer.Name = "lblSourceServer";
-        lblSourceServer.Size = new Size(117, 28);
+        lblSourceServer.Size = new Size(172, 38);
         lblSourceServer.TabIndex = 1;
         lblSourceServer.Text = "服务器地址：";
         lblSourceServer.TextAlign = ContentAlignment.MiddleRight;
@@ -195,19 +194,19 @@ partial class CrossDbCopyAppFormForm
         // 
         txtSourceServer.Dock = DockStyle.Fill;
         txtSourceServer.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtSourceServer.Location = new Point(128, 189);
+        txtSourceServer.Location = new Point(183, -13);
         txtSourceServer.Margin = new Padding(3, 3, 3, 8);
         txtSourceServer.Name = "txtSourceServer";
-        txtSourceServer.Size = new Size(281, 28);
+        txtSourceServer.Size = new Size(410, 38);
         txtSourceServer.TabIndex = 2;
         // 
         // lblSourceDbName
         // 
         lblSourceDbName.Dock = DockStyle.Fill;
-        lblSourceDbName.Location = new Point(4, 239);
+        lblSourceDbName.Location = new Point(4, 37);
         lblSourceDbName.Margin = new Padding(3, 3, 3, 8);
         lblSourceDbName.Name = "lblSourceDbName";
-        lblSourceDbName.Size = new Size(117, 28);
+        lblSourceDbName.Size = new Size(172, 38);
         lblSourceDbName.TabIndex = 20;
         lblSourceDbName.Text = "数据库名称：";
         lblSourceDbName.TextAlign = ContentAlignment.MiddleRight;
@@ -216,19 +215,19 @@ partial class CrossDbCopyAppFormForm
         // 
         txtSourceDbName.Dock = DockStyle.Fill;
         txtSourceDbName.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtSourceDbName.Location = new Point(128, 239);
+        txtSourceDbName.Location = new Point(183, 37);
         txtSourceDbName.Margin = new Padding(3, 3, 3, 8);
         txtSourceDbName.Name = "txtSourceDbName";
-        txtSourceDbName.Size = new Size(281, 28);
+        txtSourceDbName.Size = new Size(410, 38);
         txtSourceDbName.TabIndex = 21;
         // 
         // lblSourceUser
         // 
         lblSourceUser.Dock = DockStyle.Fill;
-        lblSourceUser.Location = new Point(4, 289);
+        lblSourceUser.Location = new Point(4, 87);
         lblSourceUser.Margin = new Padding(3, 3, 3, 8);
         lblSourceUser.Name = "lblSourceUser";
-        lblSourceUser.Size = new Size(117, 28);
+        lblSourceUser.Size = new Size(172, 38);
         lblSourceUser.TabIndex = 3;
         lblSourceUser.Text = "用户名：";
         lblSourceUser.TextAlign = ContentAlignment.MiddleRight;
@@ -237,19 +236,19 @@ partial class CrossDbCopyAppFormForm
         // 
         txtSourceUser.Dock = DockStyle.Fill;
         txtSourceUser.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtSourceUser.Location = new Point(128, 289);
+        txtSourceUser.Location = new Point(183, 87);
         txtSourceUser.Margin = new Padding(3, 3, 3, 8);
         txtSourceUser.Name = "txtSourceUser";
-        txtSourceUser.Size = new Size(281, 28);
+        txtSourceUser.Size = new Size(410, 38);
         txtSourceUser.TabIndex = 4;
         // 
         // lblSourcePassword
         // 
         lblSourcePassword.Dock = DockStyle.Fill;
-        lblSourcePassword.Location = new Point(4, 339);
+        lblSourcePassword.Location = new Point(4, 137);
         lblSourcePassword.Margin = new Padding(3, 3, 3, 8);
         lblSourcePassword.Name = "lblSourcePassword";
-        lblSourcePassword.Size = new Size(117, 28);
+        lblSourcePassword.Size = new Size(172, 38);
         lblSourcePassword.TabIndex = 5;
         lblSourcePassword.Text = "密码：";
         lblSourcePassword.TextAlign = ContentAlignment.MiddleRight;
@@ -258,10 +257,10 @@ partial class CrossDbCopyAppFormForm
         // 
         txtSourcePassword.Dock = DockStyle.Fill;
         txtSourcePassword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtSourcePassword.Location = new Point(128, 339);
+        txtSourcePassword.Location = new Point(183, 137);
         txtSourcePassword.Margin = new Padding(3, 3, 3, 8);
         txtSourcePassword.Name = "txtSourcePassword";
-        txtSourcePassword.Size = new Size(281, 28);
+        txtSourcePassword.Size = new Size(410, 38);
         txtSourcePassword.TabIndex = 6;
         txtSourcePassword.UseSystemPasswordChar = true;
         // 
@@ -272,7 +271,7 @@ partial class CrossDbCopyAppFormForm
         btnSelectSource.FlatStyle = FlatStyle.Flat;
         btnSelectSource.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         btnSelectSource.ForeColor = Color.White;
-        btnSelectSource.Location = new Point(128, 389);
+        btnSelectSource.Location = new Point(183, 187);
         btnSelectSource.Name = "btnSelectSource";
         btnSelectSource.Size = new Size(126, 32);
         btnSelectSource.TabIndex = 7;
@@ -299,7 +298,7 @@ partial class CrossDbCopyAppFormForm
         targetLayout.Controls.Add(btnSelectTarget, 1, 5);
         targetLayout.Dock = DockStyle.Fill;
         targetLayout.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        targetLayout.Location = new Point(439, 13);
+        targetLayout.Location = new Point(623, 13);
         targetLayout.Margin = new Padding(3, 3, 3, 10);
         targetLayout.Name = "targetLayout";
         targetLayout.RowCount = 6;
@@ -309,7 +308,7 @@ partial class CrossDbCopyAppFormForm
         targetLayout.RowStyles.Add(new RowStyle());
         targetLayout.RowStyles.Add(new RowStyle());
         targetLayout.RowStyles.Add(new RowStyle());
-        targetLayout.Size = new Size(421, 300);
+        targetLayout.Size = new Size(604, 223);
         targetLayout.TabIndex = 1;
         // 
         // lblTargetTitle
@@ -320,7 +319,7 @@ partial class CrossDbCopyAppFormForm
         lblTargetTitle.Location = new Point(4, 4);
         lblTargetTitle.Margin = new Padding(3, 3, 3, 10);
         lblTargetTitle.Name = "lblTargetTitle";
-        lblTargetTitle.Size = new Size(119, 30);
+        lblTargetTitle.Size = new Size(174, 1);
         lblTargetTitle.TabIndex = 0;
         lblTargetTitle.Text = "目标数据库";
         lblTargetTitle.TextAlign = ContentAlignment.MiddleCenter;
@@ -328,10 +327,10 @@ partial class CrossDbCopyAppFormForm
         // lblTargetServer
         // 
         lblTargetServer.Dock = DockStyle.Fill;
-        lblTargetServer.Location = new Point(4, 189);
+        lblTargetServer.Location = new Point(4, -13);
         lblTargetServer.Margin = new Padding(3, 3, 3, 8);
         lblTargetServer.Name = "lblTargetServer";
-        lblTargetServer.Size = new Size(119, 28);
+        lblTargetServer.Size = new Size(174, 38);
         lblTargetServer.TabIndex = 1;
         lblTargetServer.Text = "服务器地址：";
         lblTargetServer.TextAlign = ContentAlignment.MiddleRight;
@@ -340,19 +339,19 @@ partial class CrossDbCopyAppFormForm
         // 
         txtTargetServer.Dock = DockStyle.Fill;
         txtTargetServer.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtTargetServer.Location = new Point(130, 189);
+        txtTargetServer.Location = new Point(185, -13);
         txtTargetServer.Margin = new Padding(3, 3, 3, 8);
         txtTargetServer.Name = "txtTargetServer";
-        txtTargetServer.Size = new Size(287, 28);
+        txtTargetServer.Size = new Size(415, 38);
         txtTargetServer.TabIndex = 8;
         // 
         // lblTargetDbName
         // 
         lblTargetDbName.Dock = DockStyle.Fill;
-        lblTargetDbName.Location = new Point(4, 239);
+        lblTargetDbName.Location = new Point(4, 37);
         lblTargetDbName.Margin = new Padding(3, 3, 3, 8);
         lblTargetDbName.Name = "lblTargetDbName";
-        lblTargetDbName.Size = new Size(119, 28);
+        lblTargetDbName.Size = new Size(174, 38);
         lblTargetDbName.TabIndex = 22;
         lblTargetDbName.Text = "数据库名称：";
         lblTargetDbName.TextAlign = ContentAlignment.MiddleRight;
@@ -361,19 +360,19 @@ partial class CrossDbCopyAppFormForm
         // 
         txtTargetDbName.Dock = DockStyle.Fill;
         txtTargetDbName.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtTargetDbName.Location = new Point(130, 239);
+        txtTargetDbName.Location = new Point(185, 37);
         txtTargetDbName.Margin = new Padding(3, 3, 3, 8);
         txtTargetDbName.Name = "txtTargetDbName";
-        txtTargetDbName.Size = new Size(287, 28);
+        txtTargetDbName.Size = new Size(415, 38);
         txtTargetDbName.TabIndex = 23;
         // 
         // lblTargetUser
         // 
         lblTargetUser.Dock = DockStyle.Fill;
-        lblTargetUser.Location = new Point(4, 289);
+        lblTargetUser.Location = new Point(4, 87);
         lblTargetUser.Margin = new Padding(3, 3, 3, 8);
         lblTargetUser.Name = "lblTargetUser";
-        lblTargetUser.Size = new Size(119, 28);
+        lblTargetUser.Size = new Size(174, 38);
         lblTargetUser.TabIndex = 9;
         lblTargetUser.Text = "用户名：";
         lblTargetUser.TextAlign = ContentAlignment.MiddleRight;
@@ -382,19 +381,19 @@ partial class CrossDbCopyAppFormForm
         // 
         txtTargetUser.Dock = DockStyle.Fill;
         txtTargetUser.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtTargetUser.Location = new Point(130, 289);
+        txtTargetUser.Location = new Point(185, 87);
         txtTargetUser.Margin = new Padding(3, 3, 3, 8);
         txtTargetUser.Name = "txtTargetUser";
-        txtTargetUser.Size = new Size(287, 28);
+        txtTargetUser.Size = new Size(415, 38);
         txtTargetUser.TabIndex = 10;
         // 
         // lblTargetPassword
         // 
         lblTargetPassword.Dock = DockStyle.Fill;
-        lblTargetPassword.Location = new Point(4, 339);
+        lblTargetPassword.Location = new Point(4, 137);
         lblTargetPassword.Margin = new Padding(3, 3, 3, 8);
         lblTargetPassword.Name = "lblTargetPassword";
-        lblTargetPassword.Size = new Size(119, 28);
+        lblTargetPassword.Size = new Size(174, 38);
         lblTargetPassword.TabIndex = 11;
         lblTargetPassword.Text = "密码：";
         lblTargetPassword.TextAlign = ContentAlignment.MiddleRight;
@@ -403,10 +402,10 @@ partial class CrossDbCopyAppFormForm
         // 
         txtTargetPassword.Dock = DockStyle.Fill;
         txtTargetPassword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtTargetPassword.Location = new Point(130, 339);
+        txtTargetPassword.Location = new Point(185, 137);
         txtTargetPassword.Margin = new Padding(3, 3, 3, 8);
         txtTargetPassword.Name = "txtTargetPassword";
-        txtTargetPassword.Size = new Size(287, 28);
+        txtTargetPassword.Size = new Size(415, 38);
         txtTargetPassword.TabIndex = 12;
         txtTargetPassword.UseSystemPasswordChar = true;
         // 
@@ -417,7 +416,7 @@ partial class CrossDbCopyAppFormForm
         btnSelectTarget.FlatStyle = FlatStyle.Flat;
         btnSelectTarget.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         btnSelectTarget.ForeColor = Color.White;
-        btnSelectTarget.Location = new Point(130, 389);
+        btnSelectTarget.Location = new Point(185, 187);
         btnSelectTarget.Name = "btnSelectTarget";
         btnSelectTarget.Size = new Size(125, 32);
         btnSelectTarget.TabIndex = 13;
@@ -429,7 +428,7 @@ partial class CrossDbCopyAppFormForm
         // 
         lblObjectGuids.AutoSize = true;
         lblObjectGuids.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        lblObjectGuids.Location = new Point(13, 458);
+        lblObjectGuids.Location = new Point(13, 256);
         lblObjectGuids.Margin = new Padding(3, 10, 3, 3);
         lblObjectGuids.Name = "lblObjectGuids";
         lblObjectGuids.Size = new Size(302, 35);
@@ -442,10 +441,10 @@ partial class CrossDbCopyAppFormForm
         tableLayoutPanel1.SetColumnSpan(txtObjectGuids, 2);
         txtObjectGuids.Dock = DockStyle.Fill;
         txtObjectGuids.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtObjectGuids.Location = new Point(13, 499);
+        txtObjectGuids.Location = new Point(13, 297);
         txtObjectGuids.Multiline = true;
         txtObjectGuids.Name = "txtObjectGuids";
-        txtObjectGuids.Size = new Size(847, 120);
+        txtObjectGuids.Size = new Size(1214, 120);
         txtObjectGuids.TabIndex = 14;
         // 
         // lblObjectGuidsHint
@@ -453,7 +452,7 @@ partial class CrossDbCopyAppFormForm
         lblObjectGuidsHint.AutoSize = true;
         lblObjectGuidsHint.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         lblObjectGuidsHint.ForeColor = Color.Gray;
-        lblObjectGuidsHint.Location = new Point(13, 565);
+        lblObjectGuidsHint.Location = new Point(13, 423);
         lblObjectGuidsHint.Margin = new Padding(3);
         lblObjectGuidsHint.Name = "lblObjectGuidsHint";
         lblObjectGuidsHint.Size = new Size(371, 28);
@@ -464,63 +463,16 @@ partial class CrossDbCopyAppFormForm
         // 
         chkDeleteFirst.AutoSize = true;
         chkDeleteFirst.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        chkDeleteFirst.Location = new Point(439, 565);
+        chkDeleteFirst.Location = new Point(623, 423);
         chkDeleteFirst.Name = "chkDeleteFirst";
         chkDeleteFirst.Size = new Size(208, 35);
         chkDeleteFirst.TabIndex = 15;
         chkDeleteFirst.Text = "先删除目标数据";
         chkDeleteFirst.UseVisualStyleBackColor = true;
         // 
-        // btnConfirm
-        // 
-        btnConfirm.BackColor = Color.FromArgb(24, 145, 176);
-        btnConfirm.FlatAppearance.BorderSize = 0;
-        btnConfirm.FlatStyle = FlatStyle.Flat;
-        btnConfirm.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        btnConfirm.ForeColor = Color.White;
-        btnConfirm.Location = new Point(13, 606);
-        btnConfirm.Name = "btnConfirm";
-        btnConfirm.Size = new Size(180, 40);
-        btnConfirm.TabIndex = 16;
-        btnConfirm.Text = "确认复制";
-        btnConfirm.UseVisualStyleBackColor = false;
-        btnConfirm.Click += BtnConfirm_Click;
-        // 
-        // btnCancel
-        // 
-        btnCancel.BackColor = Color.White;
-        btnCancel.FlatAppearance.BorderColor = Color.Gray;
-        btnCancel.FlatStyle = FlatStyle.Flat;
-        btnCancel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        btnCancel.ForeColor = Color.Gray;
-        btnCancel.Location = new Point(439, 606);
-        btnCancel.Name = "btnCancel";
-        btnCancel.Size = new Size(180, 40);
-        btnCancel.TabIndex = 17;
-        btnCancel.Text = "取消";
-        btnCancel.UseVisualStyleBackColor = false;
-        btnCancel.Click += BtnCancel_Click;
-        // 
-        // progressBar
-        // 
-        progressBar.Location = new Point(13, 652);
-        progressBar.Name = "progressBar";
-        progressBar.Size = new Size(400, 25);
-        progressBar.TabIndex = 18;
-        // 
-        // lblProgress
-        // 
-        lblProgress.AutoSize = true;
-        lblProgress.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        lblProgress.ForeColor = Color.Gray;
-        lblProgress.Location = new Point(439, 649);
-        lblProgress.Name = "lblProgress";
-        lblProgress.Size = new Size(54, 28);
-        lblProgress.TabIndex = 19;
-        lblProgress.Text = "就绪";
-        // 
         // pnlSearch
         // 
+        tableLayoutPanel1.SetColumnSpan(pnlSearch, 2);
         pnlSearch.Controls.Add(lblSearchKeyword);
         pnlSearch.Controls.Add(txtSearchKeyword);
         pnlSearch.Controls.Add(btnSearch);
@@ -529,9 +481,9 @@ partial class CrossDbCopyAppFormForm
         pnlSearch.Controls.Add(lblSearchProgress);
         pnlSearch.Controls.Add(dgvSearchResults);
         pnlSearch.Dock = DockStyle.Fill;
-        pnlSearch.Location = new Point(3, 623);
+        pnlSearch.Location = new Point(13, 464);
         pnlSearch.Name = "pnlSearch";
-        pnlSearch.Size = new Size(847, 200);
+        pnlSearch.Size = new Size(1214, 467);
         pnlSearch.TabIndex = 25;
         // 
         // lblSearchKeyword
@@ -547,7 +499,7 @@ partial class CrossDbCopyAppFormForm
         // txtSearchKeyword
         // 
         txtSearchKeyword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtSearchKeyword.Location = new Point(158, 7);
+        txtSearchKeyword.Location = new Point(174, 8);
         txtSearchKeyword.Name = "txtSearchKeyword";
         txtSearchKeyword.PlaceholderText = "输入APP表单名称...";
         txtSearchKeyword.Size = new Size(377, 38);
@@ -620,14 +572,62 @@ partial class CrossDbCopyAppFormForm
         dgvSearchResults.RowHeadersWidth = 72;
         dgvSearchResults.RowTemplate.Height = 25;
         dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvSearchResults.Size = new Size(825, 135);
+        dgvSearchResults.Size = new Size(1179, 370);
         dgvSearchResults.TabIndex = 31;
+        // 
+        // btnConfirm
+        // 
+        btnConfirm.BackColor = Color.FromArgb(24, 145, 176);
+        btnConfirm.FlatAppearance.BorderSize = 0;
+        btnConfirm.FlatStyle = FlatStyle.Flat;
+        btnConfirm.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnConfirm.ForeColor = Color.White;
+        btnConfirm.Location = new Point(13, 937);
+        btnConfirm.Name = "btnConfirm";
+        btnConfirm.Size = new Size(180, 40);
+        btnConfirm.TabIndex = 16;
+        btnConfirm.Text = "确认复制";
+        btnConfirm.UseVisualStyleBackColor = false;
+        btnConfirm.Click += BtnConfirm_Click;
+        // 
+        // btnCancel
+        // 
+        btnCancel.BackColor = Color.White;
+        btnCancel.FlatAppearance.BorderColor = Color.Gray;
+        btnCancel.FlatStyle = FlatStyle.Flat;
+        btnCancel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnCancel.ForeColor = Color.Gray;
+        btnCancel.Location = new Point(623, 937);
+        btnCancel.Name = "btnCancel";
+        btnCancel.Size = new Size(180, 40);
+        btnCancel.TabIndex = 17;
+        btnCancel.Text = "取消";
+        btnCancel.UseVisualStyleBackColor = false;
+        btnCancel.Click += BtnCancel_Click;
+        // 
+        // progressBar
+        // 
+        progressBar.Location = new Point(13, 983);
+        progressBar.Name = "progressBar";
+        progressBar.Size = new Size(400, 25);
+        progressBar.TabIndex = 18;
+        // 
+        // lblProgress
+        // 
+        lblProgress.AutoSize = true;
+        lblProgress.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        lblProgress.ForeColor = Color.Gray;
+        lblProgress.Location = new Point(623, 980);
+        lblProgress.Name = "lblProgress";
+        lblProgress.Size = new Size(54, 28);
+        lblProgress.TabIndex = 19;
+        lblProgress.Text = "就绪";
         // 
         // CrossDbCopyAppFormForm
         // 
         AutoScaleDimensions = new SizeF(14F, 30F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(873, 690);
+        ClientSize = new Size(1240, 1022);
         Controls.Add(tableLayoutPanel1);
         Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         FormBorderStyle = FormBorderStyle.FixedDialog;

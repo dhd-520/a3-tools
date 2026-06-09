@@ -22,7 +22,8 @@ public partial class CrossDbCopyAppFormForm : Form
         _currentAccount = currentAccount;
         InitializeComponent();
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
-        this.KeyDown += (s, e) => {
+        this.KeyDown += (s, e) =>
+        {
             if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
         };
@@ -145,7 +146,8 @@ public partial class CrossDbCopyAppFormForm : Form
         // 快捷键：键定位搜索框，上/下键快速进入列表选择，ESC关闭，Enter确认
         dialog.KeyPreview = true;
         bool justFocused = false;
-        dialog.KeyDown += (s, e) => {
+        dialog.KeyDown += (s, e) =>
+        {
             if (e.KeyCode == Keys.Oemtilde) { txtSearch.Focus(); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.Escape) { dialog.Close(); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.Enter) { if (listBox.SelectedIndex >= 0) btnOkClick(); e.SuppressKeyPress = true; }
@@ -154,7 +156,7 @@ public partial class CrossDbCopyAppFormForm : Form
         };
         txtSearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Oemtilde) { txtSearch.SelectionStart = 0; txtSearch.SelectionLength = txtSearch.Text.Length; e.SuppressKeyPress = true; } };
         var btnOk = new Button { Text = "确定", Left = 170, Top = 480, Width = 120, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 145, 176), ForeColor = Color.White, Font = new Font("微软雅黑", 11F) };
-        
+
         void btnOkClick()
         {
             if (listBox.SelectedIndex >= 0)
@@ -492,10 +494,11 @@ public partial class CrossDbCopyAppFormForm : Form
 
                 var sql = $@"
 SELECT GUID AS OBJECTGUID,
+       CODE AS 代码,
        NAME AS APP表单名称,
        DESCRIPTION AS 备注
 FROM S_APP_OBJECT
-WHERE NAME LIKE '%{keyword}%'
+WHERE NAME LIKE '%{keyword}%' OR CODE LIKE '%{keyword}%'
 ORDER BY NAME";
 
                 using var conn = new SqlConnection(connString);
@@ -521,6 +524,11 @@ ORDER BY NAME";
                     checkCol.Name = "chk";
                     dgvSearchResults.Columns.Insert(0, checkCol);
                     dgvSearchResults.AutoResizeColumns();
+                    // 隐藏代码列
+                    if (dgvSearchResults.Columns.Contains("代码"))
+                    {
+                        dgvSearchResults.Columns["代码"].Visible = false;
+                    }
                     // 默认选中第一行并同步checkbox
                     if (dgvSearchResults.Rows.Count > 0)
                     {
