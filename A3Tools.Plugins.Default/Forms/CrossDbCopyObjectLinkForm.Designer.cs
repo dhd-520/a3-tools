@@ -124,7 +124,7 @@ partial class CrossDbCopyObjectLinkForm
         tableLayoutPanel1.Name = "tableLayoutPanel1";
         tableLayoutPanel1.Padding = new Padding(10);
         tableLayoutPanel1.RowCount = 7;
-        tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 88.70056F));
+        tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Absolute, 380F));
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
