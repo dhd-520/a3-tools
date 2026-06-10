@@ -332,7 +332,7 @@ public partial class CrossDbCopyWebObjectForm : Form
                     {
                         MessageBox.Show("WEB看板复制完成！共 " + successCount + " 个。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
-                    this.Close();
+                    // 不自动关闭，方便继续操作
                 }));
                 return true;
             }

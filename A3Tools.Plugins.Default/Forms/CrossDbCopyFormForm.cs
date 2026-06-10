@@ -448,7 +448,7 @@ ORDER BY A.NAME";
             progressBar.Value = 100;
             lblProgress.Text = "复制完成";
             MessageBox.Show("表单复制完成！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            this.Close();
+            // 不自动关闭，方便继续操作
         }
         else
         {

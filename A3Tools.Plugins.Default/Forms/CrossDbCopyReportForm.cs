@@ -280,7 +280,7 @@ public partial class CrossDbCopyReportForm : Form
             progressBar.Value = 100;
             lblProgress.Text = "复制完成";
             MessageBox.Show("报表复制完成！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            this.Close();
+            // 不自动关闭，方便继续操作
         }
         else
         {
@@ -361,7 +361,7 @@ public partial class CrossDbCopyReportForm : Form
                     {
                         MessageBox.Show($"报表复制完成！共 {successCount} 个。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
-                    this.Close();
+                    // 不自动关闭，方便继续操作
                 }));
                 return true;
             }

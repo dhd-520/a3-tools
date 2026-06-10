@@ -273,7 +273,7 @@ public partial class CrossDbCopyAppFormForm : Form
             progressBar.Value = 100;
             lblProgress.Text = "复制完成";
             MessageBox.Show("APP表单复制完成！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            this.Close();
+            // 不自动关闭，方便继续操作
         }
         else
         {
