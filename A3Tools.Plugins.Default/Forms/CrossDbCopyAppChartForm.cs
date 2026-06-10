@@ -22,7 +22,8 @@ public partial class CrossDbCopyAppChartForm : Form
         _currentAccount = currentAccount;
         InitializeComponent();
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
-        this.KeyDown += (s, e) => {
+        this.KeyDown += (s, e) =>
+        {
             if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
         };
@@ -111,7 +112,10 @@ public partial class CrossDbCopyAppChartForm : Form
 
         var txtSearch = new TextBox
         {
-            Left = 20, Top = 45, Width = 540, Height = 30,
+            Left = 20,
+            Top = 45,
+            Width = 540,
+            Height = 30,
             Font = new Font("微软雅黑", 11F),
             PlaceholderText = "输入账套编码或名称搜索..."
         };
@@ -140,7 +144,8 @@ public partial class CrossDbCopyAppChartForm : Form
         txtSearch.TextChanged += (s, e) => PopulateList(txtSearch.Text);
         dialog.KeyPreview = true;
         bool justFocused = false;
-        dialog.KeyDown += (s, e) => {
+        dialog.KeyDown += (s, e) =>
+        {
             if (e.KeyCode == Keys.Oemtilde) { txtSearch.Focus(); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.Escape) { dialog.Close(); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.Enter) { if (listBox.SelectedIndex >= 0) btnOkClick(); e.SuppressKeyPress = true; }

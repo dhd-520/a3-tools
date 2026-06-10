@@ -75,9 +75,9 @@ partial class MainForm
         tabTools = new TabPage();
         tabStatus = new TabPage();
         trayContextMenu = new ContextMenuStrip(components);
-        menuShow = new ToolStripMenuItem();
         menuHide = new ToolStripMenuItem();
         menuTrayExit = new ToolStripMenuItem();
+        menuShow = new ToolStripMenuItem();
         notifyIcon = new NotifyIcon(components);
         titleBar.SuspendLayout();
         menuStrip.SuspendLayout();
@@ -106,7 +106,7 @@ partial class MainForm
         lblVersion.Name = "lblVersion";
         lblVersion.Size = new Size(69, 28);
         lblVersion.TabIndex = 0;
-        lblVersion.Text = "v1.2.0";
+        lblVersion.Text = "v1.3.0";
         // 
         // lblTitle
         // 
@@ -218,12 +218,6 @@ partial class MainForm
         trayContextMenu.Name = "trayContextMenu";
         trayContextMenu.Size = new Size(190, 72);
         // 
-        // menuShow
-        // 
-        menuShow.Name = "menuShow";
-        menuShow.Size = new Size(189, 34);
-        menuShow.Text = "显示主窗体";
-        // 
         // menuHide
         // 
         menuHide.Name = "menuHide";
@@ -235,6 +229,12 @@ partial class MainForm
         menuTrayExit.Name = "menuTrayExit";
         menuTrayExit.Size = new Size(189, 34);
         menuTrayExit.Text = "退出";
+        // 
+        // menuShow
+        // 
+        menuShow.Name = "menuShow";
+        menuShow.Size = new Size(189, 34);
+        menuShow.Text = "显示主窗体";
         // 
         // notifyIcon
         // 

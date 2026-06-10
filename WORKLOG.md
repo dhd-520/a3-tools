@@ -1,5 +1,31 @@
 ﻿# A3Tools 工作日志
 
+## 2026-06-10
+
+### 统一跨库复制工具布局
+
+**问题：** 复制报表、复制WEB看板、复制移动看板三个工具的布局混乱，与复制App表单不一致。
+
+**修复：** 参考 CrossDbCopyFormForm 的布局结构，统一调整三个工具的 Designer.cs：
+
+1. 将两列 TableLayoutPanel 布局改为单列布局（与表单一致）
+2. 数据库面板（pnlDatabases）包含 sourceLayout 和 targetLayout 并排
+3. CODE 输入框跨越整行
+4. 新增 pnlCheckboxes 和 pnlButtons 面板
+5. 搜索面板（pnlSearch）在最下方，自适应高度
+6. 统一窗体尺寸为 1256x951
+
+**涉及文件：**
+- `CrossDbCopyReportForm.Designer.cs` - 复制报表
+- `CrossDbCopyWebObjectForm.Designer.cs` - 复制WEB看板
+- `CrossDbCopyAppChartForm.Designer.cs` - 复制移动看板
+
+**补充修改（2026-06-10 14:23）：**
+- 复制报表：提示和「先删除目标数据」复选框合并到同一行（rowHintAndCheckbox TableLayoutPanel）
+- mainLayout 从 9 行减少为 8 行
+
+---
+
 ## 2026-06-09
 
 ### 复制WIN表单集成搜索功能
