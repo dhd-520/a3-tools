@@ -511,16 +511,16 @@ ORDER BY A.NAME";
                     }));
 
                     // 复制S_OBJECT表
-                    CopyTableData(srcConn, tgtConn, "S_OBJECT", "GUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECT", "GUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制S_CONTROL表
-                    CopyTableData(srcConn, tgtConn, "S_CONTROL", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_CONTROL", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制S_DATA表
-                    CopyTableData(srcConn, tgtConn, "S_DATA", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_DATA", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制样式表
-                    CopyTableData(srcConn, tgtConn, "S_OBJECTSTYLE", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTSTYLE", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制编码规则（S_CONTROL中DATANAME=CODE/BILLNO的EXTENDS）
                     CopyCodeRulesForObject(srcConn, tgtConn, objectGuid);
@@ -735,90 +735,6 @@ ORDER BY A.NAME";
         }
     }
 
-    private void CopyTableData(SqlConnection srcConn, SqlConnection tgtConn, string tableName, string whereField, string whereValue, bool deleteFirst)
-    {
-        try
-        {
-            // 获取目标表的列信息
-            var tgtColumns = GetTableColumns(tgtConn, tableName);
-            if (tgtColumns.Count == 0)
-            {
-                System.Diagnostics.Debug.WriteLine($"目标表{tableName}不存在或没有列");
-                return;
-            }
-
-            // 如果需要先删除
-            if (deleteFirst)
-            {
-                var deleteSql = $"DELETE FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-                using var deleteCmd = new SqlCommand(deleteSql, tgtConn);
-                deleteCmd.Parameters.AddWithValue("@value", whereValue);
-                deleteCmd.ExecuteNonQuery();
-            }
-
-            // 从源数据库读取数据到DataTable
-            var selectColumns = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
-            var selectSql = $"SELECT {selectColumns} FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-            using var selectCmd = new SqlCommand(selectSql, srcConn);
-            selectCmd.Parameters.AddWithValue("@value", whereValue);
-
-            var dataTable = new DataTable();
-            using (var adapter = new SqlDataAdapter(selectCmd))
-            {
-                adapter.Fill(dataTable);
-            }
-
-            if (dataTable.Rows.Count == 0) return;
-
-            // 检查是否已存在
-            if (!deleteFirst)
-            {
-                var checkSql = $"SELECT COUNT(*) FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-                using var checkCmd = new SqlCommand(checkSql, tgtConn);
-                checkCmd.Parameters.AddWithValue("@value", whereValue);
-                var count = Convert.ToInt32(checkCmd.ExecuteScalar());
-                if (count > 0)
-                {
-                    System.Diagnostics.Debug.WriteLine($"表{tableName}中{whereField}={whereValue}已存在，跳过");
-                    return;
-                }
-            }
-
-            // 使用SqlBulkCopy批量写入，自动处理所有列类型
-            using var bulkCopy = new SqlBulkCopy(tgtConn);
-            bulkCopy.DestinationTableName = $"dbo.[{tableName}]";
-            foreach (var col in tgtColumns)
-            {
-                bulkCopy.ColumnMappings.Add(col, col);
-            }
-            bulkCopy.WriteToServer(dataTable);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
-            throw;
-        }
-    }
-
-    private List<string> GetTableColumns(SqlConnection conn, string tableName)
-    {
-        var columns = new List<string>();
-        var sql = @"
-            SELECT COLUMN_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'
-            ORDER BY ORDINAL_POSITION";
-        using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@tableName", tableName);
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            columns.Add(reader.GetString(0));
-        }
-        reader.Close();
-        return columns;
-    }
-
     // ==================== 编码规则 & 标准查询复制 ====================
 
     /// <summary>
@@ -903,10 +819,10 @@ ORDER BY A.NAME";
             }
 
             // 复制主表
-            CopyTableDataByGuid(srcConn, tgtConn, "S_BILLCODERULE", "GUID", rule.Item1, false);
+            TableCopyService.CopyTableData(srcConn, tgtConn, "S_BILLCODERULE", "GUID", rule.Item1, false, "[编码规则]");
 
             // 复制明细表
-            CopyTableDataByGuid(srcConn, tgtConn, "S_BILLCODERULEDETAIL", "BILLCODERULEGUID", rule.Item1, false);
+            TableCopyService.CopyTableData(srcConn, tgtConn, "S_BILLCODERULEDETAIL", "BILLCODERULEGUID", rule.Item1, false, "[编码规则]");
 
             System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 复制成功");
         }
@@ -941,52 +857,6 @@ ORDER BY A.NAME";
         if (dt.Rows.Count == 0) return null;
         var guid = dt.Rows[0]["GUID"].ToString()!;
         return Tuple.Create(guid, dt);
-    }
-
-    /// <summary>
-    /// 根据GUID复制整张表数据（用于规则、明细表等无主键或按GUID定位的表）
-    /// </summary>
-    private void CopyTableDataByGuid(SqlConnection srcConn, SqlConnection tgtConn, string tableName, string guidField, string guidValue, bool deleteFirst)
-    {
-        try
-        {
-            var tgtColumns = GetTableColumns(tgtConn, tableName);
-            if (tgtColumns.Count == 0) return;
-
-            if (deleteFirst)
-            {
-                var deleteSql = $"DELETE FROM dbo.[{tableName}] WHERE [{guidField}] = @guid";
-                using var delCmd = new SqlCommand(deleteSql, tgtConn);
-                delCmd.Parameters.AddWithValue("@guid", guidValue);
-                delCmd.ExecuteNonQuery();
-            }
-            else
-            {
-                var checkSql = $"SELECT COUNT(*) FROM dbo.[{tableName}] WHERE [{guidField}] = @guid";
-                using var chkCmd = new SqlCommand(checkSql, tgtConn);
-                chkCmd.Parameters.AddWithValue("@guid", guidValue);
-                if (Convert.ToInt32(chkCmd.ExecuteScalar()) > 0) return;
-            }
-
-            var cols = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
-            var selSql = $"SELECT {cols} FROM dbo.[{tableName}] WHERE [{guidField}] = @guid";
-            using var selCmd = new SqlCommand(selSql, srcConn);
-            selCmd.Parameters.AddWithValue("@guid", guidValue);
-            var dt = new DataTable();
-            using var adapter = new SqlDataAdapter(selCmd);
-            adapter.Fill(dt);
-            if (dt.Rows.Count == 0) return;
-
-            using var bulk = new SqlBulkCopy(tgtConn);
-            bulk.DestinationTableName = $"dbo.[{tableName}]";
-            foreach (var col in tgtColumns)
-                bulk.ColumnMappings.Add(col, col);
-            bulk.WriteToServer(dt);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[编码规则] 复制表{tableName}失败：" + ex.Message);
-        }
     }
 
     /// <summary>
@@ -1052,7 +922,7 @@ ORDER BY A.NAME";
             }
 
             // 复制数据
-            CopyTableDataByCode(srcConn, tgtConn, "S_DATASELECT", "CODE", code);
+            TableCopyService.CopyTableData(srcConn, tgtConn, "S_DATASELECT", "CODE", code, false, "[标准查询]");
 
             System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 复制成功");
         }
@@ -1087,39 +957,4 @@ ORDER BY A.NAME";
         return dt.Rows.Count > 0 ? dt : null;
     }
 
-    /// <summary>
-    /// 根据CODE字段复制表数据
-    /// </summary>
-    private void CopyTableDataByCode(SqlConnection srcConn, SqlConnection tgtConn, string tableName, string codeField, string codeValue)
-    {
-        try
-        {
-            var tgtColumns = GetTableColumns(tgtConn, tableName);
-            if (tgtColumns.Count == 0) return;
-
-            var checkSql = $"SELECT COUNT(*) FROM dbo.[{tableName}] WHERE [{codeField}] = @code";
-            using var chkCmd = new SqlCommand(checkSql, tgtConn);
-            chkCmd.Parameters.AddWithValue("@code", codeValue);
-            if (Convert.ToInt32(chkCmd.ExecuteScalar()) > 0) return;
-
-            var cols = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
-            var selSql = $"SELECT {cols} FROM dbo.[{tableName}] WHERE [{codeField}] = @code";
-            using var selCmd = new SqlCommand(selSql, srcConn);
-            selCmd.Parameters.AddWithValue("@code", codeValue);
-            var dt = new DataTable();
-            using var adapter = new SqlDataAdapter(selCmd);
-            adapter.Fill(dt);
-            if (dt.Rows.Count == 0) return;
-
-            using var bulk = new SqlBulkCopy(tgtConn);
-            bulk.DestinationTableName = $"dbo.[{tableName}]";
-            foreach (var col in tgtColumns)
-                bulk.ColumnMappings.Add(col, col);
-            bulk.WriteToServer(dt);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[标准查询] 复制表{tableName}失败：" + ex.Message);
-        }
-    }
 }

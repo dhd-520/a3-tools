@@ -336,22 +336,22 @@ public partial class CrossDbCopyAppFormForm : Form
                     }));
 
                     // 复制S_APP_OBJECT表
-                    CopyTableData(srcConn, tgtConn, "S_APP_OBJECT", "GUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_OBJECT", "GUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制S_APP_DATA表
-                    CopyTableData(srcConn, tgtConn, "S_APP_DATA", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_DATA", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制S_APP_CONTROL表
-                    CopyTableData(srcConn, tgtConn, "S_APP_CONTROL", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_CONTROL", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制S_APP_FILTER表
-                    CopyTableData(srcConn, tgtConn, "S_APP_FILTER", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_FILTER", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制S_OBJECTBAR表   扫码定义
-                    CopyTableData(srcConn, tgtConn, "S_OBJECTBAR", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTBAR", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                     // 复制S_APP_OBJECT_BACKGROUD表 颜色设置
-                    CopyTableData(srcConn, tgtConn, "S_APP_OBJECT_BACKGROUD", "OBJECTGUID", objectGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_OBJECT_BACKGROUD", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
 
                 }
 
@@ -366,90 +366,6 @@ public partial class CrossDbCopyAppFormForm : Form
                 return false;
             }
         });
-    }
-
-    private void CopyTableData(SqlConnection srcConn, SqlConnection tgtConn, string tableName, string whereField, string whereValue, bool deleteFirst)
-    {
-        try
-        {
-            // 获取目标表的列信息
-            var tgtColumns = GetTableColumns(tgtConn, tableName);
-            if (tgtColumns.Count == 0)
-            {
-                Debug.WriteLine($"目标表{tableName}不存在或没有列");
-                return;
-            }
-
-            // 如果需要先删除
-            if (deleteFirst)
-            {
-                var deleteSql = $"DELETE FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-                using var deleteCmd = new SqlCommand(deleteSql, tgtConn);
-                deleteCmd.Parameters.AddWithValue("@value", whereValue);
-                deleteCmd.ExecuteNonQuery();
-            }
-
-            // 从源数据库读取数据到DataTable
-            var selectColumns = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
-            var selectSql = $"SELECT {selectColumns} FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-            using var selectCmd = new SqlCommand(selectSql, srcConn);
-            selectCmd.Parameters.AddWithValue("@value", whereValue);
-
-            var dataTable = new System.Data.DataTable();
-            using (var adapter = new SqlDataAdapter(selectCmd))
-            {
-                adapter.Fill(dataTable);
-            }
-
-            if (dataTable.Rows.Count == 0) return;
-
-            // 检查是否已存在
-            if (!deleteFirst)
-            {
-                var checkSql = $"SELECT COUNT(*) FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-                using var checkCmd = new SqlCommand(checkSql, tgtConn);
-                checkCmd.Parameters.AddWithValue("@value", whereValue);
-                var count = Convert.ToInt32(checkCmd.ExecuteScalar());
-                if (count > 0)
-                {
-                    Debug.WriteLine($"表{tableName}中{whereField}={whereValue}已存在，跳过");
-                    return;
-                }
-            }
-
-            // 使用SqlBulkCopy批量写入，自动处理所有列类型
-            using var bulkCopy = new SqlBulkCopy(tgtConn);
-            bulkCopy.DestinationTableName = $"dbo.[{tableName}]";
-            foreach (var col in tgtColumns)
-            {
-                bulkCopy.ColumnMappings.Add(col, col);
-            }
-            bulkCopy.WriteToServer(dataTable);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
-            throw;
-        }
-    }
-
-    private List<string> GetTableColumns(SqlConnection conn, string tableName)
-    {
-        var columns = new List<string>();
-        var sql = @"
-            SELECT COLUMN_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'
-            ORDER BY ORDINAL_POSITION";
-        using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@tableName", tableName);
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            columns.Add(reader.GetString(0));
-        }
-        reader.Close();
-        return columns;
     }
 
     private void BtnSearch_Click(object? sender, EventArgs e)

@@ -343,9 +343,9 @@ public partial class CrossDbCopyObjectLinkForm : Form
                         continue;
                     }
 
-                    CopyTableData(srcConn, tgtConn, "S_OBJECTLINK", "GUID", mainGuid, deleteFirst);
-                    CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKDETAIL", "OBJECTLINKGUID", mainGuid, deleteFirst);
-                    CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKCROSSCHECK", "OBJECTLINKGUID", mainGuid, deleteFirst);
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTLINK", "GUID", mainGuid, deleteFirst, "[对象关联]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKDETAIL", "OBJECTLINKGUID", mainGuid, deleteFirst, "[对象关联]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKCROSSCHECK", "OBJECTLINKGUID", mainGuid, deleteFirst, "[对象关联]");
                     successCount++;
                 }
 
@@ -382,122 +382,6 @@ public partial class CrossDbCopyObjectLinkForm : Form
         cmd.Parameters.AddWithValue("@code", code);
         var result = cmd.ExecuteScalar();
         return result?.ToString();
-    }
-
-    private void CopyTableData(SqlConnection srcConn, SqlConnection tgtConn, string tableName, string whereField, string whereValue, bool deleteFirst)
-    {
-        try
-        {
-            var tgtColumns = GetTableColumns(tgtConn, tableName);
-            if (tgtColumns.Count == 0) return;
-
-            if (deleteFirst)
-            {
-                var deleteSql = $"DELETE FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-                using var deleteCmd = new SqlCommand(deleteSql, tgtConn);
-                deleteCmd.Parameters.AddWithValue("@value", whereValue);
-                deleteCmd.ExecuteNonQuery();
-            }
-            else
-            {
-                var checkSql = $"SELECT COUNT(*) FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-                using var checkCmd = new SqlCommand(checkSql, tgtConn);
-                checkCmd.Parameters.AddWithValue("@value", whereValue);
-                if (Convert.ToInt32(checkCmd.ExecuteScalar()) > 0)
-                {
-                    Debug.WriteLine($"表{tableName}中{whereField}={whereValue}已存在，跳过");
-                    return;
-                }
-            }
-
-            var selectColumns = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
-            var selectSql = $"SELECT {selectColumns} FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
-            using var selectCmd = new SqlCommand(selectSql, srcConn);
-            selectCmd.Parameters.AddWithValue("@value", whereValue);
-
-            var dataTable = new System.Data.DataTable();
-            using (var adapter = new SqlDataAdapter(selectCmd))
-            {
-                adapter.Fill(dataTable);
-            }
-
-            if (dataTable.Rows.Count == 0) return;
-
-            using var bulkCopy = new SqlBulkCopy(tgtConn);
-            bulkCopy.DestinationTableName = $"dbo.[{tableName}]";
-            foreach (var col in tgtColumns)
-            {
-                bulkCopy.ColumnMappings.Add(col, col);
-            }
-            bulkCopy.WriteToServer(dataTable);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
-            throw;
-        }
-    }
-
-    private void CopyTableDataByParentGuid(SqlConnection srcConn, SqlConnection tgtConn, string tableName, string parentField, string parentGuid, bool deleteFirst)
-    {
-        try
-        {
-            var tgtColumns = GetTableColumns(tgtConn, tableName);
-            if (tgtColumns.Count == 0) return;
-
-            if (deleteFirst)
-            {
-                var deleteSql = $"DELETE FROM dbo.[{tableName}] WHERE [{parentField}] = @parentGuid";
-                using var deleteCmd = new SqlCommand(deleteSql, tgtConn);
-                deleteCmd.Parameters.AddWithValue("@parentGuid", parentGuid);
-                deleteCmd.ExecuteNonQuery();
-            }
-
-            var selectColumns = string.Join(", ", tgtColumns.Select(c => "[" + c + "]"));
-            var selectSql = $"SELECT {selectColumns} FROM dbo.[{tableName}] WHERE [{parentField}] = @parentGuid";
-            using var selectCmd = new SqlCommand(selectSql, srcConn);
-            selectCmd.Parameters.AddWithValue("@parentGuid", parentGuid);
-
-            var dataTable = new System.Data.DataTable();
-            using (var adapter = new SqlDataAdapter(selectCmd))
-            {
-                adapter.Fill(dataTable);
-            }
-
-            if (dataTable.Rows.Count == 0) return;
-
-            using var bulkCopy = new SqlBulkCopy(tgtConn);
-            bulkCopy.DestinationTableName = $"dbo.[{tableName}]";
-            foreach (var col in tgtColumns)
-            {
-                bulkCopy.ColumnMappings.Add(col, col);
-            }
-            bulkCopy.WriteToServer(dataTable);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
-            throw;
-        }
-    }
-
-    private List<string> GetTableColumns(SqlConnection conn, string tableName)
-    {
-        var columns = new List<string>();
-        var sql = @"
-            SELECT COLUMN_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'
-            ORDER BY ORDINAL_POSITION";
-        using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@tableName", tableName);
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            columns.Add(reader.GetString(0));
-        }
-        reader.Close();
-        return columns;
     }
 
     private void BtnSearch_Click(object? sender, EventArgs e)
