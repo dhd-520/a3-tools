@@ -623,7 +623,7 @@ public partial class CrossDbCopyReportForm : Form
         var selectedCodes = new List<string>();
         foreach (DataGridViewRow row in dgvSearchResults.SelectedRows)
         {
-            var code = row.Cells["代码"].Value?.ToString();
+            var code = row.Cells["Code"].Value?.ToString();
             if (!string.IsNullOrWhiteSpace(code))
             {
                 selectedCodes.Add(code);

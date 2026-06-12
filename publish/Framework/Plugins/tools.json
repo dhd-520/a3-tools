@@ -51,6 +51,26 @@
       "category": "跨库"
     },
     {
+      "name": "复制WEB看板",
+      "description": "复制WEB看板到目标账套（通过CODE）",
+      "library": "A3Tools.Plugins.Default.dll",
+      "className": "A3Tools.Plugins.Default.CrossDbCopyWebObjectTool",
+      "methodName": "Execute",
+      "enabled": true,
+      "icon": "",
+      "category": "跨库"
+    },
+    {
+      "name": "复制移动看板",
+      "description": "复制移动看板到目标账套（通过CODE）",
+      "library": "A3Tools.Plugins.Default.dll",
+      "className": "A3Tools.Plugins.Default.CrossDbCopyAppChartTool",
+      "methodName": "Execute",
+      "enabled": true,
+      "icon": "",
+      "category": "跨库"
+    },
+    {
       "name": "搜索后台表单",
       "description": "搜索后台表单",
       "library": "A3Tools.Plugins.Default.dll",

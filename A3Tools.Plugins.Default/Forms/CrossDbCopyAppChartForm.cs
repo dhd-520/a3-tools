@@ -449,7 +449,7 @@ public partial class CrossDbCopyAppChartForm : Form
         catch (Exception ex)
         {
             Debug.WriteLine($"复制表{tableName}失败: {ex.Message}");
-            throw;
+            throw new Exception($"复制表{tableName}失败: {ex.Message}");
         }
     }
 

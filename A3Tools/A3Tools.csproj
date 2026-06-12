@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\A3Tools.Common\A3Tools.Common.csproj" />
+    <ProjectReference Include="..\A3Tools.Plugins.Default\A3Tools.Plugins.Default.csproj" />
   </ItemGroup>
 
   <!-- 插件目录 -->
@@ -36,14 +37,26 @@
     <None Update="Plugins\tools.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="Plugins\A3Tools.Plugins.Default.dll">
+    <None Update="Plugins\A3Tools.Plugins.Default.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
+  <!-- 构建后复制插件 DLL 到 Plugins 文件夹 -->
+  <Target Name="CopyPluginsToFolder" AfterTargets="Build">
+    <Copy SourceFiles="$(OutputPath)A3Tools.Plugins.Default.dll" DestinationFolder="$(MSBuildProjectDirectory)\Plugins" />
+  </Target>
+
   <!-- 复制图标到输出目录（托盘图标用） -->
   <ItemGroup>
     <None Include="A3Tool.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 用户手册 -->
+  <ItemGroup>
+    <None Include="..\A3工具箱_用户手册.docx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
