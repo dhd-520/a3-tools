@@ -313,11 +313,11 @@ public partial class CrossDbCopyWebObjectForm : Form
                         continue;
                     }
 
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_WEBOBJECT", "GUID", webObjectGuid, deleteFirst, "[Web对象]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBCONTROL", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web对象]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBDATA", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web对象]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBSTYLE", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web对象]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBCMD", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web对象]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_WEBOBJECT", "GUID", webObjectGuid, deleteFirst, "[Web看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBCONTROL", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBDATA", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBSTYLE", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_WEBCMD", "WEBOBJECTGUID", webObjectGuid, deleteFirst, "[Web看板]");
                     successCount++;
                 }
 

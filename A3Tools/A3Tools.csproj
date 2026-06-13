@@ -8,6 +8,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>A3Tool.ico</ApplicationIcon>
     <AssemblyName>A3Tools</AssemblyName>
+
+    <!-- 单文件发布参数（默认关闭，需要时通过命令行 -p:PublishSingleFile=true 启用） -->
+    <PublishSingleFile Condition="'$(PublishSingleFile)' == ''">false</PublishSingleFile>
+    <SelfContained Condition="'$(SelfContained)' == ''">false</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(IncludeNativeLibrariesForSelfExtract)' == ''">false</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile Condition="'$(EnableCompressionInSingleFile)' == ''">false</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <!-- 为 Designer.cs 添加嵌套关系（SDK默认已包含，通过Update添加DependentUpon） -->
@@ -32,25 +38,28 @@
     <ProjectReference Include="..\A3Tools.Plugins.Default\A3Tools.Plugins.Default.csproj" />
   </ItemGroup>
 
-  <!-- 插件目录 -->
+  <!-- 插件目录（单文件发布时排除在 exe 外，保留为独立文件） -->
   <ItemGroup>
     <None Update="Plugins\tools.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
     <None Update="Plugins\A3Tools.Plugins.Default.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
   </ItemGroup>
 
-  <!-- 构建后复制插件 DLL 到 Plugins 文件夹 -->
-  <Target Name="CopyPluginsToFolder" AfterTargets="Build">
-    <Copy SourceFiles="$(OutputPath)A3Tools.Plugins.Default.dll" DestinationFolder="$(MSBuildProjectDirectory)\Plugins" />
+  <!-- 构建/发布后复制插件 DLL 到 Plugins 子目录（插件 DLL 不进单文件包，需保持为独立文件） -->
+  <Target Name="CopyPluginsToFolder" AfterTargets="Build;Publish">
+    <Copy SourceFiles="$(OutputPath)A3Tools.Plugins.Default.dll" DestinationFolder="$(OutputPath)Plugins" Condition="Exists('$(OutputPath)A3Tools.Plugins.Default.dll')" />
   </Target>
 
-  <!-- 复制图标到输出目录（托盘图标用） -->
+  <!-- 复制图标到输出目录（托盘图标用，单文件发布时也保留为独立文件，方便运行时加载） -->
   <ItemGroup>
     <None Include="A3Tool.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
   </ItemGroup>
 
@@ -58,6 +67,7 @@
   <ItemGroup>
     <None Include="..\A3工具箱_用户手册.docx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
   </ItemGroup>
 

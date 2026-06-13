@@ -25,7 +25,14 @@ public class ToolExecutorService
     
     public ToolExecutorService()
     {
-        _pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Plugins");
+        // 优先使用 AppContext.BaseDirectory（.NET 6+，单文件发布下指向 exe 真实目录）
+        // 回退到 AppDomain.BaseDirectory
+        var baseDir = AppContext.BaseDirectory;
+        if (string.IsNullOrEmpty(baseDir) || !Directory.Exists(baseDir))
+        {
+            baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        }
+        _pluginsDir = Path.Combine(baseDir, "Plugins");
         EnsurePluginsDirectory();
     }
     

@@ -99,12 +99,12 @@ public class RemoteConnectTool
 }
 
 /// <summary>
-/// 跨库复制表结构工具
+/// 跨库复制数据库对象工具
 /// </summary>
 public class CrossDbCopyTableTool
 {
-    public string Name => "跨库复制表结构";
-    public string Description => "复制指定表的结构到目标数据库";
+    public string Name => "跨库复制数据库对象";
+    public string Description => "复制表/视图/函数/存储过程等数据库对象到目标数据库（支持搜索选源库对象）";
 
     public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
     {

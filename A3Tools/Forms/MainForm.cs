@@ -35,15 +35,29 @@ public partial class MainForm : Form, IToolContext
     {
         try
         {
-            string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "A3Tool.ico");
+            // 优先使用 AppContext.BaseDirectory（.NET 6+，单文件发布下指向 exe 真实目录）
+            // 回退到 AppDomain.BaseDirectory
+            string baseDir = AppContext.BaseDirectory;
+            if (string.IsNullOrEmpty(baseDir) || !File.Exists(Path.Combine(baseDir, "A3Tool.ico")))
+            {
+                baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            }
+            string iconPath = Path.Combine(baseDir, "A3Tool.ico");
             if (File.Exists(iconPath))
             {
                 notifyIcon.Icon = new Icon(iconPath);
+            }
+            else
+            {
+                // 兜底：找不到外部 .ico 时使用系统默认图标，避免 notifyIcon.Icon 为 null
+                notifyIcon.Icon = SystemIcons.Application;
             }
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"加载托盘图标失败: {ex.Message}");
+            // 异常时也兜底一个系统图标
+            try { notifyIcon.Icon = SystemIcons.Application; } catch { }
         }
     }
 
@@ -1145,7 +1159,14 @@ public partial class MainForm : Form, IToolContext
 
     private void LoadExternalPlugins()
     {
-        string pluginDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Plugins");
+        // 优先使用 AppContext.BaseDirectory（.NET 6+，单文件发布下指向 exe 真实目录）
+        // 回退到 AppDomain.BaseDirectory
+        string baseDir = AppContext.BaseDirectory;
+        if (string.IsNullOrEmpty(baseDir) || !Directory.Exists(Path.Combine(baseDir, "Plugins")))
+        {
+            baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        }
+        string pluginDir = Path.Combine(baseDir, "Plugins");
         if (!Directory.Exists(pluginDir)) return;
 
         foreach (var file in Directory.GetFiles(pluginDir, "*.dll"))

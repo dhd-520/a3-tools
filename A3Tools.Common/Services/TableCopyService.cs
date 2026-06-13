@@ -67,7 +67,7 @@ public static class TableCopyService
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"{tag}复制表{tableName}失败: {ex.Message}");
-            throw;
+            throw new Exception($"{tag}复制表{tableName}失败: {ex.Message}");
         }
     }
 

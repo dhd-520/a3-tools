@@ -511,16 +511,16 @@ ORDER BY A.NAME";
                     }));
 
                     // 复制S_OBJECT表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECT", "GUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECT", "GUID", objectGuid, deleteFirst, "[Win表单]");
 
                     // 复制S_CONTROL表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_CONTROL", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_CONTROL", "OBJECTGUID", objectGuid, deleteFirst, "[Win表单]");
 
                     // 复制S_DATA表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_DATA", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_DATA", "OBJECTGUID", objectGuid, deleteFirst, "[Win表单]");
 
                     // 复制样式表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTSTYLE", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTSTYLE", "OBJECTGUID", objectGuid, deleteFirst, "[Win表单]");
 
                     // 复制编码规则（S_CONTROL中DATANAME=CODE/BILLNO的EXTENDS）
                     CopyCodeRulesForObject(srcConn, tgtConn, objectGuid);

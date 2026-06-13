@@ -336,22 +336,22 @@ public partial class CrossDbCopyAppFormForm : Form
                     }));
 
                     // 复制S_APP_OBJECT表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_OBJECT", "GUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_OBJECT", "GUID", objectGuid, deleteFirst, "[APP表单]");
 
                     // 复制S_APP_DATA表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_DATA", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_DATA", "OBJECTGUID", objectGuid, deleteFirst, "[APP表单]");
 
                     // 复制S_APP_CONTROL表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_CONTROL", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_CONTROL", "OBJECTGUID", objectGuid, deleteFirst, "[APP表单]");
 
                     // 复制S_APP_FILTER表
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_FILTER", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_FILTER", "OBJECTGUID", objectGuid, deleteFirst, "[APP表单]");
 
                     // 复制S_OBJECTBAR表   扫码定义
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTBAR", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTBAR", "OBJECTGUID", objectGuid, deleteFirst, "[APP表单]");
 
                     // 复制S_APP_OBJECT_BACKGROUD表 颜色设置
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_OBJECT_BACKGROUD", "OBJECTGUID", objectGuid, deleteFirst, "[表单]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_OBJECT_BACKGROUD", "OBJECTGUID", objectGuid, deleteFirst, "[APP表单]");
 
                 }
 

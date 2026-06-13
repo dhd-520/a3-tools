@@ -1,3 +1,4 @@
+using System.Data;
 using System.Diagnostics;
 using System.Windows.Forms;
 using A3Tools.Models;
@@ -28,7 +29,7 @@ public partial class CrossDbCopyTableForm : Form
         _currentAccount = currentAccount;
         InitializeComponent();
         InitObjectTypeCombo();
-        
+
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
 
         // Ctrl+S 选择源账套，Ctrl+D 选择目标账套
@@ -36,6 +37,45 @@ public partial class CrossDbCopyTableForm : Form
         {
             if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { BtnSelectSource_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.D && e.Modifiers == Keys.Control) { BtnSelectTarget_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
+        };
+
+        // 搜索区 DataGridView 多选 + 复选框联动
+        dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        dgvSearchResults.MultiSelect = true;
+
+        dgvSearchResults.SelectionChanged += (s, e) =>
+        {
+            if (!dgvSearchResults.Columns.Contains("chk")) return;
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null) checkCell.Value = row.Selected;
+            }
+        };
+
+        // 表头点击全选/取消全选
+        dgvSearchResults.ColumnHeaderMouseClick += (s, e) =>
+        {
+            if (!dgvSearchResults.Columns.Contains("chk") || e.ColumnIndex != 0) return;
+            var allChecked = true;
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell == null || checkCell.Value == null || !(bool)checkCell.Value)
+                {
+                    allChecked = false;
+                    break;
+                }
+            }
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null)
+                {
+                    checkCell.Value = !allChecked;
+                    row.Selected = !allChecked;
+                }
+            }
         };
     }
 
@@ -64,6 +104,246 @@ public partial class CrossDbCopyTableForm : Form
     private void BtnCancel_Click(object? sender, EventArgs e)
     {
         this.Close();
+    }
+
+    /// <summary>
+    /// 搜索按钮：根据当前选中的对象类型查询源数据库中所有匹配的对象
+    /// </summary>
+    private void BtnSearch_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(txtSourceServer.Text))
+        {
+            MessageBox.Show("请填写源数据库地址！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(txtSourceDbName.Text))
+        {
+            MessageBox.Show("请填写源数据库名称！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (cboObjectType.SelectedItem == null)
+        {
+            MessageBox.Show("请先选择对象类型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var keyword = txtSearchKeyword.Text.Trim();
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            MessageBox.Show("请输入搜索关键字！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            txtSearchKeyword.Focus();
+            return;
+        }
+
+        var objectType = ((ObjectTypeItem)cboObjectType.SelectedItem).Value;
+
+        lblSearchProgress.Text = "查询中...";
+        lblSearchProgress.ForeColor = Color.Blue;
+        dgvSearchResults.DataSource = null;
+        btnSearch.Enabled = false;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                var server = txtSourceServer.Text.Trim();
+                var dbName = txtSourceDbName.Text.Trim();
+                var user = txtSourceUser.Text.Trim();
+                var password = txtSourcePassword.Text;
+
+                var connString = string.IsNullOrEmpty(user)
+                    ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
+                    : $"Server={server};Database={dbName};User Id={user};Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
+
+                // 按对象类型查询 sys.objects（过滤系统对象）
+                var sql = @"
+SELECT o.name AS 对象名称,
+       o.type_desc AS 类型描述,
+       o.create_date AS 创建时间,
+       o.modify_date AS 修改时间
+FROM sys.objects o
+WHERE o.type = @objType
+  AND o.is_ms_shipped = 0
+  AND o.name LIKE @keyword
+ORDER BY o.name";
+
+                using var conn = new Microsoft.Data.SqlClient.SqlConnection(connString);
+                using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@objType", objectType);
+                cmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
+                using var adapter = new Microsoft.Data.SqlClient.SqlDataAdapter(cmd);
+                var dt = new DataTable();
+                adapter.Fill(dt);
+
+                this.Invoke(new Action(() =>
+                {
+                    if (dgvSearchResults.Columns.Contains("chk"))
+                    {
+                        dgvSearchResults.Columns.Remove("chk");
+                    }
+                    dgvSearchResults.DataSource = dt;
+                    var checkCol = new DataGridViewCheckBoxColumn
+                    {
+                        HeaderText = "选择",
+                        Width = 50,
+                        Name = "chk"
+                    };
+                    dgvSearchResults.Columns.Insert(0, checkCol);
+                    dgvSearchResults.AutoResizeColumns();
+                    if (dgvSearchResults.Columns.Contains("创建时间"))
+                        dgvSearchResults.Columns["创建时间"].Visible = false;
+                    if (dgvSearchResults.Columns.Contains("修改时间"))
+                        dgvSearchResults.Columns["修改时间"].Visible = false;
+                    if (dgvSearchResults.Rows.Count > 0)
+                    {
+                        dgvSearchResults.Rows[0].Selected = true;
+                    }
+                    foreach (DataGridViewRow row in dgvSearchResults.Rows)
+                    {
+                        var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                        if (checkCell != null) checkCell.Value = row.Selected;
+                    }
+                    lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
+                    lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
+                    lblSearchProgress.ForeColor = Color.Green;
+                }));
+            }
+            catch (Exception ex)
+            {
+                this.Invoke(new Action(() =>
+                {
+                    lblSearchProgress.Text = "查询失败";
+                    lblSearchProgress.ForeColor = Color.Red;
+                    MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }));
+            }
+            finally
+            {
+                this.Invoke(new Action(() =>
+                {
+                    btnSearch.Enabled = true;
+                }));
+            }
+        });
+    }
+
+    /// <summary>
+    /// 添加选中：把搜索结果中勾选的对象名追加到 txtObjects（去重）
+    /// </summary>
+    private void BtnAddSelected_Click(object? sender, EventArgs e)
+    {
+        if (dgvSearchResults.SelectedRows.Count == 0)
+        {
+            MessageBox.Show("请先在搜索结果中勾选要添加的对象！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var selectedNames = new List<string>();
+        foreach (DataGridViewRow row in dgvSearchResults.SelectedRows)
+        {
+            var name = row.Cells["对象名称"].Value?.ToString();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                selectedNames.Add(name);
+            }
+        }
+
+        if (selectedNames.Count == 0) return;
+
+        var currentText = txtObjects.Text.Trim();
+        var separator = string.IsNullOrEmpty(currentText) ? "" : ";";
+
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(currentText))
+        {
+            currentText.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .ToList()
+                .ForEach(n => existing.Add(n.Trim()));
+        }
+
+        var newNames = selectedNames.Where(n => !existing.Contains(n)).ToList();
+        if (newNames.Count == 0)
+        {
+            MessageBox.Show("选中的对象已全部添加！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var addedText = string.Join(";", newNames);
+        txtObjects.Text = currentText + separator + addedText;
+
+        lblSearchProgress.Text = $"已添加 {newNames.Count} 个对象到列表";
+        lblSearchProgress.ForeColor = Color.Green;
+    }
+
+    /// <summary>
+    /// 清空选项：一键清空对象名称文本框
+    /// </summary>
+    private void BtnClearSelected_Click(object? sender, EventArgs e)
+    {
+        txtObjects.Clear();
+        dgvSearchResults.ClearSelection();
+        lblSearchProgress.Text = "已清空对象列表";
+        lblSearchProgress.ForeColor = Color.Gray;
+    }
+
+    /// <summary>
+    /// 对比表结构：先校验【类型=表结构】【目标库已填】【搜索区有勾选】，然后弹出对比窗体
+    /// </summary>
+    private void BtnCompareTables_Click(object? sender, EventArgs e)
+    {
+        // 1. 校验对象类型
+        if (cboObjectType.SelectedItem == null)
+        {
+            MessageBox.Show("请先选择对象类型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        var objectType = ((ObjectTypeItem)cboObjectType.SelectedItem).Value;
+        if (objectType != "U")
+        {
+            MessageBox.Show("对比表结构功能仅支持【表结构】类型，请先将对象类型切换为表结构！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            cboObjectType.Focus();
+            return;
+        }
+
+        // 2. 校验源库
+        if (string.IsNullOrWhiteSpace(txtSourceServer.Text) || string.IsNullOrWhiteSpace(txtSourceDbName.Text))
+        {
+            MessageBox.Show("请填写源数据库连接信息！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 3. 校验目标库
+        if (string.IsNullOrWhiteSpace(txtTargetServer.Text) || string.IsNullOrWhiteSpace(txtTargetDbName.Text))
+        {
+            MessageBox.Show("请填写目标数据库连接信息！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 4. 校验搜索区有勾选
+        if (dgvSearchResults.SelectedRows.Count == 0)
+        {
+            MessageBox.Show("请先在搜索结果中勾选要对比的表！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var selectedTables = new List<string>();
+        foreach (DataGridViewRow row in dgvSearchResults.SelectedRows)
+        {
+            var name = row.Cells["对象名称"].Value?.ToString();
+            if (!string.IsNullOrWhiteSpace(name)) selectedTables.Add(name);
+        }
+        if (selectedTables.Count == 0)
+        {
+            MessageBox.Show("未获取到勾选的表名！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 5. 弹出对比窗体
+        var compareForm = new CompareTablesForm(
+            txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
+            txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
+            selectedTables);
+        compareForm.ShowDialog();
     }
 
     private void LoadCurrentAccount()
@@ -364,15 +644,15 @@ public partial class CrossDbCopyTableForm : Form
                         {
                             lblProgress.Text = $"正在复制触发器... ({objectName})";
                         }));
-                        
+
                         var triggers = GetTriggersForTable(srcConn, objectName);
                         Debug.WriteLine($"表 {objectName} 有 {triggers.Count} 个触发器");
-                        
+
                         if (triggers.Count == 0)
                         {
                             Debug.WriteLine($"警告: 表 {objectName} 没有找到触发器（或查询失败）");
                         }
-                        
+
                         foreach (var triggerScript in triggers)
                         {
                             try
@@ -504,14 +784,14 @@ public partial class CrossDbCopyTableForm : Form
                 var triggerName = reader["trigger_name"]?.ToString() ?? "";
                 var triggerType = reader["trigger_type"]?.ToString() ?? "SQL_TRIGGER";
                 var triggerDef = reader["definition"]?.ToString();
-                
+
                 Debug.WriteLine($"触发器名称: {triggerName}, 类型: {triggerType}");
                 Debug.WriteLine($"触发器定义前100字符: {triggerDef?.Substring(0, Math.Min(100, triggerDef.Length))}");
-                
+
                 if (!string.IsNullOrEmpty(triggerDef))
                 {
                     var trimmed = triggerDef.Trim();
-                    
+
                     // 检查definition是否已包含CREATE TRIGGER头，可能嵌在注释中间（如 Author/Description 注释块之后）
                     var createIdx = trimmed.ToUpperInvariant().IndexOf("CREATE TRIGGER");
                     if (createIdx >= 0)
@@ -543,11 +823,11 @@ public partial class CrossDbCopyTableForm : Form
                         {
                             Debug.WriteLine($"查触发器事件失败: {ex.Message}");
                         }
-                        
-                        var eventClause = events.Count > 0 
+
+                        var eventClause = events.Count > 0
                             ? string.Join(", ", events.Select(e => e.Replace("SQL_TRIGGER_EVENT_", "").Replace("_", " ")).ToArray())
                             : "INSERT";
-                        
+
                         triggers.Add($"CREATE TRIGGER [{triggerName}] ON [{tableName}] FOR {eventClause} AS{trimmed}");
                     }
                 }

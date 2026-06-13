@@ -36,3 +36,9 @@ TestForm/
 
 # Junk files
 nul
+
+# Publish outputs (Framework2/Standalone2/StandaloneSF/Framework/Standalone)
+publish/
+
+# ILRepack tools (download manually)
+tools/

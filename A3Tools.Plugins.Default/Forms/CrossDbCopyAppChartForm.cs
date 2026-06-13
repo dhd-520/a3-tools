@@ -313,11 +313,11 @@ public partial class CrossDbCopyAppChartForm : Form
                         continue;
                     }
 
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_CHART", "GUID", guid, deleteFirst, "[图表]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTDETAIL", "CHARTGUID", guid, deleteFirst, "[图表]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTDATASOURCE", "CHARTGUID", guid, deleteFirst, "[图表]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTROLE", "CHARTGUID", guid, deleteFirst, "[图表]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTCMD", "CHARTGUID", guid, deleteFirst, "[图表]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_CHART", "GUID", guid, deleteFirst, "[移动看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTDETAIL", "CHARTGUID", guid, deleteFirst, "[移动看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTDATASOURCE", "CHARTGUID", guid, deleteFirst, "[移动看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTROLE", "CHARTGUID", guid, deleteFirst, "[移动看板]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTCMD", "CHARTGUID", guid, deleteFirst, "[移动看板]");
                     successCount++;
                 }
 

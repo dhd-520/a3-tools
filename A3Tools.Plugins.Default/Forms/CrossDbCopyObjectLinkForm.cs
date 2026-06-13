@@ -343,9 +343,9 @@ public partial class CrossDbCopyObjectLinkForm : Form
                         continue;
                     }
 
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTLINK", "GUID", mainGuid, deleteFirst, "[对象关联]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKDETAIL", "OBJECTLINKGUID", mainGuid, deleteFirst, "[对象关联]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKCROSSCHECK", "OBJECTLINKGUID", mainGuid, deleteFirst, "[对象关联]");
+                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECTLINK", "GUID", mainGuid, deleteFirst, "[单据流转]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKDETAIL", "OBJECTLINKGUID", mainGuid, deleteFirst, "[单据流转]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_OBJECTLINKCROSSCHECK", "OBJECTLINKGUID", mainGuid, deleteFirst, "[单据流转]");
                     successCount++;
                 }
 
