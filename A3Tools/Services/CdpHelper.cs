@@ -417,14 +417,47 @@ public static class CdpHelper
         var pSelJs = JsonSerializer.Serialize(passwordSel);
         var bSelJs = JsonSerializer.Serialize(submitSel);
 
+        // 诊断 + 填表脚本
+        // 返回值约定：{{ ok: bool, missing: [string], count: {{u:int, p:int, b:int}}, url: string }}
+        // 1. 在主 frame 和所有 iframe 里查找元素
+        // 2. 返回每个选择器在所有 frame 中找到的元素总数（便于诊断）
+        // 3. 填表成功后返回 ok=true
         string script = $@"
 (function() {{
-  function findFirst(sel) {{
-    try {{
-      var el = document.querySelector(sel);
-      if (el) return el;
-    }} catch (e) {{}}
-    return null;
+  function findInAllFrames(sel) {{
+    // 在当前 document 和所有 iframe 里查找，返回所有匹配元素数组
+    // 同时穿透 shadow DOM（Angular Material 等组件库会用到）
+    var results = [];
+    function deepQuerySelectorAll(root, selector) {{
+      var out = [];
+      try {{
+        var direct = root.querySelectorAll(selector);
+        for (var i = 0; i < direct.length; i++) out.push(direct[i]);
+      }} catch (e) {{}}
+      // 穿透 shadow root
+      var all = root.querySelectorAll('*');
+      for (var k = 0; k < all.length; k++) {{
+        if (all[k].shadowRoot) {{
+          var shadowResults = deepQuerySelectorAll(all[k].shadowRoot, selector);
+          for (var m = 0; m < shadowResults.length; m++) out.push(shadowResults[m]);
+        }}
+      }}
+      return out;
+    }}
+    function search(doc) {{
+      var els = deepQuerySelectorAll(doc, sel);
+      for (var i = 0; i < els.length; i++) results.push(els[i]);
+      // 递归子 iframe
+      var iframes = doc.querySelectorAll('iframe');
+      for (var j = 0; j < iframes.length; j++) {{
+        try {{
+          var idoc = iframes[j].contentDocument || iframes[j].contentWindow?.document;
+          if (idoc) search(idoc);
+        }} catch (e) {{}}
+      }}
+    }}
+    search(document);
+    return results;
   }}
   function setVal(el, val) {{
     var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
@@ -433,18 +466,35 @@ public static class CdpHelper
     el.dispatchEvent(new Event('input', {{ bubbles: true }}));
     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
   }}
-  // 第一道闸门：页面必须 readyState=complete（HTML 解析+子资源加载完成）
-  if (document.readyState !== 'complete') return false;
-  var u = findFirst({uSelJs});
-  var p = findFirst({pSelJs});
-  var b = findFirst({bSelJs});
-  if (u && p && b) {{
-    setVal(u, {uJs});
-    setVal(p, {pJs});
-    b.click();
-    return true;
+  function diagStatus() {{
+    var uMatches = findInAllFrames({uSelJs});
+    var pMatches = findInAllFrames({pSelJs});
+    var bMatches = findInAllFrames({bSelJs});
+    var status = {{
+      ok: false,
+      url: window.location.href,
+      count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }},
+      missing: []
+    }};
+    if (uMatches.length === 0) status.missing.push('username');
+    if (pMatches.length === 0) status.missing.push('password');
+    if (bMatches.length === 0) status.missing.push('button');
+    return status;
   }}
-  return false;
+  // 第一道闸门：页面必须 readyState=complete
+  if (document.readyState !== 'complete') {{
+    return {{ ok: false, reason: 'loading', readyState: document.readyState, diag: diagStatus() }};
+  }}
+  var uMatches = findInAllFrames({uSelJs});
+  var pMatches = findInAllFrames({pSelJs});
+  var bMatches = findInAllFrames({bSelJs});
+  if (uMatches.length > 0 && pMatches.length > 0 && bMatches.length > 0) {{
+    setVal(uMatches[0], {uJs});
+    setVal(pMatches[0], {pJs});
+    bMatches[0].click();
+    return {{ ok: true, count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }} }};
+  }}
+  return {{ ok: false, reason: 'not_found', diag: diagStatus() }};
 }})()
 ";
 
@@ -458,15 +508,62 @@ public static class CdpHelper
                 var result = await session.EvaluateAsync(script);
                 if (result.TryGetProperty("result", out var resultEl) &&
                     resultEl.TryGetProperty("value", out var valueEl) &&
-                    valueEl.ValueKind == JsonValueKind.True)
+                    valueEl.ValueKind == JsonValueKind.Object)
                 {
-                    CdpLog($"✓ 第 {attempt} 次轮询填表成功");
-                    return true;
+                    // 读取结构化的诊断信息
+                    string? reason = null;
+                    string? missing = null;
+                    string? diagUrl = null;
+                    string? countInfo = null;
+                    if (valueEl.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.True)
+                    {
+                        if (valueEl.TryGetProperty("count", out var cntEl))
+                        {
+                            countInfo = $"u={cntEl.GetProperty("u").GetInt32()} p={cntEl.GetProperty("p").GetInt32()} b={cntEl.GetProperty("b").GetInt32()}";
+                        }
+                        CdpLog($"✓ 第 {attempt} 次轮询填表成功 ({countInfo})");
+                        return true;
+                    }
+                    if (valueEl.TryGetProperty("reason", out var reasonEl))
+                    {
+                        reason = reasonEl.GetString();
+                    }
+                    if (valueEl.TryGetProperty("diag", out var diagEl))
+                    {
+                        if (diagEl.TryGetProperty("missing", out var mEl) && mEl.ValueKind == JsonValueKind.Array)
+                        {
+                            var missList = new List<string>();
+                            foreach (var m in mEl.EnumerateArray())
+                            {
+                                var s = m.GetString();
+                                if (!string.IsNullOrEmpty(s)) missList.Add(s);
+                            }
+                            missing = string.Join(",", missList);
+                        }
+                        if (diagEl.TryGetProperty("url", out var uEl))
+                        {
+                            diagUrl = uEl.GetString();
+                        }
+                        if (diagEl.TryGetProperty("count", out var cEl))
+                        {
+                            countInfo = $"u={cEl.GetProperty("u").GetInt32()} p={cEl.GetProperty("p").GetInt32()} b={cEl.GetProperty("b").GetInt32()}";
+                        }
+                    }
+                    // 第一次或每次 missing 变化时打日志
+                    if (reason == "not_found" && !string.IsNullOrEmpty(missing))
+                    {
+                        CdpLog($"  第 {attempt} 次：未找到 [{missing}] (找到数量：{countInfo}) URL={diagUrl}");
+                    }
+                    else if (reason == "loading")
+                    {
+                        // 页面还在 loading，不刷屏
+                    }
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 // 页面可能还没 ready，吞掉异常继续重试
+                if (attempt == 1) CdpLog($"  脚本执行异常: {ex.GetType().Name}: {ex.Message}");
             }
             await Task.Delay(200);
         }
