@@ -849,6 +849,7 @@ public partial class MainForm : Form, IToolContext
 
         if (!string.IsNullOrEmpty(browserPath) && File.Exists(browserPath))
         {
+            CdpHelper.CdpLog($"找到浏览器：{browserPath}");
             // 如果 useCdp 已算出 fullArgs，复用它；否则现场算
             string args = !string.IsNullOrEmpty(fullArgs) ? fullArgs : BuildBrowserArgs(url, browser, newWindow, useCdp ? cdpPort : 0, useCdp ? cdpUserDataDir : null);
 
@@ -916,10 +917,12 @@ public partial class MainForm : Form, IToolContext
         }
         else
         {
+            CdpHelper.CdpLog($"未找到浏览器：browser={browser} path=“{browserPath}”，尝试从注册表查找");
             // 浏览器未找到，尝试从注册表查找
             string? foundPath = FindBrowserFromRegistry(browser);
             if (!string.IsNullOrEmpty(foundPath) && File.Exists(foundPath))
             {
+                CdpHelper.CdpLog($"注册表找到浏览器：{foundPath}");
                 // 使用注册表找到的路径启动
                 string args = BuildBrowserArgs(url, browser, newWindow, useCdp ? cdpPort : 0, useCdp ? cdpUserDataDir : null);
                 bool useShellExecute = browser == "msedge" || browser == "firefox";
@@ -1183,12 +1186,23 @@ public partial class MainForm : Form, IToolContext
 
         return browser switch
         {
-            "chrome" => FindFileInPaths(programFiles, @"Google\Chrome\Application\chrome.exe"),
+            "chrome" => FindFileInPaths(
+                programFiles + @"\Google\Chrome\Application\chrome.exe",
+                programFilesX86 + @"\Google\Chrome\Application\chrome.exe"
+            ),
             "msedge" => FindFileInPaths(
+                // Edge 可能安装在 3 个位置：
+                // 1. C:\Program Files (x86)\Microsoft\Edge\... （64位系统上的默认位置）
+                // 2. C:\Program Files\Microsoft\Edge\... （少量机器）
+                // 3. C:\Users\xxx\AppData\Local\Microsoft\Edge\... （Dev/Canary）
+                programFilesX86 + @"\Microsoft\Edge\Application\msedge.exe",
                 programFiles + @"\Microsoft\Edge\Application\msedge.exe",
                 localAppData + @"\Microsoft\Edge\Application\msedge.exe"
             ),
-            "firefox" => FindFileInPaths(programFiles, @"Mozilla Firefox\firefox.exe"),
+            "firefox" => FindFileInPaths(
+                programFiles + @"\Mozilla Firefox\firefox.exe",
+                programFilesX86 + @"\Mozilla Firefox\firefox.exe"
+            ),
             "360se" => FindFileInPaths(programFilesX86, @"360safe\sechrome\sechrome.exe"),
             _ => string.Empty
         };
