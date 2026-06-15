@@ -37,6 +37,9 @@ public partial class SettingsDialog : Form
         chkShowLaunchDialog.Checked = settings.ShowLaunchOptionsDialog;
         txtSsmsPath.Text = settings.SsmsPath;
         chkBrowserNewWindow.Checked = settings.BrowserNewWindow;
+        txtUsernameSel.Text = settings.WebUsernameSelector;
+        txtPasswordSel.Text = settings.WebPasswordSelector;
+        txtSubmitSel.Text = settings.WebSubmitSelector;
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -71,6 +74,9 @@ public partial class SettingsDialog : Form
         settings.ShowLaunchOptionsDialog = chkShowLaunchDialog.Checked;
         settings.SsmsPath = txtSsmsPath.Text;
         settings.BrowserNewWindow = chkBrowserNewWindow.Checked;
+        settings.WebUsernameSelector = txtUsernameSel.Text.Trim();
+        settings.WebPasswordSelector = txtPasswordSel.Text.Trim();
+        settings.WebSubmitSelector = txtSubmitSel.Text.Trim();
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();

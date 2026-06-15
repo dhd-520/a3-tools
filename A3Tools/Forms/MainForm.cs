@@ -932,6 +932,28 @@ public partial class MainForm : Form, IToolContext
     {
         try
         {
+            // 从设置中读取选择器配置
+            var settings = _dataService.LoadSettings();
+            string usernameSel = settings.WebUsernameSelector;
+            string passwordSel = settings.WebPasswordSelector;
+            string submitSel = settings.WebSubmitSelector;
+
+            // 使用账套的 ServerUsername（默认 admin）和 ServerPassword
+            string username = account.ServerUsername;
+            string password = account.ServerPassword;
+
+            // 检查必要参数
+            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+            {
+                Debug.WriteLine("[CDP] 账套用户名为空或密码为空，跳过自动登录");
+                return;
+            }
+            if (string.IsNullOrEmpty(usernameSel) || string.IsNullOrEmpty(passwordSel) || string.IsNullOrEmpty(submitSel))
+            {
+                Debug.WriteLine("[CDP] 选择器未配置，请到设置中配置网页登录选择器");
+                return;
+            }
+
             // 等浏览器起来（CDP 端口开始监听）
             string? wsUrl = null;
             for (int i = 0; i < 30; i++)  // 最多等 6 秒
@@ -950,11 +972,11 @@ public partial class MainForm : Form, IToolContext
             bool ok = await CdpHelper.AutoLoginAsync(
                 session,
                 url,
-                account.WebUsernameSelector,
-                account.WebPasswordSelector,
-                account.WebSubmitSelector,
-                account.WebUsername,
-                account.WebPassword,
+                usernameSel,
+                passwordSel,
+                submitSel,
+                username,
+                password,
                 timeoutMs: 10000);
 
             await session.CloseAsync();

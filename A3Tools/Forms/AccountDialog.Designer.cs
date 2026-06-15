@@ -37,19 +37,11 @@ partial class AccountDialog
     private System.Windows.Forms.TextBox txtDatabaseName = null!;
     private System.Windows.Forms.TextBox txtRemotePassword = null!;
 
-    // ===== 网页版自动登录字段 =====
+    // ===== 网页版自动登录字段（用户名默认 admin，密码用账套密码） =====
     private System.Windows.Forms.Panel sepWeb = null!;
     private System.Windows.Forms.Label lblWebHint = null!;
-    private System.Windows.Forms.Label lblWebUsername = null!;
-    private System.Windows.Forms.TextBox txtWebUsername = null!;
-    private System.Windows.Forms.Label lblWebPassword = null!;
-    private System.Windows.Forms.TextBox txtWebPassword = null!;
-    private System.Windows.Forms.Label lblWebUsernameSelector = null!;
-    private System.Windows.Forms.TextBox txtWebUsernameSelector = null!;
-    private System.Windows.Forms.Label lblWebPasswordSelector = null!;
-    private System.Windows.Forms.TextBox txtWebPasswordSelector = null!;
-    private System.Windows.Forms.Label lblWebSubmitSelector = null!;
-    private System.Windows.Forms.TextBox txtWebSubmitSelector = null!;
+    private System.Windows.Forms.Label lblServerUsername = null!;
+    private System.Windows.Forms.TextBox txtServerUsername = null!;
 
     private System.Windows.Forms.Button btnSave = null!;
     private System.Windows.Forms.Button btnCancel = null!;
@@ -157,11 +149,11 @@ partial class AccountDialog
         sep2.Location = new System.Drawing.Point(lx, y); y += 20;
         AddMultiRow(lx, y, lw, "备注：", ix, 900, 80, out txtRemark); y += rh + 30;
 
-        // ===== 网页版自动登录区（CDP）=====
+        // ===== 网页版自动登录区（CDP）：用户名默认 admin，密码用账套密码，选择器在设置中配置 =====
         sepWeb.Location = new System.Drawing.Point(lx, y); y += 15;
         lblWebHint = new System.Windows.Forms.Label
         {
-            Text = "🌐 网页版自动登录（仅 Chrome / Edge 生效，凭证 AES 加密存储）",
+            Text = "🌐 网页版自动登录（仅 Chrome / Edge 生效，用户名默认 admin，密码使用账套密码，选择器在【设置】中配置）",
             Location = new System.Drawing.Point(lx, y),
             Size = new System.Drawing.Size(1100, 30),
             Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold),
@@ -170,17 +162,7 @@ partial class AccountDialog
         contentPanel.Controls.Add(lblWebHint);
         y += rh - 10;
 
-        AddRow(lx, y, lw, "登录用户名：", ix, out txtWebUsername); y += rh;
-        AddRow(lx, y, lw, "登录密码：", ix, out txtWebPassword); txtWebPassword.UseSystemPasswordChar = true; y += rh;
-        AddRow(lx, y, lw, "用户名选择器：", ix, out txtWebUsernameSelector);
-        txtWebUsernameSelector.PlaceholderText = "例：#username 或 input[ng-model=username]";
-        y += rh;
-        AddRow(lx, y, lw, "密码选择器：", ix, out txtWebPasswordSelector);
-        txtWebPasswordSelector.PlaceholderText = "例：#password 或 input[type=password]";
-        y += rh;
-        AddRow(lx, y, lw, "登录按钮选择器：", ix, out txtWebSubmitSelector);
-        txtWebSubmitSelector.PlaceholderText = "例：button[type=submit] 或 .login-btn";
-        y += rh + 10;
+        AddRow(lx, y, lw, "账套用户名：", ix, out txtServerUsername); y += rh + 10;
 
         footerPanel.Location = new System.Drawing.Point(0, y);
     }

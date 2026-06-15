@@ -88,7 +88,6 @@ public class DataService
         {
             account.DbPassword = EncryptionService.Decrypt(account.DbPassword ?? "");
             account.RemotePassword = EncryptionService.Decrypt(account.RemotePassword ?? "");
-            account.WebPassword = EncryptionService.Decrypt(account.WebPassword ?? "");
         }
         return accounts;
     }
@@ -105,8 +104,6 @@ public class DataService
                 account.DbPassword = EncryptionService.Encrypt(account.DbPassword);
             if (!string.IsNullOrEmpty(account.RemotePassword) && !IsEncrypted(account.RemotePassword))
                 account.RemotePassword = EncryptionService.Encrypt(account.RemotePassword);
-            if (!string.IsNullOrEmpty(account.WebPassword) && !IsEncrypted(account.WebPassword))
-                account.WebPassword = EncryptionService.Encrypt(account.WebPassword);
         }
         string json = JsonSerializer.Serialize(accounts, _jsonOptions);
         File.WriteAllText(_accountsFile, json);
@@ -157,8 +154,9 @@ public class DataService
                 account.DbPassword = accounts[index].DbPassword;
             if (string.IsNullOrEmpty(account.RemotePassword))
                 account.RemotePassword = accounts[index].RemotePassword;
-            if (string.IsNullOrEmpty(account.WebPassword))
-                account.WebPassword = accounts[index].WebPassword;
+            // 保留账套用户名（如果新用户名为空）
+            if (string.IsNullOrEmpty(account.ServerUsername))
+                account.ServerUsername = accounts[index].ServerUsername;
 
             accounts[index] = account;
             SaveAccounts(accounts);

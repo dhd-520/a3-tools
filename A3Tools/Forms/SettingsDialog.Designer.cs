@@ -21,6 +21,14 @@ partial class SettingsDialog
         hintLaunch = new Label();
         lblBrowserLaunch = new Label();
         chkBrowserNewWindow = new CheckBox();
+        lblWebSelectors = new Label();
+        lblUsernameSel = new Label();
+        txtUsernameSel = new TextBox();
+        lblPasswordSel = new Label();
+        txtPasswordSel = new TextBox();
+        lblSubmitSel = new Label();
+        txtSubmitSel = new TextBox();
+        hintWebSel = new Label();
         bottom = new Panel();
         btnCancel = new Button();
         btnOK = new Button();
@@ -69,10 +77,18 @@ partial class SettingsDialog
         mainPanel.Controls.Add(hintLaunch);
         mainPanel.Controls.Add(lblBrowserLaunch);
         mainPanel.Controls.Add(chkBrowserNewWindow);
+        mainPanel.Controls.Add(lblWebSelectors);
+        mainPanel.Controls.Add(lblUsernameSel);
+        mainPanel.Controls.Add(txtUsernameSel);
+        mainPanel.Controls.Add(lblPasswordSel);
+        mainPanel.Controls.Add(txtPasswordSel);
+        mainPanel.Controls.Add(lblSubmitSel);
+        mainPanel.Controls.Add(txtSubmitSel);
+        mainPanel.Controls.Add(hintWebSel);
         mainPanel.Dock = DockStyle.Fill;
         mainPanel.Location = new Point(0, 60);
         mainPanel.Name = "mainPanel";
-        mainPanel.Size = new Size(1152, 720);
+        mainPanel.Size = new Size(1152, 960);
         mainPanel.TabIndex = 1;
         // 
         // lblAppDir
@@ -232,13 +248,94 @@ partial class SettingsDialog
         chkBrowserNewWindow.TabIndex = 13;
         chkBrowserNewWindow.Text = "启动新窗口（不勾选则在当前浏览器中打开新Tab）";
         // 
+        // lblWebSelectors
+        // 
+        lblWebSelectors.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
+        lblWebSelectors.ForeColor = Color.FromArgb(24, 145, 176);
+        lblWebSelectors.Location = new Point(36, 510);
+        lblWebSelectors.Name = "lblWebSelectors";
+        lblWebSelectors.Size = new Size(341, 30);
+        lblWebSelectors.TabIndex = 14;
+        lblWebSelectors.Text = "🌐 网页版自动登录选择器：";
+        lblWebSelectors.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // lblUsernameSel
+        // 
+        lblUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblUsernameSel.Location = new Point(36, 550);
+        lblUsernameSel.Name = "lblUsernameSel";
+        lblUsernameSel.Size = new Size(180, 30);
+        lblUsernameSel.TabIndex = 15;
+        lblUsernameSel.Text = "用户名选择器：";
+        lblUsernameSel.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // txtUsernameSel
+        // 
+        txtUsernameSel.BackColor = Color.FromArgb(248, 248, 248);
+        txtUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtUsernameSel.Location = new Point(220, 548);
+        txtUsernameSel.Name = "txtUsernameSel";
+        txtUsernameSel.Size = new Size(500, 34);
+        txtUsernameSel.TabIndex = 16;
+        txtUsernameSel.PlaceholderText = "例：#username 或 input[ng-model=username]";
+        // 
+        // lblPasswordSel
+        // 
+        lblPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblPasswordSel.Location = new Point(36, 590);
+        lblPasswordSel.Name = "lblPasswordSel";
+        lblPasswordSel.Size = new Size(180, 30);
+        lblPasswordSel.TabIndex = 17;
+        lblPasswordSel.Text = "密码选择器：";
+        lblPasswordSel.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // txtPasswordSel
+        // 
+        txtPasswordSel.BackColor = Color.FromArgb(248, 248, 248);
+        txtPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtPasswordSel.Location = new Point(220, 588);
+        txtPasswordSel.Name = "txtPasswordSel";
+        txtPasswordSel.Size = new Size(500, 34);
+        txtPasswordSel.TabIndex = 18;
+        txtPasswordSel.PlaceholderText = "例：#password 或 input[type=password]";
+        // 
+        // lblSubmitSel
+        // 
+        lblSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSubmitSel.Location = new Point(36, 630);
+        lblSubmitSel.Name = "lblSubmitSel";
+        lblSubmitSel.Size = new Size(180, 30);
+        lblSubmitSel.TabIndex = 19;
+        lblSubmitSel.Text = "登录按钮选择器：";
+        lblSubmitSel.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // txtSubmitSel
+        // 
+        txtSubmitSel.BackColor = Color.FromArgb(248, 248, 248);
+        txtSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtSubmitSel.Location = new Point(220, 628);
+        txtSubmitSel.Name = "txtSubmitSel";
+        txtSubmitSel.Size = new Size(500, 34);
+        txtSubmitSel.TabIndex = 20;
+        txtSubmitSel.PlaceholderText = "例：button[type=submit] 或 .login-btn";
+        // 
+        // hintWebSel
+        // 
+        hintWebSel.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        hintWebSel.ForeColor = Color.FromArgb(150, 150, 150);
+        hintWebSel.Location = new Point(220, 665);
+        hintWebSel.Name = "hintWebSel";
+        hintWebSel.Size = new Size(600, 30);
+        hintWebSel.TabIndex = 21;
+        hintWebSel.Text = "用浏览器 F12 → Elements 面板查看登录页 input 元素的 id/class/name";
+        // 
         // bottom
         // 
         bottom.BackColor = Color.FromArgb(248, 248, 248);
         bottom.Controls.Add(btnCancel);
         bottom.Controls.Add(btnOK);
         bottom.Dock = DockStyle.Bottom;
-        bottom.Location = new Point(0, 702);
+        bottom.Location = new Point(0, 942);
         bottom.Name = "bottom";
         bottom.Size = new Size(1152, 78);
         bottom.TabIndex = 0;
@@ -283,7 +380,7 @@ partial class SettingsDialog
         AcceptButton = btnOK;
         BackColor = Color.White;
         CancelButton = btnCancel;
-        ClientSize = new Size(1152, 780);
+        ClientSize = new Size(1152, 1020);
         Controls.Add(bottom);
         Controls.Add(mainPanel);
         Controls.Add(titleBar);
@@ -314,5 +411,13 @@ partial class SettingsDialog
     private Label lblLaunchTitle;
     private Label hintLaunch;
     private Label lblBrowserLaunch;
+    private Label lblWebSelectors;
+    private Label lblUsernameSel;
+    private TextBox txtUsernameSel;
+    private Label lblPasswordSel;
+    private TextBox txtPasswordSel;
+    private Label lblSubmitSel;
+    private TextBox txtSubmitSel;
+    private Label hintWebSel;
     private Panel bottom;
 }

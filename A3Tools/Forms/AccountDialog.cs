@@ -67,12 +67,8 @@ public partial class AccountDialog : Form
         this.txtRemotePassword.Text = account.RemotePassword;
         this.txtRemark.Text = account.Remark;
 
-        // 网页版自动登录字段
-        this.txtWebUsername.Text = account.WebUsername;
-        this.txtWebPassword.Text = account.WebPassword;
-        this.txtWebUsernameSelector.Text = account.WebUsernameSelector;
-        this.txtWebPasswordSelector.Text = account.WebPasswordSelector;
-        this.txtWebSubmitSelector.Text = account.WebSubmitSelector;
+        // 网页版自动登录字段（用户名默认 admin）
+        this.txtServerUsername.Text = account.ServerUsername;
 
         // Root模式显示明文密码
         if (ShowPasswords)
@@ -80,7 +76,6 @@ public partial class AccountDialog : Form
             this.txtServerPassword.UseSystemPasswordChar = false;
             this.txtDbPassword.UseSystemPasswordChar = false;
             this.txtRemotePassword.UseSystemPasswordChar = false;
-            this.txtWebPassword.UseSystemPasswordChar = false;
         }
     }
 
@@ -151,12 +146,8 @@ public partial class AccountDialog : Form
             RemoteUser = this.txtRemoteUser.Text.Trim(),
             RemotePassword = this.txtRemotePassword.Text,
             Remark = this.txtRemark.Text.Trim(),
-            // 网页版自动登录字段
-            WebUsername = this.txtWebUsername.Text.Trim(),
-            WebPassword = this.txtWebPassword.Text,
-            WebUsernameSelector = this.txtWebUsernameSelector.Text.Trim(),
-            WebPasswordSelector = this.txtWebPasswordSelector.Text.Trim(),
-            WebSubmitSelector = this.txtWebSubmitSelector.Text.Trim()
+            // 网页版自动登录字段（用户名）
+            ServerUsername = this.txtServerUsername.Text.Trim()
         };
     }
 }
