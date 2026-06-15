@@ -841,10 +841,11 @@ public partial class MainForm : Form, IToolContext
 
             cdpPort = CdpHelper.FindFreePort();
             cdpUserDataDir = CdpHelper.GetTempUserDataDir();
-            // 先算出完整命令，用于日志
+            // 先算出完整命令，用于日志（打印完整参数，不裁断）
             fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
             CdpHelper.CdpLog($"准备启动浏览器：exe={browserPath}");
-            CdpHelper.CdpLog($"参数：{fullArgs.Substring(0, Math.Min(200, fullArgs.Length))}...");
+            CdpHelper.CdpLog($"完整参数：{fullArgs}");
+            CdpHelper.CdpLog($"调试端口：{cdpPort}, user-data-dir={cdpUserDataDir}");
         }
 
         if (!string.IsNullOrEmpty(browserPath) && File.Exists(browserPath))
@@ -874,6 +875,23 @@ public partial class MainForm : Form, IToolContext
                 if (p != null && !p.HasExited)
                 {
                     CdpHelper.CdpLog($"进程启动成功：PID={p.Id}");
+                    // 等 2 秒再检查一次，避免 Edge 立即退出但 Process.Start 还没感知
+                    System.Threading.Thread.Sleep(2000);
+                    try
+                    {
+                        if (p.HasExited)
+                        {
+                            CdpHelper.CdpLog($"⚠️ 进程 2 秒后已退出 (ExitCode={p.ExitCode})，可能是 Edge 单实例转发给了已有进程");
+                        }
+                        else
+                        {
+                            CdpHelper.CdpLog($"✓ 进程 2 秒后仍在运行（真实存活）");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        CdpHelper.CdpLog($"检查进程状态失败: {ex.Message}");
+                    }
                     _processIds.Add(p.Id);
                     _processLaunchModes[p.Id] = newWindow;
                     RecordProcess(accountCode, p.Id, "web");
