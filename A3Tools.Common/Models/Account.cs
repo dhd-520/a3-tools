@@ -22,9 +22,27 @@ public class Account
     public string RemotePassword { get; set; } = string.Empty;// 远程密码（加密）
     public string Remark { get; set; } = string.Empty;           // 备注
 
+    // ===== 网页版自动登录（Chrome DevTools Protocol）=====
+    public string WebUsername { get; set; } = string.Empty;       // 网页版登录用户名
+    public string WebPassword { get; set; } = string.Empty;       // 网页版登录密码（加密）
+    public string WebUsernameSelector { get; set; } = string.Empty;  // 用户名输入框 CSS 选择器
+    public string WebPasswordSelector { get; set; } = string.Empty;  // 密码输入框 CSS 选择器
+    public string WebSubmitSelector { get; set; } = string.Empty;    // 登录按钮 CSS 选择器
+
     [JsonIgnore]
     public string? DbPasswordDecrypted { get; set; }   // 仅内存中使用
 
     [JsonIgnore]
     public string? RemotePasswordDecrypted { get; set; } // 仅内存中使用
+
+    /// <summary>
+    /// 是否配置了网页版自动登录所需的全部信息
+    /// </summary>
+    [JsonIgnore]
+    public bool HasWebAutoLogin =>
+        !string.IsNullOrEmpty(WebUsername) &&
+        !string.IsNullOrEmpty(WebPassword) &&
+        !string.IsNullOrEmpty(WebUsernameSelector) &&
+        !string.IsNullOrEmpty(WebPasswordSelector) &&
+        !string.IsNullOrEmpty(WebSubmitSelector);
 }

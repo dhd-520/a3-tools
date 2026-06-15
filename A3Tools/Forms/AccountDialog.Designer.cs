@@ -37,6 +37,20 @@ partial class AccountDialog
     private System.Windows.Forms.TextBox txtDatabaseName = null!;
     private System.Windows.Forms.TextBox txtRemotePassword = null!;
 
+    // ===== 网页版自动登录字段 =====
+    private System.Windows.Forms.Panel sepWeb = null!;
+    private System.Windows.Forms.Label lblWebHint = null!;
+    private System.Windows.Forms.Label lblWebUsername = null!;
+    private System.Windows.Forms.TextBox txtWebUsername = null!;
+    private System.Windows.Forms.Label lblWebPassword = null!;
+    private System.Windows.Forms.TextBox txtWebPassword = null!;
+    private System.Windows.Forms.Label lblWebUsernameSelector = null!;
+    private System.Windows.Forms.TextBox txtWebUsernameSelector = null!;
+    private System.Windows.Forms.Label lblWebPasswordSelector = null!;
+    private System.Windows.Forms.TextBox txtWebPasswordSelector = null!;
+    private System.Windows.Forms.Label lblWebSubmitSelector = null!;
+    private System.Windows.Forms.TextBox txtWebSubmitSelector = null!;
+
     private System.Windows.Forms.Button btnSave = null!;
     private System.Windows.Forms.Button btnCancel = null!;
 
@@ -51,7 +65,7 @@ partial class AccountDialog
     {
         this.SuspendLayout();
         this.Text = "账套编辑";
-        this.Size = new System.Drawing.Size(1200, 1160);
+        this.Size = new System.Drawing.Size(1200, 1530);
         this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
         this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
@@ -87,6 +101,7 @@ partial class AccountDialog
         // 分隔线
         sep1 = new System.Windows.Forms.Panel { BackColor = System.Drawing.Color.FromArgb(220, 220, 220), Size = new System.Drawing.Size(1110, 1) };
         sep2 = new System.Windows.Forms.Panel { BackColor = System.Drawing.Color.FromArgb(220, 220, 220), Size = new System.Drawing.Size(1110, 1) };
+        sepWeb = new System.Windows.Forms.Panel { BackColor = System.Drawing.Color.FromArgb(220, 220, 220), Size = new System.Drawing.Size(1110, 1) };
 
         // 底部面板
         footerPanel = new System.Windows.Forms.Panel
@@ -105,6 +120,7 @@ partial class AccountDialog
         // 加载控件
         contentPanel.Controls.Add(sep1);
         contentPanel.Controls.Add(sep2);
+        contentPanel.Controls.Add(sepWeb);
         contentPanel.Controls.Add(footerPanel);
 
         this.Controls.Add(contentPanel);
@@ -141,7 +157,31 @@ partial class AccountDialog
         sep2.Location = new System.Drawing.Point(lx, y); y += 20;
         AddMultiRow(lx, y, lw, "备注：", ix, 900, 80, out txtRemark); y += rh + 30;
 
-        sep2.Location = new System.Drawing.Point(lx, y); y += 15;
+        // ===== 网页版自动登录区（CDP）=====
+        sepWeb.Location = new System.Drawing.Point(lx, y); y += 15;
+        lblWebHint = new System.Windows.Forms.Label
+        {
+            Text = "🌐 网页版自动登录（仅 Chrome / Edge 生效，凭证 AES 加密存储）",
+            Location = new System.Drawing.Point(lx, y),
+            Size = new System.Drawing.Size(1100, 30),
+            Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold),
+            ForeColor = System.Drawing.Color.FromArgb(24, 145, 176)
+        };
+        contentPanel.Controls.Add(lblWebHint);
+        y += rh - 10;
+
+        AddRow(lx, y, lw, "登录用户名：", ix, out txtWebUsername); y += rh;
+        AddRow(lx, y, lw, "登录密码：", ix, out txtWebPassword); txtWebPassword.UseSystemPasswordChar = true; y += rh;
+        AddRow(lx, y, lw, "用户名选择器：", ix, out txtWebUsernameSelector);
+        txtWebUsernameSelector.PlaceholderText = "例：#username 或 input[ng-model=username]";
+        y += rh;
+        AddRow(lx, y, lw, "密码选择器：", ix, out txtWebPasswordSelector);
+        txtWebPasswordSelector.PlaceholderText = "例：#password 或 input[type=password]";
+        y += rh;
+        AddRow(lx, y, lw, "登录按钮选择器：", ix, out txtWebSubmitSelector);
+        txtWebSubmitSelector.PlaceholderText = "例：button[type=submit] 或 .login-btn";
+        y += rh + 10;
+
         footerPanel.Location = new System.Drawing.Point(0, y);
     }
 

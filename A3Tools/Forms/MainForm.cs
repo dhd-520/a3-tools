@@ -779,49 +779,30 @@ public partial class MainForm : Form, IToolContext
         if (settings.LaunchWeb && !string.IsNullOrEmpty(account.Server))
         {
             string url = account.Server.TrimEnd('/') + "/h5comerp/#/login";
-            LaunchWebBrowser(url, settings.SelectedBrowser, account.Code);
+            LaunchWebBrowser(url, settings.SelectedBrowser, account.Code, account);
         }
     }
 
-    private void LaunchWebBrowser(string url, string browser, string accountCode)
+    private void LaunchWebBrowser(string url, string browser, string accountCode, Account? account = null)
     {
         var settings = _dataService.LoadSettings();
         bool newWindow = settings.BrowserNewWindow;
         string browserPath = GetBrowserPath(browser);
 
+        // === CDP 自动登录：Chrome/Edge 且账套配置了凭证时走该分支 ===
+        bool useCdp = account != null && account.HasWebAutoLogin && CdpHelper.IsCdpSupported(browser);
+        int cdpPort = 0;
+        string? cdpUserDataDir = null;
+        if (useCdp)
+        {
+            cdpPort = CdpHelper.FindFreePort();
+            cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+        }
+
         if (!string.IsNullOrEmpty(browserPath) && File.Exists(browserPath))
         {
-            // 根据浏览器类型和设置使用不同的启动参数
-            string args;
-            if (newWindow)
-            {
-                // 新窗口模式
-                args = browser switch
-                {
-                    // Chrome 效能优化参数
-                    "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding \"{url}\"",
-                    // Edge 使用简单参数（Edge对参数更严格）
-                    "msedge" => $"--new-window \"{url}\"",
-                    // Firefox 参数
-                    "firefox" => $"-new-window \"{url}\"",
-                    // 360浏览器
-                    "360se" => $"--new-window \"{url}\"",
-                    // 其他浏览器使用默认参数
-                    _ => $"--new-window \"{url}\""
-                };
-            }
-            else
-            {
-                // 当前Tab模式
-                args = browser switch
-                {
-                    "chrome" => $"\"{url}\"",
-                    "msedge" => $"\"{url}\"",
-                    "firefox" => $"\"{url}\"",
-                    "360se" => $"\"{url}\"",
-                    _ => $"\"{url}\""
-                };
-            }
+            // 统一调用 BuildBrowserArgs：自动附带 CDP 参数（如果 useCdp）
+            string args = BuildBrowserArgs(url, browser, newWindow, useCdp ? cdpPort : 0, useCdp ? cdpUserDataDir : null);
 
             // Chrome/360 直接启动，UseShellExecute=false 可获取真实 PID
             // Edge/Firefox 也去掉 ShellExecute，用 --new-window 参数保证新窗口
@@ -858,6 +839,12 @@ public partial class MainForm : Form, IToolContext
                         RecordProcess(accountCode, newPid, "web");
                     }
                 }
+
+                // CDP 自动登录：浏览器启动后异步执行
+                if (useCdp)
+                {
+                    _ = RunCdpAutoLoginAsync(cdpPort, url, account!);
+                }
             }
             catch (Exception ex)
             {
@@ -871,7 +858,7 @@ public partial class MainForm : Form, IToolContext
             if (!string.IsNullOrEmpty(foundPath) && File.Exists(foundPath))
             {
                 // 使用注册表找到的路径启动
-                string args = BuildBrowserArgs(url, browser, newWindow);
+                string args = BuildBrowserArgs(url, browser, newWindow, useCdp ? cdpPort : 0, useCdp ? cdpUserDataDir : null);
                 bool useShellExecute = browser == "msedge" || browser == "firefox";
                 try
                 {
@@ -888,6 +875,12 @@ public partial class MainForm : Form, IToolContext
                         _processIds.Add(p.Id);
                         _processLaunchModes[p.Id] = newWindow;
                         RecordProcess(accountCode, p.Id, "web");
+                    }
+
+                    // CDP 自动登录
+                    if (useCdp)
+                    {
+                        _ = RunCdpAutoLoginAsync(cdpPort, url, account!);
                     }
                 }
                 catch (Exception ex)
@@ -932,17 +925,73 @@ public partial class MainForm : Form, IToolContext
         }
     }
 
-    private string BuildBrowserArgs(string url, string browser, bool newWindow)
+    /// <summary>
+    /// CDP 自动登录（异步）：连接远程调试端口 → 填表 → 提交
+    /// </summary>
+    private async Task RunCdpAutoLoginAsync(int port, string url, Account account)
     {
+        try
+        {
+            // 等浏览器起来（CDP 端口开始监听）
+            string? wsUrl = null;
+            for (int i = 0; i < 30; i++)  // 最多等 6 秒
+            {
+                wsUrl = await CdpSession.GetWebSocketUrlAsync(port);
+                if (!string.IsNullOrEmpty(wsUrl)) break;
+                await Task.Delay(200);
+            }
+            if (string.IsNullOrEmpty(wsUrl))
+            {
+                Debug.WriteLine("[CDP] 拿不到 WebSocket URL，浏览器可能启动失败");
+                return;
+            }
+
+            using var session = await CdpSession.ConnectAsync(wsUrl);
+            bool ok = await CdpHelper.AutoLoginAsync(
+                session,
+                url,
+                account.WebUsernameSelector,
+                account.WebPasswordSelector,
+                account.WebSubmitSelector,
+                account.WebUsername,
+                account.WebPassword,
+                timeoutMs: 10000);
+
+            await session.CloseAsync();
+
+            if (!ok)
+            {
+                Debug.WriteLine("[CDP] 自动登录超时（10s 内未找到表单元素）");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[CDP] 自动登录异常: {ex.Message}");
+        }
+    }
+
+    private string BuildBrowserArgs(string url, string browser, bool newWindow, int cdpPort = 0, string? cdpUserDataDir = null)
+    {
+        // CDP 远程调试参数（开启后可被 A3Tools 通过 WebSocket 注入 JS）
+        string cdpPart = cdpPort > 0
+            ? (browser == "msedge"
+                ? $" --remote-debugging-port={cdpPort}"
+                : $" --remote-debugging-port={cdpPort} --remote-allow-origins=*")
+            : "";
+        // 隔离的 user-data-dir（避免与用户自己的浏览器配置冲突）
+        string userDataPart = !string.IsNullOrEmpty(cdpUserDataDir)
+            ? $" --user-data-dir=\"{cdpUserDataDir}\""
+            : "";
+
         if (newWindow)
         {
             return browser switch
             {
-                "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding \"{url}\"",
-                "msedge" => $"--new-window \"{url}\"",
+                "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
+                "msedge" => $"--new-window{userDataPart}{cdpPart} \"{url}\"",
                 "firefox" => $"-new-window \"{url}\"",
                 "360se" => $"--new-window \"{url}\"",
-                _ => $"--new-window \"{url}\""
+                _ => $"--new-window{userDataPart}{cdpPart} \"{url}\""
             };
         }
         else
