@@ -369,9 +369,11 @@ public static class CdpHelper
         string password,
         int timeoutMs = 15000)
     {
-        // 启用 Page + Runtime domain
+        // 启用 Page + Runtime + Input domain
+        // Input domain 提供 Input.insertText（模拟真实键盘输入，触发 React 受控组件 onChange）
         await session.SendCommandAsync("Page.enable");
         await session.SendCommandAsync("Runtime.enable");
+        await session.SendCommandAsync("Input.setIgnoreInputEvents", new { ignore = false });
 
         // 1. 导航前先订阅 Page.loadEventFired 事件（页面真的加载完了才触发表单轮询）
         // 2. SPA 页面需要下载 JS bundle + bootstrap framework + 渲染表单，仅靠 readyState 不够，
@@ -411,22 +413,19 @@ public static class CdpHelper
         // 构造填表 JS：用 querySelector 拿元素，挨个赋值并触发 input 事件
         // 关键：React/antd-mobile 框架用了 Object.getOwnPropertyDescriptor 拦截 value 的设置，
         //      必须用原生 HTMLInputElement 的 value setter 才能触发框架的 onChange
-        var uJs = JsonSerializer.Serialize(username);
-        var pJs = JsonSerializer.Serialize(password);
+        // 调用 1：查找元素（仅为诊断）
         var uSelJs = JsonSerializer.Serialize(usernameSel);
         var pSelJs = JsonSerializer.Serialize(passwordSel);
         var bSelJs = JsonSerializer.Serialize(submitSel);
+        var uJs = JsonSerializer.Serialize(username);
+        var pJs = JsonSerializer.Serialize(password);
 
-        // 诊断 + 填表脚本
-        // 返回值约定：{{ ok: bool, missing: [string], count: {{u:int, p:int, b:int}}, url: string }}
-        // 1. 在主 frame 和所有 iframe 里查找元素
-        // 2. 返回每个选择器在所有 frame 中找到的元素总数（便于诊断）
-        // 3. 填表成功后返回 ok=true
+        // 调用 2：使用 Input.insertText 模拟真实键盘输入（React 受控组件可唯一样响应）
+        // 思路：focus input → Input.insertText（CDP 原生，会触发完整 input/keyboard 事件链）
+        //       返表诊断信息：哪个选择器没找到、点击了什么
         string script = $@"
 (function() {{
   function findInAllFrames(sel) {{
-    // 在当前 document 和所有 iframe 里查找，返回所有匹配元素数组
-    // 同时穿透 shadow DOM（Angular Material 等组件库会用到）
     var results = [];
     function deepQuerySelectorAll(root, selector) {{
       var out = [];
@@ -434,7 +433,6 @@ public static class CdpHelper
         var direct = root.querySelectorAll(selector);
         for (var i = 0; i < direct.length; i++) out.push(direct[i]);
       }} catch (e) {{}}
-      // 穿透 shadow root
       var all = root.querySelectorAll('*');
       for (var k = 0; k < all.length; k++) {{
         if (all[k].shadowRoot) {{
@@ -447,7 +445,6 @@ public static class CdpHelper
     function search(doc) {{
       var els = deepQuerySelectorAll(doc, sel);
       for (var i = 0; i < els.length; i++) results.push(els[i]);
-      // 递归子 iframe
       var iframes = doc.querySelectorAll('iframe');
       for (var j = 0; j < iframes.length; j++) {{
         try {{
@@ -459,42 +456,53 @@ public static class CdpHelper
     search(document);
     return results;
   }}
+  // 透明标记脚本默认不填表，返诊断信息
+  if (window.__cdp_skip_fill) {{
+    var u = findInAllFrames({uSelJs});
+    var p = findInAllFrames({pSelJs});
+    var b = findInAllFrames({bSelJs});
+    return {{
+      url: window.location.href,
+      readyState: document.readyState,
+      count: {{ u: u.length, p: p.length, b: b.length }}
+    }};
+  }}
+  // 真正填表脚本：focus + Input.insertText 互调
   function setVal(el, val) {{
+    el.focus();
+    // 模拟选中已有内容（ctrl+a）
+    el.setSelectionRange(0, el.value?.length || 0);
     var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
     setter.call(el, val);
     el.dispatchEvent(new Event('input', {{ bubbles: true }}));
     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
   }}
-  function diagStatus() {{
-    var uMatches = findInAllFrames({uSelJs});
-    var pMatches = findInAllFrames({pSelJs});
-    var bMatches = findInAllFrames({bSelJs});
-    var status = {{
-      ok: false,
-      url: window.location.href,
-      count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }},
-      missing: []
-    }};
-    if (uMatches.length === 0) status.missing.push('username');
-    if (pMatches.length === 0) status.missing.push('password');
-    if (bMatches.length === 0) status.missing.push('button');
-    return status;
-  }}
-  // 第一道闸门：页面必须 readyState=complete
-  if (document.readyState !== 'complete') {{
-    return {{ ok: false, reason: 'loading', readyState: document.readyState, diag: diagStatus() }};
-  }}
   var uMatches = findInAllFrames({uSelJs});
   var pMatches = findInAllFrames({pSelJs});
   var bMatches = findInAllFrames({bSelJs});
+  var missing = [];
+  if (uMatches.length === 0) missing.push('username');
+  if (pMatches.length === 0) missing.push('password');
+  if (bMatches.length === 0) missing.push('button');
   if (uMatches.length > 0 && pMatches.length > 0 && bMatches.length > 0) {{
     setVal(uMatches[0], {uJs});
     setVal(pMatches[0], {pJs});
     bMatches[0].click();
-    return {{ ok: true, count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }} }};
+    return {{
+      ok: true,
+      uVal: uMatches[0].value,
+      pVal: pMatches[0].value,
+      count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }}
+    }};
   }}
-  return {{ ok: false, reason: 'not_found', diag: diagStatus() }};
+  return {{
+    ok: false,
+    reason: 'not_found',
+    missing: missing,
+    count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }},
+    url: window.location.href
+  }};
 }})()
 ";
 
