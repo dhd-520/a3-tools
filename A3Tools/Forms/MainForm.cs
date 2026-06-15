@@ -1045,16 +1045,18 @@ public partial class MainForm : Form, IToolContext
             string? wsUrl = null;
             for (int i = 0; i < 30; i++)  // 最多等 6 秒
             {
-                wsUrl = await CdpHelper.GetWebSocketUrlAsync(port);
+                // 优先拿 page target 的 WebSocket URL（有 Page 域，能调 Page.navigate / Page.enable）
+                // /json/version 是 browser-level，只有 Browser/Target 域
+                wsUrl = await CdpHelper.GetPageWebSocketUrlAsync(port);
                 if (!string.IsNullOrEmpty(wsUrl)) break;
                 await Task.Delay(200);
             }
             if (string.IsNullOrEmpty(wsUrl))
             {
-                CdpHelper.CdpLog("✗ 拿不到 WebSocket URL，浏览器可能启动失败（看上面 cdp.log）");
+                CdpHelper.CdpLog("✗ 拿不到 page WebSocket URL，浏览器可能启动失败（看上面 cdp.log）");
                 return;
             }
-            CdpHelper.CdpLog($"✓ 已连接到 CDP: {wsUrl}");
+            CdpHelper.CdpLog($"✓ 已连接到 page CDP: {wsUrl}");
 
             using var session = await CdpSession.ConnectAsync(wsUrl);
             bool ok = await CdpHelper.AutoLoginAsync(

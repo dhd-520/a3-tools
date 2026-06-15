@@ -272,6 +272,90 @@ public static class CdpHelper
     }
 
     /// <summary>
+    /// 从 /json/list 拿一个 page target 的 WebSocket URL
+    /// /json/version 返回的是 browser-level 连接（只能调 Browser/Target 域）
+    /// /json/list 返回的是页面级连接（能调 Page 域，这才是填表要的）
+    /// 优先选 type=page 且有 URL 的（不是 about:blank 或 chrome://newtab）
+    /// </summary>
+    public static async Task<string?> GetPageWebSocketUrlAsync(int port)
+    {
+        var targets = new (string host, System.Net.IPAddress[] addrs)[]
+        {
+            ("127.0.0.1", new[] { System.Net.IPAddress.Parse("127.0.0.1") }),
+            ("localhost", new[] { System.Net.IPAddress.Loopback }),
+        };
+        foreach (var (host, addrs) in targets)
+        {
+            // 先 TcpClient 探活
+            System.Net.IPAddress? connectedAddr = null;
+            foreach (var addr in addrs)
+            {
+                try
+                {
+                    using var tcp = new System.Net.Sockets.TcpClient();
+                    var connectTask = tcp.ConnectAsync(addr, port);
+                    var timeoutTask = Task.Delay(1500);
+                    var done = await Task.WhenAny(connectTask, timeoutTask);
+                    if (done == connectTask && tcp.Connected)
+                    {
+                        connectedAddr = addr;
+                        break;
+                    }
+                }
+                catch { }
+            }
+            if (connectedAddr == null) continue;
+
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                var url = $"http://{connectedAddr}:{port}/json/list";
+                var json = await http.GetStringAsync(url);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind != JsonValueKind.Array) continue;
+
+                string? firstPageWs = null;
+                string? anyPageWs = null;
+                foreach (var target in doc.RootElement.EnumerateArray())
+                {
+                    if (!target.TryGetProperty("type", out var typeEl)) continue;
+                    var type = typeEl.GetString();
+                    if (type != "page") continue;
+                    if (!target.TryGetProperty("webSocketDebuggerUrl", out var wsEl)) continue;
+                    var ws = wsEl.GetString();
+                    if (string.IsNullOrEmpty(ws)) continue;
+
+                    // 有 URL 的 page 优先（不是 about:blank）
+                    if (target.TryGetProperty("url", out var urlEl))
+                    {
+                        var pageUrl = urlEl.GetString() ?? "";
+                        if (!string.IsNullOrEmpty(pageUrl) &&
+                            !pageUrl.StartsWith("about:") &&
+                            !pageUrl.StartsWith("chrome://") &&
+                            !pageUrl.StartsWith("edge://"))
+                        {
+                            firstPageWs = ws;
+                            break;
+                        }
+                    }
+                    anyPageWs ??= ws;
+                }
+                var result = firstPageWs ?? anyPageWs;
+                if (!string.IsNullOrEmpty(result))
+                {
+                    CdpLog($"✓ 拿到 page WebSocket URL (host={connectedAddr})");
+                    return result;
+                }
+            }
+            catch (Exception ex)
+            {
+                CdpLog($"http://{connectedAddr}:{port}/json/list 拿不到: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// 自动登录：导航 + 轮询填表 + 提交
     /// 适合 SPA 登录页（Angular/Vue/React/antd-mobile），会等表单元素渲染后再填
     /// </summary>
