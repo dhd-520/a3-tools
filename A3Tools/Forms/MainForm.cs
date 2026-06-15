@@ -848,7 +848,28 @@ public partial class MainForm : Form, IToolContext
             }
 
             cdpPort = CdpHelper.FindFreePort();
-            cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+            if (newWindow)
+            {
+                // 新窗口模式：独占 user-data-dir（避免现有实例 lock 冲突）
+                cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+            }
+            else
+            {
+                // Tab 模式：复用现有浏览器 profile，共享 cookie/扩展/收藏
+                // 查现有浏览器进程的 --user-data-dir 参数
+                string? existingProfile = GetExistingBrowserUserDataDir(browser);
+                if (!string.IsNullOrEmpty(existingProfile) && Directory.Exists(existingProfile))
+                {
+                    cdpUserDataDir = existingProfile;
+                    CdpHelper.CdpLog($"Tab 模式复用现有 profile: {cdpUserDataDir}");
+                }
+                else
+                {
+                    // 现有实例未指定 user-data-dir，用默认路径
+                    cdpUserDataDir = GetDefaultUserDataDir(browser);
+                    CdpHelper.CdpLog($"Tab 模式使用默认 profile: {cdpUserDataDir}");
+                }
+            }
             // 先算出完整命令，用于日志（打印完整参数，不裁断）
             fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
             CdpHelper.CdpLog($"准备启动浏览器：exe={browserPath}");
@@ -1092,6 +1113,54 @@ public partial class MainForm : Form, IToolContext
         {
             CdpHelper.CdpLog($"✗ 自动登录异常: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 查现有浏览器进程的 --user-data-dir 参数（Tab 模式用，共享 profile）
+    /// </summary>
+    private string? GetExistingBrowserUserDataDir(string browser)
+    {
+        string procName = browser == "msedge" ? "msedge" : (browser == "chrome" ? "chrome" : "");
+        if (string.IsNullOrEmpty(procName)) return null;
+        try
+        {
+            var procs = Process.GetProcessesByName(procName);
+            foreach (var p in procs)
+            {
+                try
+                {
+                    var searcher = new System.Management.ManagementObjectSearcher(
+                        $"SELECT CommandLine FROM Win32_Process WHERE ProcessId={p.Id}");
+                    foreach (var obj in searcher.Get())
+                    {
+                        var cmd = obj["CommandLine"]?.ToString() ?? "";
+                        var match = System.Text.RegularExpressions.Regex.Match(
+                            cmd, @"--user-data-dir=(""?)([^""\s]+)\1");
+                        if (match.Success)
+                        {
+                            return match.Groups[2].Value;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// 获取浏览器默认 profile 路径
+    /// </summary>
+    private string GetDefaultUserDataDir(string browser)
+    {
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return browser switch
+        {
+            "msedge" => Path.Combine(localAppData, @"Microsoft\Edge\User Data"),
+            "chrome" => Path.Combine(localAppData, @"Google\Chrome\User Data"),
+            _ => Path.Combine(localAppData, @"A3Tools_TempProfile")
+        };
     }
 
     private string BuildBrowserArgs(string url, string browser, bool newWindow, int cdpPort = 0, string? cdpUserDataDir = null)
