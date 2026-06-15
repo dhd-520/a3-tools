@@ -942,18 +942,18 @@ public partial class MainForm : Form, IToolContext
             string username = account.ServerUsername;
             string password = account.ServerPassword;
 
-            Debug.WriteLine($"[CDP] 开始自动登录：账号={username} 密码长度={password?.Length ?? 0}");
-            Debug.WriteLine($"[CDP] 选择器：user={usernameSel} pwd={passwordSel} btn={submitSel}");
+            CdpHelper.CdpLog($"开始自动登录：账号={username} 密码长度={password?.Length ?? 0}");
+            CdpHelper.CdpLog($"选择器：user={usernameSel} pwd={passwordSel} btn={submitSel}");
 
             // 检查必要参数
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             {
-                Debug.WriteLine("[CDP] ✗ 账套用户名为空或密码为空，跳过自动登录");
+                CdpHelper.CdpLog("✗ 账套用户名为空或密码为空，跳过自动登录");
                 return;
             }
             if (string.IsNullOrEmpty(usernameSel) || string.IsNullOrEmpty(passwordSel) || string.IsNullOrEmpty(submitSel))
             {
-                Debug.WriteLine("[CDP] ✗ 选择器未配置，请到设置中配置网页登录选择器");
+                CdpHelper.CdpLog("✗ 选择器未配置，请到设置中配置网页登录选择器");
                 return;
             }
 
@@ -961,16 +961,16 @@ public partial class MainForm : Form, IToolContext
             string? wsUrl = null;
             for (int i = 0; i < 30; i++)  // 最多等 6 秒
             {
-                wsUrl = await CdpSession.GetWebSocketUrlAsync(port);
+                wsUrl = await CdpHelper.GetWebSocketUrlAsync(port);
                 if (!string.IsNullOrEmpty(wsUrl)) break;
                 await Task.Delay(200);
             }
             if (string.IsNullOrEmpty(wsUrl))
             {
-                Debug.WriteLine("[CDP] ✗ 拿不到 WebSocket URL，浏览器可能启动失败");
+                CdpHelper.CdpLog("✗ 拿不到 WebSocket URL，浏览器可能启动失败（看上面 cdp.log）");
                 return;
             }
-            Debug.WriteLine($"[CDP] ✓ 已连接到 CDP: {wsUrl}");
+            CdpHelper.CdpLog($"✓ 已连接到 CDP: {wsUrl}");
 
             using var session = await CdpSession.ConnectAsync(wsUrl);
             bool ok = await CdpHelper.AutoLoginAsync(
@@ -987,26 +987,25 @@ public partial class MainForm : Form, IToolContext
 
             if (ok)
             {
-                Debug.WriteLine("[CDP] ✓ 自动登录成功（填表并点击登录）");
+                CdpHelper.CdpLog("✓ 自动登录成功（填表并点击登录）");
             }
             else
             {
-                Debug.WriteLine("[CDP] ✗ 自动登录超时（10s 内未找到表单元素）");
+                CdpHelper.CdpLog("✗ 自动登录超时（10s 内未找到表单元素）");
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[CDP] ✗ 自动登录异常: {ex.GetType().Name}: {ex.Message}");
+            CdpHelper.CdpLog($"✗ 自动登录异常: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
     private string BuildBrowserArgs(string url, string browser, bool newWindow, int cdpPort = 0, string? cdpUserDataDir = null)
     {
         // CDP 远程调试参数（开启后可被 A3Tools 通过 WebSocket 注入 JS）
+        // Edge/Chrome 111+ 都需要 --remote-allow-origins=* 避免 WebSocket Origin 检查报错
         string cdpPart = cdpPort > 0
-            ? (browser == "msedge"
-                ? $" --remote-debugging-port={cdpPort}"
-                : $" --remote-debugging-port={cdpPort} --remote-allow-origins=*")
+            ? $" --remote-debugging-port={cdpPort} --remote-allow-origins=*"
             : "";
         // 隔离的 user-data-dir（避免与用户自己的浏览器配置冲突）
         string userDataPart = !string.IsNullOrEmpty(cdpUserDataDir)

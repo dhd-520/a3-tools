@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
@@ -17,29 +18,10 @@ public class CdpSession : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private int _nextId = 0;
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pending = new();
-    private readonly ConcurrentQueue<byte> _rxBuffer = new();
 
     public event Action<string, JsonElement>? OnEvent;
 
     public bool IsOpen => _ws.State == WebSocketState.Open;
-
-    /// <summary>
-    /// 从 /json/version 拿 websocketUrl
-    /// </summary>
-    public static async Task<string?> GetWebSocketUrlAsync(int port)
-    {
-        try
-        {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var json = await http.GetStringAsync($"http://127.0.0.1:{port}/json/version");
-            using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.GetProperty("webSocketDebuggerUrl").GetString();
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     /// <summary>
     /// 连接到指定 wsUrl
@@ -100,16 +82,13 @@ public class CdpSession : IDisposable
 
                 var bytes = new byte[result.Count];
                 Buffer.BlockCopy(buffer, 0, bytes, 0, result.Count);
-
-                // CDP 消息以 0x00 长度前缀（Binary 模式）或纯文本（Text 模式）
-                // 我们用 Text 模式发送，对端也用 Text 模式回复
                 HandleMessage(bytes);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"CDP read loop error: {ex.Message}");
+            Debug.WriteLine($"CDP read loop error: {ex.Message}");
         }
     }
 
@@ -123,7 +102,6 @@ public class CdpSession : IDisposable
 
             if (root.TryGetProperty("id", out var idEl))
             {
-                // 响应消息
                 int id = idEl.GetInt32();
                 if (_pending.TryRemove(id, out var tcs))
                 {
@@ -140,16 +118,15 @@ public class CdpSession : IDisposable
             }
             else if (root.TryGetProperty("method", out var methodEl))
             {
-                // 事件消息
                 var method = methodEl.GetString() ?? "";
                 var @params = root.TryGetProperty("params", out var p) ? p.Clone() : default;
                 try { OnEvent?.Invoke(method, @params); }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CDP event handler error: {ex.Message}"); }
+                catch (Exception ex) { Debug.WriteLine($"CDP event handler error: {ex.Message}"); }
             }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"CDP message parse error: {ex.Message}");
+            Debug.WriteLine($"CDP message parse error: {ex.Message}");
         }
     }
 
@@ -193,7 +170,7 @@ public static class CdpHelper
     }
 
     /// <summary>
-    /// 找一个空闲端口（CDP 远程调试用）
+    /// 查找本地空闲端口（CDP 远程调试用）
     /// </summary>
     public static int FindFreePort()
     {
@@ -215,18 +192,89 @@ public static class CdpHelper
     }
 
     /// <summary>
-    /// 自动登录：导航 + 轮询填表 + 提交
-    /// 适合 SPA 登录页（Angular/Vue/React），会等表单元素渲染后再填
+    /// 写日志到文件 + Debug 输出（双写）
+    /// 文件位置：A3Tools 同目录的 cdp.log（方便不开 VS 也能排查问题）
     /// </summary>
-    /// <param name="session">已连接的 CDP 会话</param>
-    /// <param name="url">目标 URL</param>
-    /// <param name="usernameSel">用户名输入框 CSS 选择器</param>
-    /// <param name="passwordSel">密码输入框 CSS 选择器</param>
-    /// <param name="submitSel">登录按钮 CSS 选择器</param>
-    /// <param name="username">用户名</param>
-    /// <param name="password">密码</param>
-    /// <param name="timeoutMs">总超时（默认 8 秒）</param>
-    /// <returns>true=登录成功，false=超时失败</returns>
+    public static void CdpLog(string msg)
+    {
+        var line = $"[{DateTime.Now:HH:mm:ss.fff}] [CDP] {msg}";
+        Debug.WriteLine(line);
+        try
+        {
+            var logPath = Path.Combine(AppContext.BaseDirectory, "cdp.log");
+            File.AppendAllText(logPath, line + Environment.NewLine);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 从 /json/version 拿 websocketUrl
+    /// 1. 先用 TcpClient 探活（连接被拒绝时不会抛 HttpRequestException）
+    /// 2. 端口活着才走 HttpClient 拿 wsUrl
+    /// Chrome 默认绑 127.0.0.1（IPv4），优先试 127.0.0.1 和 localhost
+    /// </summary>
+    public static async Task<string?> GetWebSocketUrlAsync(int port)
+    {
+        // 优先 127.0.0.1（Edge/Chrome 默认绑 IPv4），其次 localhost
+        var targets = new (string host, System.Net.IPAddress[] addrs)[]
+        {
+            ("127.0.0.1", new[] { System.Net.IPAddress.Parse("127.0.0.1") }),
+            ("localhost", new[] { System.Net.IPAddress.Loopback }),
+        };
+        foreach (var (host, addrs) in targets)
+        {
+            System.Net.IPAddress? connectedAddr = null;
+            foreach (var addr in addrs)
+            {
+                try
+                {
+                    using var tcp = new System.Net.Sockets.TcpClient();
+                    var connectTask = tcp.ConnectAsync(addr, port);
+                    var timeoutTask = Task.Delay(1500);
+                    var done = await Task.WhenAny(connectTask, timeoutTask);
+                    if (done == connectTask && tcp.Connected)
+                    {
+                        connectedAddr = addr;
+                        break;
+                    }
+                }
+                catch
+                {
+                    // 忽略，尝试下一个地址
+                }
+            }
+            if (connectedAddr == null)
+            {
+                CdpLog($"端口 {port} 不可达 (尝试 {host})");
+                continue;
+            }
+
+            // 端口活着，走 HTTP 拿 wsUrl
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                var url = $"http://{connectedAddr}:{port}/json/version";
+                var json = await http.GetStringAsync(url);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var wsEl))
+                {
+                    CdpLog($"✓ 拿到 WebSocket URL (host={connectedAddr})");
+                    return wsEl.GetString();
+                }
+            }
+            catch (Exception ex)
+            {
+                CdpLog($"http://{connectedAddr}:{port}/json/version 拿不到: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        CdpLog($"✗ 所有 host 都连不上，请检查：1) Edge/Chrome 是否启动 2) 防火墙是否拦截端口 {port} 3) --remote-debugging-port 是否生效");
+        return null;
+    }
+
+    /// <summary>
+    /// 自动登录：导航 + 轮询填表 + 提交
+    /// 适合 SPA 登录页（Angular/Vue/React/antd-mobile），会等表单元素渲染后再填
+    /// </summary>
     public static async Task<bool> AutoLoginAsync(
         CdpSession session,
         string url,
@@ -244,8 +292,9 @@ public static class CdpHelper
         // 导航到目标 URL
         await session.SendCommandAsync("Page.navigate", new { url });
 
-        // 构造填表 JS：用 querySelectorAll('sel') 拿所有匹配，挨个赋值并触发 input 事件
-        // （Angular 这种双向绑定框架必须 dispatch input 事件）
+        // 构造填表 JS：用 querySelector 拿元素，挨个赋值并触发 input 事件
+        // 关键：React/antd-mobile 框架用了 Object.getOwnPropertyDescriptor 拦截 value 的设置，
+        //      必须用原生 HTMLInputElement 的 value setter 才能触发框架的 onChange
         var uJs = JsonSerializer.Serialize(username);
         var pJs = JsonSerializer.Serialize(password);
         var uSelJs = JsonSerializer.Serialize(usernameSel);
@@ -261,8 +310,6 @@ public static class CdpHelper
     }} catch (e) {{}}
     return null;
   }}
-  // 兼容 React / antd-mobile / Vue 等框架的双向绑定：
-  // 直接 el.value = xxx 会被框架的 setter 拦截，必须用原生 HTMLInputElement 的 value setter
   function setVal(el, val) {{
     var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
@@ -291,11 +338,11 @@ public static class CdpHelper
             try
             {
                 var result = await session.EvaluateAsync(script);
-                // 解析 result.result.value
                 if (result.TryGetProperty("result", out var resultEl) &&
                     resultEl.TryGetProperty("value", out var valueEl) &&
                     valueEl.ValueKind == JsonValueKind.True)
                 {
+                    CdpLog($"✓ 第 {attempt} 次轮询填表成功");
                     return true;
                 }
             }
@@ -305,6 +352,7 @@ public static class CdpHelper
             }
             await Task.Delay(200);
         }
+        CdpLog($"✗ {timeoutMs}ms 内未填表成功（试了 {attempt} 次）");
         return false;
     }
 }
