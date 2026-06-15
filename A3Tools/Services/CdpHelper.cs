@@ -283,14 +283,46 @@ public static class CdpHelper
         string submitSel,
         string username,
         string password,
-        int timeoutMs = 8000)
+        int timeoutMs = 15000)
     {
         // 启用 Page + Runtime domain
         await session.SendCommandAsync("Page.enable");
         await session.SendCommandAsync("Runtime.enable");
 
-        // 导航到目标 URL
-        await session.SendCommandAsync("Page.navigate", new { url });
+        // 1. 导航前先订阅 Page.loadEventFired 事件（页面真的加载完了才触发表单轮询）
+        // 2. SPA 页面需要下载 JS bundle + bootstrap framework + 渲染表单，仅靠 readyState 不够，
+        //    还要等表单元素实际出现在 DOM 中
+        var loadEventTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnLoadEvent(string method, JsonElement p)
+        {
+            if (method == "Page.loadEventFired")
+            {
+                CdpLog("✓ 页面 loadEventFired（页面主资源加载完成）");
+                loadEventTcs.TrySetResult(true);
+            }
+        }
+        session.OnEvent += OnLoadEvent;
+
+        try
+        {
+            // 导航到目标 URL
+            CdpLog($"导航到：{url}");
+            await session.SendCommandAsync("Page.navigate", new { url });
+
+            // 3. 等 loadEventFired 事件（页面主资源加载完）
+            //    超时 10 秒（避诼 SPA 卡死），超时也继续填表（页面可能从缓存加载）
+            var loadTask = loadEventTcs.Task;
+            var loadTimeoutTask = Task.Delay(10000);
+            var loadDone = await Task.WhenAny(loadTask, loadTimeoutTask);
+            if (loadDone == loadTimeoutTask)
+            {
+                CdpLog("⚠️ loadEventFired 超时（10s），强制继续填表");
+            }
+        }
+        finally
+        {
+            session.OnEvent -= OnLoadEvent;
+        }
 
         // 构造填表 JS：用 querySelector 拿元素，挨个赋值并触发 input 事件
         // 关键：React/antd-mobile 框架用了 Object.getOwnPropertyDescriptor 拦截 value 的设置，
@@ -317,6 +349,8 @@ public static class CdpHelper
     el.dispatchEvent(new Event('input', {{ bubbles: true }}));
     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
   }}
+  // 第一道闸门：页面必须 readyState=complete（HTML 解析+子资源加载完成）
+  if (document.readyState !== 'complete') return false;
   var u = findFirst({uSelJs});
   var p = findFirst({pSelJs});
   var b = findFirst({bSelJs});
