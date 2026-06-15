@@ -261,12 +261,12 @@ public static class CdpHelper
     }} catch (e) {{}}
     return null;
   }}
+  // 兼容 React / antd-mobile / Vue 等框架的双向绑定：
+  // 直接 el.value = xxx 会被框架的 setter 拦截，必须用原生 HTMLInputElement 的 value setter
   function setVal(el, val) {{
-    var last = el.value;
-    el.value = val;
-    if (el.value !== val) {{
-      el.value = val;  // 某些 input 需要 set + dispatch 配合
-    }}
+    var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+    setter.call(el, val);
     el.dispatchEvent(new Event('input', {{ bubbles: true }}));
     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
   }}

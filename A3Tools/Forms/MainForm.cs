@@ -942,15 +942,18 @@ public partial class MainForm : Form, IToolContext
             string username = account.ServerUsername;
             string password = account.ServerPassword;
 
+            Debug.WriteLine($"[CDP] 开始自动登录：账号={username} 密码长度={password?.Length ?? 0}");
+            Debug.WriteLine($"[CDP] 选择器：user={usernameSel} pwd={passwordSel} btn={submitSel}");
+
             // 检查必要参数
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             {
-                Debug.WriteLine("[CDP] 账套用户名为空或密码为空，跳过自动登录");
+                Debug.WriteLine("[CDP] ✗ 账套用户名为空或密码为空，跳过自动登录");
                 return;
             }
             if (string.IsNullOrEmpty(usernameSel) || string.IsNullOrEmpty(passwordSel) || string.IsNullOrEmpty(submitSel))
             {
-                Debug.WriteLine("[CDP] 选择器未配置，请到设置中配置网页登录选择器");
+                Debug.WriteLine("[CDP] ✗ 选择器未配置，请到设置中配置网页登录选择器");
                 return;
             }
 
@@ -964,9 +967,10 @@ public partial class MainForm : Form, IToolContext
             }
             if (string.IsNullOrEmpty(wsUrl))
             {
-                Debug.WriteLine("[CDP] 拿不到 WebSocket URL，浏览器可能启动失败");
+                Debug.WriteLine("[CDP] ✗ 拿不到 WebSocket URL，浏览器可能启动失败");
                 return;
             }
+            Debug.WriteLine($"[CDP] ✓ 已连接到 CDP: {wsUrl}");
 
             using var session = await CdpSession.ConnectAsync(wsUrl);
             bool ok = await CdpHelper.AutoLoginAsync(
@@ -981,14 +985,18 @@ public partial class MainForm : Form, IToolContext
 
             await session.CloseAsync();
 
-            if (!ok)
+            if (ok)
             {
-                Debug.WriteLine("[CDP] 自动登录超时（10s 内未找到表单元素）");
+                Debug.WriteLine("[CDP] ✓ 自动登录成功（填表并点击登录）");
+            }
+            else
+            {
+                Debug.WriteLine("[CDP] ✗ 自动登录超时（10s 内未找到表单元素）");
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[CDP] 自动登录异常: {ex.Message}");
+            Debug.WriteLine($"[CDP] ✗ 自动登录异常: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
