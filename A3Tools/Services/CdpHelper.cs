@@ -404,6 +404,13 @@ public static class CdpHelper
             {
                 CdpLog("⚠️ loadEventFired 超时（10s），强制继续填表");
             }
+            else
+            {
+                // 4. 页面主资源加载完了，但还要等 500ms 让 SPA 加载账套信息（接口、初始化数据）
+                //    loadEventFired 只表示 HTML+子资源加载完，不代表框架 bootstrap 完
+                CdpLog("等待 500ms 让页面初始化完成（加载账套信息）");
+                await Task.Delay(500);
+            }
         }
         finally
         {
@@ -508,6 +515,7 @@ public static class CdpHelper
 
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         int attempt = 0;
+        bool filled = false;
         while (DateTime.UtcNow < deadline)
         {
             attempt++;
