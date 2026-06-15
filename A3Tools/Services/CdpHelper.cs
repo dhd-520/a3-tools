@@ -474,8 +474,9 @@ public static class CdpHelper
       count: {{ u: u.length, p: p.length, b: b.length }}
     }};
   }}
-  // 真正填表脚本：focus + native value setter + 返按钮坐标
-  // 不点 click()，因为 React 17+ 事件委托需要真实鼠标事件，改用 CDP Input.dispatchMouseEvent
+  // 真正填表脚本：focus + native value setter + 返按钮坐标 + 调用 React onClick handler
+  // 重点：React 内部不依赖 onClick 事件，而是从 props 里取。
+  // 为了避免 React 事件委托拦截 mouse/click，我们直接从 React fiber 里拿 onClick 直接调用。
   function setVal(el, val) {{
     el.focus();
     el.setSelectionRange(0, el.value?.length || 0);
@@ -484,6 +485,13 @@ public static class CdpHelper
     setter.call(el, val);
     el.dispatchEvent(new Event('input', {{ bubbles: true }}));
     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+  }}
+  // 从 React fiber 拿 onClick props key（react 16+ 是 memoizedProps，17+ 也是 props）
+  function getReactProps(el) {{
+    var key = Object.keys(el).find(function(k) {{
+      return k.startsWith('__reactProps$') || k.startsWith('__reactInternalInstance$') || k.startsWith('__reactFiber$');
+    }});
+    return key ? el[key] : null;
   }}
   var uMatches = findInAllFrames({uSelJs});
   var pMatches = findInAllFrames({pSelJs});
@@ -495,9 +503,11 @@ public static class CdpHelper
   if (uMatches.length > 0 && pMatches.length > 0 && bMatches.length > 0) {{
     setVal(uMatches[0], {uJs});
     setVal(pMatches[0], {pJs});
-    // 拿按钮中心坐标，供 C# 侧用 Input.dispatchMouseEvent 点击
     var btn = bMatches[0];
     var rect = btn.getBoundingClientRect();
+    // 检查 React props 里有没有 onClick（React 16+ 都在 __reactProps$xxx 上）
+    var props = getReactProps(btn);
+    var hasReactOnClick = !!(props && typeof props.onClick === 'function');
     return {{
       ok: true,
       uVal: uMatches[0].value,
@@ -507,7 +517,13 @@ public static class CdpHelper
       btnX: rect.left + rect.width / 2,
       btnY: rect.top + rect.height / 2,
       // 按钮外层文本
-      btnText: (btn.innerText || btn.textContent || '').trim().substring(0, 20)
+      btnText: (btn.innerText || btn.textContent || '').trim().substring(0, 20),
+      // 按钮是否在视口内
+      inViewport: rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth,
+      // React props 检测
+      hasReactOnClick: hasReactOnClick,
+      btnTag: btn.tagName,
+      btnClass: btn.className
     }};
   }}
   return {{
@@ -553,7 +569,41 @@ public static class CdpHelper
                             double btnX = btnXEl.GetDouble();
                             double btnY = btnYEl.GetDouble();
                             string btnText = valueEl.TryGetProperty("btnText", out var btEl) ? btEl.GetString() ?? "" : "";
-                            CdpLog($"按钮位置: ({btnX:F0}, {btnY:F0}) 文本=\"{btnText}\"，用真实鼠标点击");
+                            bool inViewport = valueEl.TryGetProperty("inViewport", out var ivEl) && ivEl.ValueKind == JsonValueKind.True;
+                            bool hasReactOnClick = valueEl.TryGetProperty("hasReactOnClick", out var hocEl) && hocEl.ValueKind == JsonValueKind.True;
+                            string btnTag = valueEl.TryGetProperty("btnTag", out var tagEl) ? tagEl.GetString() ?? "" : "";
+                            string btnClass = valueEl.TryGetProperty("btnClass", out var clsEl) ? clsEl.GetString() ?? "" : "";
+                            CdpLog($"按钮: 位置({btnX:F0},{btnY:F0}) tag={btnTag} class={btnClass} 文本=\"{btnText}\"");
+                            CdpLog($"      在视口内={inViewport} 有React onClick={hasReactOnClick}");
+                            // 1. 如果不在视口内，先滚动到可见
+                            if (!inViewport)
+                            {
+                                CdpLog("按钮不在视口内，滚动到可见");
+                                await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({bSelJs})?.scrollIntoView({{block:'center'}});" });
+                                await Task.Delay(200);
+                            }
+                            // 2. 送完整点击事件链：touch + mouse + pointer（antd-mobile 是移动端 UI 可能听 touch）
+                            // touchStart
+                            await session.SendCommandAsync("Input.dispatchTouchEvent", new
+                            {
+                                type = "touchStart",
+                                touchPoints = new[] { new { x = btnX, y = btnY, id = 1 } }
+                            });
+                            await Task.Delay(50);
+                            // touchEnd
+                            await session.SendCommandAsync("Input.dispatchTouchEvent", new
+                            {
+                                type = "touchEnd",
+                                touchPoints = new object[] { }
+                            });
+                            await Task.Delay(50);
+                            // 鼠标移动
+                            await session.SendCommandAsync("Input.dispatchMouseEvent", new
+                            {
+                                type = "mouseMoved",
+                                x = btnX,
+                                y = btnY
+                            });
                             // 鼠标按下
                             await session.SendCommandAsync("Input.dispatchMouseEvent", new
                             {
@@ -572,7 +622,32 @@ public static class CdpHelper
                                 button = "left",
                                 clickCount = 1
                             });
-                            CdpLog("✓ 真实鼠标点击已发送");
+                            CdpLog("✓ 已发送 touch + mouse + pointer 完整事件链");
+                            // 3. 靠底：直接调用 React onClick handler
+                            if (hasReactOnClick)
+                            {
+                                CdpLog("React onClick handler 存在，直接调用");
+                                var jsCallOnClick = $@"
+(function() {{
+  var btn = document.querySelector({bSelJs});
+  if (!btn) return 'no btn';
+  var key = Object.keys(btn).find(function(k) {{ return k.startsWith('__reactProps$') || k.startsWith('__reactInternalInstance$'); }});
+  if (!key) return 'no react key';
+  var props = btn[key];
+  if (props && typeof props.onClick === 'function') {{
+    try {{ props.onClick({{ preventDefault: function(){{}}, stopPropagation: function(){{}} }}); return 'onClick called'; }}
+    catch (e) {{ return 'onClick err: ' + e.message; }}
+  }}
+  return 'no onClick';
+}})()";
+                                var callResult = await session.EvaluateAsync(jsCallOnClick);
+                                CdpLog($"React onClick 调用结果: {callResult}");
+                            }
+                            await Task.Delay(1500);
+                            // 验证：检查 URL 是否变了
+                            var urlResult = await session.EvaluateAsync("window.location.href");
+                            string afterUrl = urlResult.GetProperty("result").GetProperty("value").GetString() ?? "";
+                            CdpLog($"点击后 URL: {afterUrl}");
                         }
                         else
                         {
