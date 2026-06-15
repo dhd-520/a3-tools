@@ -790,15 +790,14 @@ public partial class MainForm : Form, IToolContext
         string browserPath = GetBrowserPath(browser);
 
         // === CDP 自动登录：Chrome/Edge 且账套配置了凭证时走该分支 ===
-        // 只有「启动新窗口」模式才能用 CDP
-        // 「现有浏览器新 Tab」模式下 Edge 会把 URL 转发到已有实例，新进程会被单实例机制废弃，调试端口起不来
-        bool useCdp = newWindow
-            && account != null
+        // 两个模式都启用 CDP：用独占 user-data-dir 隔离现有浏览器进程
+        // 调试结果证明独占 user-data-dir 的进程能稳定运行，调试端口有效
+        bool useCdp = account != null
             && account.HasWebAutoLogin
             && CdpHelper.IsCdpSupported(browser);
-        if (account != null && account.HasWebAutoLogin && CdpHelper.IsCdpSupported(browser) && !newWindow)
+        if (useCdp && !newWindow)
         {
-            CdpHelper.CdpLog("「现有浏览器新 Tab」模式下 Edge 会转发到已有实例，跳过自动登录（如需自动登录请选「启动新窗口」）");
+            CdpHelper.CdpLog("Tab 模式启用 CDP：用独占 user-data-dir 隔离现有浏览器进程");
         }
         int cdpPort = 0;
         string? cdpUserDataDir = null;
@@ -1120,7 +1119,16 @@ public partial class MainForm : Form, IToolContext
         }
         else
         {
-            return $"\"{url}\"";
+            // Tab 模式：以独占 user-data-dir 启动 + 调试端口 + URL
+            // 用独占 user-data-dir 避免单实例转发隔离现有浏览器进程
+            return browser switch
+            {
+                "chrome" => $"--no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
+                "msedge" => $"{userDataPart}{cdpPart} \"{url}\"",
+                "firefox" => $"\"{url}\"",
+                "360se" => $"\"{url}\"",
+                _ => $"{userDataPart}{cdpPart} \"{url}\""
+            };
         }
     }
 
