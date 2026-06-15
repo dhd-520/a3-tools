@@ -796,6 +796,11 @@ public partial class MainForm : Form, IToolContext
         string fullArgs = "";
         if (useCdp)
         {
+            // Edge 单实例 IPC 会把新启动的 --remote-debugging-port 忽略！
+            // 杀光所有 msedge.exe 进程，让新的独占 user-data-dir 实例接管调试端口
+            // 用户的 profile 不会丢（我们用的是独立临时目录）
+            KillAllBrowserProcesses(browser);
+
             cdpPort = CdpHelper.FindFreePort();
             cdpUserDataDir = CdpHelper.GetTempUserDataDir();
             // 先算出完整命令，用于日志
@@ -1046,6 +1051,55 @@ public partial class MainForm : Form, IToolContext
         else
         {
             return $"\"{url}\"";
+        }
+    }
+
+    /// <summary>
+    /// 杀掉所有同类型浏览器进程（Edge/Chrome）
+    /// 原因：Edge 单实例 IPC 会让新启动的 --remote-debugging-port 被忽略
+    /// 调用时机：CDP 模式启动前，杀光旧进程让新独占 user-data-dir 实例接管调试端口
+    /// 注意：用户自己的浏览器会话可能会被关闭（我们用的是独立临时目录所以 profile 不会丢）
+    /// </summary>
+    private void KillAllBrowserProcesses(string browser)
+    {
+        try
+        {
+            string processName = browser switch
+            {
+                "msedge" => "msedge",
+                "chrome" => "chrome",
+                _ => ""  // 360/Firefox 不杀
+            };
+            if (string.IsNullOrEmpty(processName)) return;
+
+            var procs = Process.GetProcessesByName(processName);
+            if (procs.Length == 0)
+            {
+                CdpHelper.CdpLog($"没有 {processName} 进程，跳过杀进程");
+                return;
+            }
+            CdpHelper.CdpLog($"杀掉 {procs.Length} 个 {processName} 进程（避免单实例转发）");
+            foreach (var p in procs)
+            {
+                try
+                {
+                    p.Kill(entireProcessTree: true);
+                }
+                catch (Exception ex)
+                {
+                    CdpHelper.CdpLog($"  杀 PID {p.Id} 失败: {ex.Message}");
+                }
+                finally
+                {
+                    p.Dispose();
+                }
+            }
+            // 等进程退出
+            Thread.Sleep(1000);
+        }
+        catch (Exception ex)
+        {
+            CdpHelper.CdpLog($"杀进程异常: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
