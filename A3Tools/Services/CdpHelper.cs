@@ -486,6 +486,31 @@ public static class CdpHelper
     el.dispatchEvent(new Event('input', {{ bubbles: true }}));
     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
   }}
+  // 重要补充：Ant Design Mobile / React 17+ 还可能从 native input setter 里读 value，
+  // 上面 setVal 可能还不够。需要额外发 keyboardEvent（keydown/keypress/keyup/input）。
+  function simulateTyping(el, val) {{
+    el.focus();
+    el.setSelectionRange(0, el.value?.length || 0);
+    // 退格删除现有内容
+    for (var i = 0; i < (el.value?.length || 0); i++) {{
+      el.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Backspace', code: 'Backspace', keyCode: 8, bubbles: true }}));
+    }}
+    el.value = '';
+    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    // 逐字发送 keydown + keypress + input + keyup
+    for (var i = 0; i < val.length; i++) {{
+      var ch = val.charAt(i);
+      el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, code: 'Key' + ch.toUpperCase(), keyCode: ch.charCodeAt(0), bubbles: true }}));
+      el.dispatchEvent(new KeyboardEvent('keypress', {{ key: ch, keyCode: ch.charCodeAt(0), bubbles: true }}));
+      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      var current = el.value;
+      setter.call(el, current + ch);
+      el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+      el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, code: 'Key' + ch.toUpperCase(), keyCode: ch.charCodeAt(0), bubbles: true }}));
+    }}
+    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+  }}
   // 从 React fiber 拿 onClick props key（react 16+ 是 memoizedProps，17+ 也是 props）
   function getReactProps(el) {{
     var key = Object.keys(el).find(function(k) {{
@@ -501,6 +526,8 @@ public static class CdpHelper
   if (pMatches.length === 0) missing.push('password');
   if (bMatches.length === 0) missing.push('button');
   if (uMatches.length > 0 && pMatches.length > 0 && bMatches.length > 0) {{
+    // 重点：JS 事件置入 React state 不一定生效（提交时拿到空值），
+    // 后面 C# 侧会用 Input.insertText（CDP 原生）重发一次，那才是唯一可靠的方式。
     setVal(uMatches[0], {uJs});
     setVal(pMatches[0], {pJs});
     var btn = bMatches[0];
@@ -575,6 +602,21 @@ public static class CdpHelper
                             string btnClass = valueEl.TryGetProperty("btnClass", out var clsEl) ? clsEl.GetString() ?? "" : "";
                             CdpLog($"按钮: 位置({btnX:F0},{btnY:F0}) tag={btnTag} class={btnClass} 文本=\"{btnText}\"");
                             CdpLog($"      在视口内={inViewport} 有React onClick={hasReactOnClick}");
+                            // 0. 【重要】先用 CDP Input.insertText 重填（JS 填的不一定生效）
+                            //    思路：JS focus input → C# 发 Input.insertText → 触发真实 input 事件 → React state 同步
+                            CdpLog("=== 阶段 0：用 Input.insertText 重填账号（CDP 原生键盘输入） ===");
+                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({uSelJs})?.focus(); document.querySelector({uSelJs})?.select();" });
+                            await Task.Delay(100);
+                            await session.SendCommandAsync("Input.insertText", new { text = username });
+                            await Task.Delay(200);
+                            CdpLog($"=== 阶段 0：用 Input.insertText 重填密码 ===");
+                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({pSelJs})?.focus(); document.querySelector({pSelJs})?.select();" });
+                            await Task.Delay(100);
+                            await session.SendCommandAsync("Input.insertText", new { text = password });
+                            await Task.Delay(300);
+                            // 验证：拿一下当前 uVal
+                            var verifyResult = await session.EvaluateAsync($@"JSON.stringify({{u: document.querySelector({uSelJs})?.value, p: document.querySelector({pSelJs})?.value}})");
+                            CdpLog($"填表后验证: {verifyResult}");
                             // 1. 如果不在视口内，先滚动到可见
                             if (!inViewport)
                             {
