@@ -474,10 +474,10 @@ public static class CdpHelper
       count: {{ u: u.length, p: p.length, b: b.length }}
     }};
   }}
-  // 真正填表脚本：focus + Input.insertText 互调
+  // 真正填表脚本：focus + native value setter + 返按钮坐标
+  // 不点 click()，因为 React 17+ 事件委托需要真实鼠标事件，改用 CDP Input.dispatchMouseEvent
   function setVal(el, val) {{
     el.focus();
-    // 模拟选中已有内容（ctrl+a）
     el.setSelectionRange(0, el.value?.length || 0);
     var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
@@ -495,12 +495,19 @@ public static class CdpHelper
   if (uMatches.length > 0 && pMatches.length > 0 && bMatches.length > 0) {{
     setVal(uMatches[0], {uJs});
     setVal(pMatches[0], {pJs});
-    bMatches[0].click();
+    // 拿按钮中心坐标，供 C# 侧用 Input.dispatchMouseEvent 点击
+    var btn = bMatches[0];
+    var rect = btn.getBoundingClientRect();
     return {{
       ok: true,
       uVal: uMatches[0].value,
       pVal: pMatches[0].value,
-      count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }}
+      count: {{ u: uMatches.length, p: pMatches.length, b: bMatches.length }},
+      // 按钮中心坐标（视口坐标）
+      btnX: rect.left + rect.width / 2,
+      btnY: rect.top + rect.height / 2,
+      // 按钮外层文本
+      btnText: (btn.innerText || btn.textContent || '').trim().substring(0, 20)
     }};
   }}
   return {{
@@ -538,6 +545,39 @@ public static class CdpHelper
                             countInfo = $"u={cntEl.GetProperty("u").GetInt32()} p={cntEl.GetProperty("p").GetInt32()} b={cntEl.GetProperty("b").GetInt32()}";
                         }
                         CdpLog($"✓ 第 {attempt} 次轮询填表成功 ({countInfo})");
+                        // 拿按钮中心坐标，用 Input.dispatchMouseEvent 真实鼠标点击
+                        // （React 17+ 事件委托需要真实鼠标事件才能触发 onClick）
+                        if (valueEl.TryGetProperty("btnX", out var btnXEl) &&
+                            valueEl.TryGetProperty("btnY", out var btnYEl))
+                        {
+                            double btnX = btnXEl.GetDouble();
+                            double btnY = btnYEl.GetDouble();
+                            string btnText = valueEl.TryGetProperty("btnText", out var btEl) ? btEl.GetString() ?? "" : "";
+                            CdpLog($"按钮位置: ({btnX:F0}, {btnY:F0}) 文本=\"{btnText}\"，用真实鼠标点击");
+                            // 鼠标按下
+                            await session.SendCommandAsync("Input.dispatchMouseEvent", new
+                            {
+                                type = "mousePressed",
+                                x = btnX,
+                                y = btnY,
+                                button = "left",
+                                clickCount = 1
+                            });
+                            // 鼠标抬起
+                            await session.SendCommandAsync("Input.dispatchMouseEvent", new
+                            {
+                                type = "mouseReleased",
+                                x = btnX,
+                                y = btnY,
+                                button = "left",
+                                clickCount = 1
+                            });
+                            CdpLog("✓ 真实鼠标点击已发送");
+                        }
+                        else
+                        {
+                            CdpLog("⚠️ 未拿到按钮坐标，回退到 element.click()");
+                        }
                         return true;
                     }
                     if (valueEl.TryGetProperty("reason", out var reasonEl))
