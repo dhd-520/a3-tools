@@ -793,16 +793,21 @@ public partial class MainForm : Form, IToolContext
         bool useCdp = account != null && account.HasWebAutoLogin && CdpHelper.IsCdpSupported(browser);
         int cdpPort = 0;
         string? cdpUserDataDir = null;
+        string fullArgs = "";
         if (useCdp)
         {
             cdpPort = CdpHelper.FindFreePort();
             cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+            // 先算出完整命令，用于日志
+            fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
+            CdpHelper.CdpLog($"准备启动浏览器：exe={browserPath}");
+            CdpHelper.CdpLog($"参数：{fullArgs.Substring(0, Math.Min(200, fullArgs.Length))}...");
         }
 
         if (!string.IsNullOrEmpty(browserPath) && File.Exists(browserPath))
         {
-            // 统一调用 BuildBrowserArgs：自动附带 CDP 参数（如果 useCdp）
-            string args = BuildBrowserArgs(url, browser, newWindow, useCdp ? cdpPort : 0, useCdp ? cdpUserDataDir : null);
+            // 如果 useCdp 已算出 fullArgs，复用它；否则现场算
+            string args = !string.IsNullOrEmpty(fullArgs) ? fullArgs : BuildBrowserArgs(url, browser, newWindow, useCdp ? cdpPort : 0, useCdp ? cdpUserDataDir : null);
 
             // Chrome/360 直接启动，UseShellExecute=false 可获取真实 PID
             // Edge/Firefox 也去掉 ShellExecute，用 --new-window 参数保证新窗口
@@ -820,16 +825,31 @@ public partial class MainForm : Form, IToolContext
                 // Edge/Firefox 用 ShellExecute，Process.Start 返回 null 或立即退出的进程
                 var existingPids = useShellExecute ? GetExistingBrowserPids(browser) : null;
 
+                CdpHelper.CdpLog($"调用 Process.Start，useShellExecute={useShellExecute}");
                 var p = Process.Start(startInfo);
                 if (p != null && !p.HasExited)
                 {
+                    CdpHelper.CdpLog($"进程启动成功：PID={p.Id}");
                     _processIds.Add(p.Id);
                     _processLaunchModes[p.Id] = newWindow;
                     RecordProcess(accountCode, p.Id, "web");
                 }
-                else if (useShellExecute && existingPids != null)
+                else
+                {
+                    // 进程立即退出！可能是 Edge 单实例把 URL 转发给老进程了
+                    CdpHelper.CdpLog($"⚠️ 进程立即退出 (HasExited={p?.HasExited})，可能是 Edge 单实例转发给了已有进程");
+                    // 如果是 CDP 模式，等一等再尝试 CDP 连接（可能有新进程）
+                    if (useCdp)
+                    {
+                        CdpHelper.CdpLog("CDP 模式：等待 2 秒让 Edge 启动...");
+                        System.Threading.Thread.Sleep(2000);
+                    }
+                }
+
+                if (useShellExecute && existingPids != null)
                 {
                     // ShellExecute 模式：等待浏览器启动，然后查找新进程
+                    CdpHelper.CdpLog("ShellExecute 模式，等待 500ms 后查找新进程...");
                     System.Threading.Thread.Sleep(500);
                     var newPids = GetNewBrowserPids(browser, existingPids);
                     foreach (var newPid in newPids)
