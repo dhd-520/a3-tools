@@ -356,6 +356,86 @@ public static class CdpHelper
     }
 
     /// <summary>
+    /// 扫描现有浏览器进程，找到带 --remote-debugging-port=XXXX 的进程
+    /// 【Tab 模式用】复用现有浏览器实例，在现有窗口开新 Tab
+    /// </summary>
+    /// <returns>调试端口（如 9222），如果没找到返回 0</returns>
+    public static int FindExistingBrowserDebugPort(string browser)
+    {
+        string procName = browser == "msedge" ? "msedge" : (browser == "chrome" ? "chrome" : "");
+        if (string.IsNullOrEmpty(procName)) return 0;
+        try
+        {
+            var procs = Process.GetProcessesByName(procName);
+            foreach (var p in procs)
+            {
+                try
+                {
+                    var searcher = new System.Management.ManagementObjectSearcher(
+                        $"SELECT CommandLine FROM Win32_Process WHERE ProcessId={p.Id}");
+                    foreach (var obj in searcher.Get())
+                    {
+                        var cmd = obj["CommandLine"]?.ToString() ?? "";
+                        var match = System.Text.RegularExpressions.Regex.Match(
+                            cmd, @"--remote-debugging-port=(\d+)");
+                        if (match.Success && int.TryParse(match.Groups[1].Value, out int port))
+                        {
+                            CdpLog($"发现现有 {procName} 带调试端口: PID={p.Id} port={port}");
+                            return port;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            CdpLog($"扫描现有 {procName} 进程失败: {ex.Message}");
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// 在现有浏览器中通过 CDP 创建新 Tab，返回新 Tab 的 WebSocket URL
+    /// 【Tab 模式用】需先调用 FindExistingBrowserDebugPort 拿到端口
+    /// </summary>
+    public static async Task<string?> CreateNewTabInExistingBrowserAsync(int port, string url)
+    {
+        try
+        {
+            // 1. TcpClient 探活
+            using var tcp = new System.Net.Sockets.TcpClient();
+            var connectTask = tcp.ConnectAsync(System.Net.IPAddress.Parse("127.0.0.1"), port);
+            var timeoutTask = Task.Delay(2000);
+            var done = await Task.WhenAny(connectTask, timeoutTask);
+            if (done != connectTask || !tcp.Connected)
+            {
+                CdpLog($"端口 {port} 不可达");
+                return null;
+            }
+            // 2. /json/new 端点创建新 Tab
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            var newTabJson = await http.GetStringAsync($"http://127.0.0.1:{port}/json/new?{Uri.EscapeDataString(url)}");
+            using var doc = JsonDocument.Parse(newTabJson);
+            if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var wsEl))
+            {
+                var ws = wsEl.GetString();
+                if (!string.IsNullOrEmpty(ws))
+                {
+                    CdpLog($"✓ 现有浏览器创建新 Tab: {ws}");
+                    return ws;
+                }
+            }
+            CdpLog($"现有浏览器 /json/new 返回无效: {newTabJson}");
+        }
+        catch (Exception ex)
+        {
+            CdpLog($"在现有浏览器开新 Tab 失败: {ex.GetType().Name}: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>
     /// 自动登录：导航 + 轮询填表 + 提交
     /// 适合 SPA 登录页（Angular/Vue/React/antd-mobile），会等表单元素渲染后再填
     /// </summary>

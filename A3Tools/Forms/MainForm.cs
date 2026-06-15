@@ -951,7 +951,7 @@ public partial class MainForm : Form, IToolContext
                 // CDP 自动登录：浏览器启动后异步执行
                 if (useCdp)
                 {
-                    _ = RunCdpAutoLoginAsync(cdpPort, url, account!);
+                    _ = RunCdpAutoLoginAsync(cdpPort, url, account!, browser, newWindow);
                 }
             }
             catch (Exception ex)
@@ -990,7 +990,7 @@ public partial class MainForm : Form, IToolContext
                     // CDP 自动登录
                     if (useCdp)
                     {
-                        _ = RunCdpAutoLoginAsync(cdpPort, url, account!);
+                        _ = RunCdpAutoLoginAsync(cdpPort, url, account!, browser, newWindow);
                     }
                 }
                 catch (Exception ex)
@@ -1038,7 +1038,41 @@ public partial class MainForm : Form, IToolContext
     /// <summary>
     /// CDP 自动登录（异步）：连接远程调试端口 → 填表 → 提交
     /// </summary>
-    private async Task RunCdpAutoLoginAsync(int port, string url, Account account)
+    private async Task RunCdpAutoLoginAsync(int port, string url, Account account, string browser, bool isNewWindow)
+    {
+        try
+        {
+            // === 【Tab 模式】优先复用现有浏览器，在现有窗口开新 Tab ===
+            if (!isNewWindow)
+            {
+                int existingPort = CdpHelper.FindExistingBrowserDebugPort(browser);
+                if (existingPort > 0)
+                {
+                    CdpHelper.CdpLog($"Tab 模式：发现现有 {browser} 调试端口 {existingPort}，在该窗口开新 Tab");
+                    string? existingWs = await CdpHelper.CreateNewTabInExistingBrowserAsync(existingPort, url);
+                    if (!string.IsNullOrEmpty(existingWs))
+                    {
+                        CdpHelper.CdpLog($"✓ 已在现有 {browser} 中开新 Tab，wsUrl={existingWs}");
+                        await DoAutoLoginAsync(existingWs, url, account);
+                        return;
+                    }
+                    CdpHelper.CdpLog("现有浏览器开新 Tab 失败，回退到启动新进程");
+                }
+                else
+                {
+                    CdpHelper.CdpLog($"Tab 模式：现有 {browser} 未启用调试端口，启动新进程（会开新窗口）");
+                }
+            }
+            // 【新窗口模式】或【Tab 模式回退】启动新进程
+            await DoAutoLoginAsync(null, url, account, port);
+        }
+        catch (Exception ex)
+        {
+            CdpHelper.CdpLog($"✗ 自动登录异常: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private async Task DoAutoLoginAsync(string? existingWsUrl, string url, Account account, int port = 0)
     {
         try
         {
@@ -1068,14 +1102,17 @@ public partial class MainForm : Form, IToolContext
             }
 
             // 等浏览器起来（CDP 端口开始监听）
-            string? wsUrl = null;
-            for (int i = 0; i < 30; i++)  // 最多等 6 秒
+            string? wsUrl = existingWsUrl;
+            if (string.IsNullOrEmpty(wsUrl))
             {
-                // 优先拿 page target 的 WebSocket URL（有 Page 域，能调 Page.navigate / Page.enable）
-                // /json/version 是 browser-level，只有 Browser/Target 域
-                wsUrl = await CdpHelper.GetPageWebSocketUrlAsync(port);
-                if (!string.IsNullOrEmpty(wsUrl)) break;
-                await Task.Delay(200);
+                for (int i = 0; i < 30; i++)  // 最多等 6 秒
+                {
+                    // 优先拿 page target 的 WebSocket URL（有 Page 域，能调 Page.navigate / Page.enable）
+                    // /json/version 是 browser-level，只有 Browser/Target 域
+                    wsUrl = await CdpHelper.GetPageWebSocketUrlAsync(port);
+                    if (!string.IsNullOrEmpty(wsUrl)) break;
+                    await Task.Delay(200);
+                }
             }
             if (string.IsNullOrEmpty(wsUrl))
             {
