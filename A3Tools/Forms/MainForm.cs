@@ -855,20 +855,17 @@ public partial class MainForm : Form, IToolContext
             }
             else
             {
-                // Tab 模式：复用现有浏览器 profile，共享 cookie/扩展/收藏
-                // 查现有浏览器进程的 --user-data-dir 参数
+                // Tab 模式：复制现有 profile 关键文件到 temp 目录
+                // 【重要】不能用现有 user-data-dir：Edge/Chrome 会在该目录创建 lockfile，
+                //         新进程检测到 lock 会把 URL 转发给现有实例并退出
+                cdpUserDataDir = CdpHelper.GetTempUserDataDir();
                 string? existingProfile = GetExistingBrowserUserDataDir(browser);
-                if (!string.IsNullOrEmpty(existingProfile) && Directory.Exists(existingProfile))
+                if (string.IsNullOrEmpty(existingProfile) || !Directory.Exists(existingProfile))
                 {
-                    cdpUserDataDir = existingProfile;
-                    CdpHelper.CdpLog($"Tab 模式复用现有 profile: {cdpUserDataDir}");
+                    existingProfile = GetDefaultUserDataDir(browser);
                 }
-                else
-                {
-                    // 现有实例未指定 user-data-dir，用默认路径
-                    cdpUserDataDir = GetDefaultUserDataDir(browser);
-                    CdpHelper.CdpLog($"Tab 模式使用默认 profile: {cdpUserDataDir}");
-                }
+                CdpHelper.CdpLog($"Tab 模式现有 profile: {existingProfile}");
+                CopyBrowserProfile(existingProfile, cdpUserDataDir, browser);
             }
             // 先算出完整命令，用于日志（打印完整参数，不裁断）
             fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
@@ -1161,6 +1158,67 @@ public partial class MainForm : Form, IToolContext
             "chrome" => Path.Combine(localAppData, @"Google\Chrome\User Data"),
             _ => Path.Combine(localAppData, @"A3Tools_TempProfile")
         };
+    }
+
+    /// <summary>
+    /// 复制现有浏览器 profile 关键文件到 temp profile，实现共享登录状态
+    /// 【问题背景】Edge/Chrome 启动新进程时，如果 user-data-dir 被现有实例锁住，
+    ///            会把 URL 转发给现有实例并退出。所以 Tab 模式必须用独立 profile。
+    /// 【本方案】用独立 temp profile，但复制关键文件（Cookies/Login Data/Bookmarks/Local State），
+    ///           让新进程能复用现有实例的登录态。
+    /// </summary>
+    private void CopyBrowserProfile(string srcProfile, string dstProfile, string browser)
+    {
+        if (string.IsNullOrEmpty(srcProfile) || !Directory.Exists(srcProfile))
+        {
+            CdpHelper.CdpLog($"现有 profile 不存在，跳过复制: {srcProfile}");
+            return;
+        }
+        try
+        {
+            // 关键文件列表（按重要性排序）
+            // 1. Local State - 全局状态、首选语言
+            // 2. Default/Cookies - 登录态（最重要）
+            // 3. Default/Login Data - 保存的密码
+            // 4. Default/Bookmarks - 收藏
+            // 5. Default/Preferences - 偏好设置
+            string[] criticalFiles = new[]
+            {
+                "Local State",
+                Path.Combine("Default", "Cookies"),
+                Path.Combine("Default", "Cookies-journal"),
+                Path.Combine("Default", "Login Data"),
+                Path.Combine("Default", "Login Data-journal"),
+                Path.Combine("Default", "Bookmarks"),
+                Path.Combine("Default", "Preferences"),
+                Path.Combine("Default", "Secure Preferences"),
+                Path.Combine("Default", "Web Data"),
+                Path.Combine("Default", "Web Data-journal"),
+            };
+            int copiedCount = 0;
+            foreach (var relPath in criticalFiles)
+            {
+                string src = Path.Combine(srcProfile, relPath);
+                string dst = Path.Combine(dstProfile, relPath);
+                if (!File.Exists(src)) continue;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+                    File.Copy(src, dst, overwrite: true);
+                    copiedCount++;
+                }
+                catch (Exception ex)
+                {
+                    // 现有 Edge 可能锁住文件（如 Cookies.sqlite），跳过不复制
+                    CdpHelper.CdpLog($"  跳过（可能被锁）: {relPath} - {ex.Message}");
+                }
+            }
+            CdpHelper.CdpLog($"Tab 模式复制了 {copiedCount} 个关键文件到 temp profile");
+        }
+        catch (Exception ex)
+        {
+            CdpHelper.CdpLog($"复制 profile 失败: {ex.Message}");
+        }
     }
 
     private string BuildBrowserArgs(string url, string browser, bool newWindow, int cdpPort = 0, string? cdpUserDataDir = null)
