@@ -796,10 +796,48 @@ public partial class MainForm : Form, IToolContext
         string fullArgs = "";
         if (useCdp)
         {
-            // Edge 单实例 IPC 会把新启动的 --remote-debugging-port 忽略！
-            // 杀光所有 msedge.exe 进程，让新的独占 user-data-dir 实例接管调试端口
-            // 用户的 profile 不会丢（我们用的是独立临时目录）
-            KillAllBrowserProcesses(browser);
+            // Edge 单实例 IPC 是按 --user-data-dir 隔离的
+            // 只要用独占 user-data-dir 启动新 Edge，调试端口就不会被原有 Edge 实例拦截
+            // 不用杀旧进程
+
+            // 检查现有浏览器进程是否已启用调试端口（多 debug port 冲突会争抢）
+            try
+            {
+                string procName = browser == "msedge" ? "msedge" : (browser == "chrome" ? "chrome" : "");
+                if (!string.IsNullOrEmpty(procName))
+                {
+                    var procs = Process.GetProcessesByName(procName);
+                    int existingDebugPort = 0;
+                    foreach (var p in procs)
+                    {
+                        try
+                        {
+                            var mgr = p.GetType();
+                            // 用 WMI 拿命令行
+                            var searcher = new System.Management.ManagementObjectSearcher(
+                                $"SELECT CommandLine FROM Win32_Process WHERE ProcessId={p.Id}");
+                            foreach (var obj in searcher.Get())
+                            {
+                                var cmd = obj["CommandLine"]?.ToString() ?? "";
+                                var match = System.Text.RegularExpressions.Regex.Match(
+                                    cmd, @"--remote-debugging-port=(\d+)");
+                                if (match.Success && int.TryParse(match.Groups[1].Value, out int existingPort))
+                                {
+                                    existingDebugPort = existingPort;
+                                    break;
+                                }
+                            }
+                            if (existingDebugPort > 0) break;
+                        }
+                        catch { }
+                    }
+                    CdpHelper.CdpLog($"现有 {procName} 进程：{procs.Length} 个，其中调试端口：{(existingDebugPort > 0 ? existingDebugPort.ToString() : "无")}");
+                }
+            }
+            catch (Exception ex)
+            {
+                CdpHelper.CdpLog($"检查现有浏览器调试端口失败: {ex.Message}");
+            }
 
             cdpPort = CdpHelper.FindFreePort();
             cdpUserDataDir = CdpHelper.GetTempUserDataDir();
@@ -1056,9 +1094,10 @@ public partial class MainForm : Form, IToolContext
 
     /// <summary>
     /// 杀掉所有同类型浏览器进程（Edge/Chrome）
-    /// 原因：Edge 单实例 IPC 会让新启动的 --remote-debugging-port 被忽略
-    /// 调用时机：CDP 模式启动前，杀光旧进程让新独占 user-data-dir 实例接管调试端口
-    /// 注意：用户自己的浏览器会话可能会被关闭（我们用的是独立临时目录所以 profile 不会丢）
+    /// 【保留作为应急方案】一般情况下不需要调用
+    /// 原因：Edge 单实例 IPC 按 user-data-dir 隔离，独占目录启动的实例可以正常绑定调试端口
+    /// 只有当用户启用了 --remote-debugging-port 的 Edge 已在运行时，新启动实例才会被单实例转发
+    /// 以后如果遇到这种边界场景可以调用本方法
     /// </summary>
     private void KillAllBrowserProcesses(string browser)
     {
@@ -1078,7 +1117,7 @@ public partial class MainForm : Form, IToolContext
                 CdpHelper.CdpLog($"没有 {processName} 进程，跳过杀进程");
                 return;
             }
-            CdpHelper.CdpLog($"杀掉 {procs.Length} 个 {processName} 进程（避免单实例转发）");
+            CdpHelper.CdpLog($"杀掉 {procs.Length} 个 {processName} 进程");
             foreach (var p in procs)
             {
                 try
