@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Data;
+using System.Diagnostics;
 using System.Drawing;
 using System.Collections.Generic;
 using System.Linq;
@@ -353,6 +354,10 @@ public partial class CrossDbCopyAppFormForm : Form
                     // 复制S_APP_OBJECT_BACKGROUD表 颜色设置
                     TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_OBJECT_BACKGROUD", "OBJECTGUID", objectGuid, deleteFirst, "[APP表单]");
 
+                    // 复制关联的编码规则和标准查询
+                    CopyAppFormCodeRules(srcConn, tgtConn, objectGuid);
+                    CopyAppFormStandardQueries(srcConn, tgtConn, objectGuid);
+
                 }
 
                 return true;
@@ -544,5 +549,196 @@ ORDER BY NAME";
         }
         lblSearchProgress.Text = "已清空选项";
         lblSearchProgress.ForeColor = Color.Gray;
+    }
+
+    // ==================== APP表单编码规则 & 标准查询复制 ====================
+
+    /// <summary>
+    /// 复制APP编码规则：从S_APP_CONTROL中DATANAME=BILLNO/CODE的行取DEFAULTVALUE作为编码规则CODE，
+    /// 若目标库不存在对应规则则从源库复制S_BILLCODERULE和S_BILLCODERULEDETAIL
+    /// </summary>
+    private void CopyAppFormCodeRules(SqlConnection srcConn, SqlConnection tgtConn, string objectGuid)
+    {
+        try
+        {
+            var sql = @"SELECT DEFAULTVALUE FROM dbo.S_APP_CONTROL
+                        WHERE OBJECTGUID = @guid AND (DATANAME = 'BILLNO' OR DATANAME = 'CODE')";
+            using var cmd = new SqlCommand(sql, srcConn);
+            cmd.Parameters.AddWithValue("@guid", objectGuid);
+            using var reader = cmd.ExecuteReader();
+            var codeRuleCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (reader.Read())
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    var defaultValue = reader.GetString(0)?.Trim();
+                    if (!string.IsNullOrWhiteSpace(defaultValue))
+                    {
+                        codeRuleCodes.Add(defaultValue);
+                    }
+                }
+            }
+            reader.Close();
+
+            foreach (var ruleCode in codeRuleCodes)
+            {
+                CopyOneAppFormCodeRule(srcConn, tgtConn, ruleCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[APP表单编码规则] 复制失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 复制单条编码规则（S_BILLCODERULE + S_BILLCODERULEDETAIL）
+    /// </summary>
+    private void CopyOneAppFormCodeRule(SqlConnection srcConn, SqlConnection tgtConn, string ruleCode)
+    {
+        try
+        {
+            if (AppFormCodeRuleExistsInTarget(tgtConn, ruleCode))
+            {
+                System.Diagnostics.Debug.WriteLine($"[APP表单编码规则] {ruleCode} 目标库已存在，跳过");
+                return;
+            }
+
+            var rule = GetAppFormCodeRuleFromSource(srcConn, ruleCode);
+            if (rule == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[APP表单编码规则] {ruleCode} 在源库中未找到");
+                return;
+            }
+
+            TableCopyService.CopyTableData(srcConn, tgtConn, "S_BILLCODERULE", "CODE", ruleCode, false, "[APP表单编码规则]");
+            TableCopyService.CopyTableData(srcConn, tgtConn, "S_BILLCODERULEDETAIL", "BILLCODERULEGUID", rule.Item1, false, "[APP表单编码规则]");
+
+            System.Diagnostics.Debug.WriteLine($"[APP表单编码规则] {ruleCode} 复制成功");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[APP表单编码规则] {ruleCode} 复制失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 检查目标库中编码规则是否存在
+    /// </summary>
+    private bool AppFormCodeRuleExistsInTarget(SqlConnection tgtConn, string code)
+    {
+        var sql = @"SELECT COUNT(*) FROM dbo.S_BILLCODERULE WHERE CODE = @code";
+        using var cmd = new SqlCommand(sql, tgtConn);
+        cmd.Parameters.AddWithValue("@code", code);
+        return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+    }
+
+    /// <summary>
+    /// 从源库获取编码规则的GUID
+    /// </summary>
+    private Tuple<string, DataTable>? GetAppFormCodeRuleFromSource(SqlConnection srcConn, string code)
+    {
+        var sql = "SELECT * FROM dbo.S_BILLCODERULE WHERE CODE = @code";
+        using var cmd = new SqlCommand(sql, srcConn);
+        cmd.Parameters.AddWithValue("@code", code);
+        var dt = new DataTable();
+        using var adapter = new SqlDataAdapter(cmd);
+        adapter.Fill(dt);
+        if (dt.Rows.Count == 0) return null;
+        var guid = dt.Rows[0]["GUID"].ToString()!;
+        return Tuple.Create(guid, dt);
+    }
+
+    /// <summary>
+    /// 复制APP标准查询：从S_APP_CONTROL中DATASELECTCODE不为空的行取值，
+    /// 若目标库不存在对应标准查询则从源库复制S_DATASELECT
+    /// </summary>
+    private void CopyAppFormStandardQueries(SqlConnection srcConn, SqlConnection tgtConn, string objectGuid)
+    {
+        try
+        {
+            var sql = @"SELECT DATASELECTCODE FROM dbo.S_APP_CONTROL
+                        WHERE OBJECTGUID = @guid AND DATASELECTCODE IS NOT NULL AND DATASELECTCODE <> ''";
+            using var cmd = new SqlCommand(sql, srcConn);
+            cmd.Parameters.AddWithValue("@guid", objectGuid);
+            using var reader = cmd.ExecuteReader();
+            var dataSelectCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (reader.Read())
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    var code = reader.GetString(0)?.Trim();
+                    if (!string.IsNullOrWhiteSpace(code))
+                    {
+                        dataSelectCodes.Add(code);
+                    }
+                }
+            }
+            reader.Close();
+
+            foreach (var code in dataSelectCodes)
+            {
+                CopyOneAppFormStandardQuery(srcConn, tgtConn, code);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[APP表单标准查询] 复制失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 复制单条标准查询（S_DATASELECT）
+    /// </summary>
+    private void CopyOneAppFormStandardQuery(SqlConnection srcConn, SqlConnection tgtConn, string code)
+    {
+        try
+        {
+            if (AppFormStandardQueryExistsInTarget(tgtConn, code))
+            {
+                System.Diagnostics.Debug.WriteLine($"[APP表单标准查询] {code} 目标库已存在，跳过");
+                return;
+            }
+
+            var dt = GetAppFormStandardQueryFromSource(srcConn, code);
+            if (dt == null || dt.Rows.Count == 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[APP表单标准查询] {code} 在源库中未找到");
+                return;
+            }
+
+            TableCopyService.CopyTableData(srcConn, tgtConn, "S_DATASELECT", "CODE", code, false, "[APP表单标准查询]");
+
+            System.Diagnostics.Debug.WriteLine($"[APP表单标准查询] {code} 复制成功");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[APP表单标准查询] {code} 复制失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 检查目标库中标准查询是否存在
+    /// </summary>
+    private bool AppFormStandardQueryExistsInTarget(SqlConnection tgtConn, string code)
+    {
+        var sql = @"SELECT COUNT(*) FROM dbo.S_DATASELECT WHERE CODE = @code";
+        using var cmd = new SqlCommand(sql, tgtConn);
+        cmd.Parameters.AddWithValue("@code", code);
+        return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+    }
+
+    /// <summary>
+    /// 从源库获取标准查询数据
+    /// </summary>
+    private DataTable? GetAppFormStandardQueryFromSource(SqlConnection srcConn, string code)
+    {
+        var sql = "SELECT * FROM dbo.S_DATASELECT WHERE CODE = @code";
+        using var cmd = new SqlCommand(sql, srcConn);
+        cmd.Parameters.AddWithValue("@code", code);
+        var dt = new DataTable();
+        using var adapter = new SqlDataAdapter(cmd);
+        adapter.Fill(dt);
+        return dt.Rows.Count > 0 ? dt : null;
     }
 }
