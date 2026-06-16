@@ -1235,16 +1235,19 @@ public partial class MainForm : Form, IToolContext
         string userDataPart = !string.IsNullOrEmpty(cdpUserDataDir)
             ? $" --user-data-dir=\"{cdpUserDataDir}\""
             : "";
+        // 启动最大化：仅新窗口模式生效（Tab 模式走 explorer.exe 跳板不经过这里）
+        // Edge/Chrome 都支持 --start-maximized；Firefox -start-maximized
+        string maxPart = newWindow ? " --start-maximized" : "";
 
         if (newWindow)
         {
             return browser switch
             {
-                "chrome" => $"--new-window --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
-                "msedge" => $"--new-window{userDataPart}{cdpPart} \"{url}\"",
-                "firefox" => $"-new-window \"{url}\"",
-                "360se" => $"--new-window \"{url}\"",
-                _ => $"--new-window{userDataPart}{cdpPart} \"{url}\""
+                "chrome" => $"--new-window --start-maximized --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
+                "msedge" => $"--new-window --start-maximized{userDataPart}{cdpPart} \"{url}\"",
+                "firefox" => $"-new-window -start-maximized \"{url}\"",
+                "360se" => $"--new-window --start-maximized \"{url}\"",
+                _ => $"--new-window --start-maximized{userDataPart}{cdpPart} \"{url}\""
             };
         }
         else
