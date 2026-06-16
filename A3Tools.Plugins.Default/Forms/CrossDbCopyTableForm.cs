@@ -228,6 +228,201 @@ ORDER BY o.name";
     }
 
     /// <summary>
+    /// 缺失对象：分别从源库和目标库查询当前选中类型的全部对象名，求差集（源有目标无）展示在下方，默认全选
+    /// </summary>
+    private void BtnFindMissing_Click(object? sender, EventArgs e)
+    {
+        // 1. 校验源库
+        if (string.IsNullOrWhiteSpace(txtSourceServer.Text) || string.IsNullOrWhiteSpace(txtSourceDbName.Text))
+        {
+            MessageBox.Show("请填写源数据库连接信息！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 2. 校验目标库
+        if (string.IsNullOrWhiteSpace(txtTargetServer.Text) || string.IsNullOrWhiteSpace(txtTargetDbName.Text))
+        {
+            MessageBox.Show("请填写目标数据库连接信息！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 3. 校验对象类型
+        if (cboObjectType.SelectedItem == null)
+        {
+            MessageBox.Show("请先选择对象类型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var objectType = ((ObjectTypeItem)cboObjectType.SelectedItem).Value;
+        var keyword = txtSearchKeyword.Text.Trim();
+        var typeDisplay = GetTypeDisplay(objectType);
+
+        lblSearchProgress.Text = "查询缺失对象中...";
+        lblSearchProgress.ForeColor = Color.Blue;
+        dgvSearchResults.DataSource = null;
+        btnFindMissing.Enabled = false;
+        btnSearch.Enabled = false;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                var srcServer = txtSourceServer.Text.Trim();
+                var srcDbName = txtSourceDbName.Text.Trim();
+                var srcUser = txtSourceUser.Text.Trim();
+                var srcPassword = txtSourcePassword.Text;
+
+                var tgtServer = txtTargetServer.Text.Trim();
+                var tgtDbName = txtTargetDbName.Text.Trim();
+                var tgtUser = txtTargetUser.Text.Trim();
+                var tgtPassword = txtTargetPassword.Text;
+
+                var srcConnStr = BuildConnString(srcServer, srcDbName, srcUser, srcPassword);
+                var tgtConnStr = BuildConnString(tgtServer, tgtDbName, tgtUser, tgtPassword);
+
+                // 1. 取源库当前类型全部对象（含元数据，筛选 is_ms_shipped=0）
+                var hasKeyword = !string.IsNullOrWhiteSpace(keyword);
+                var srcSql = @"
+SELECT o.name AS 对象名称,
+       o.type_desc AS 类型描述,
+       o.create_date AS 创建时间,
+       o.modify_date AS 修改时间
+FROM sys.objects o
+WHERE o.type = @objType
+  AND o.is_ms_shipped = 0" + (hasKeyword ? "  AND o.name LIKE @keyword" : "") + @"
+ORDER BY o.name";
+
+                var srcData = new DataTable();
+                int srcTotal = 0;
+                using (var conn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr))
+                {
+                    conn.Open();
+                    using var cmd = new Microsoft.Data.SqlClient.SqlCommand(srcSql, conn);
+                    cmd.Parameters.AddWithValue("@objType", objectType);
+                    if (hasKeyword) cmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
+                    using var adapter = new Microsoft.Data.SqlClient.SqlDataAdapter(cmd);
+                    adapter.Fill(srcData);
+                    srcTotal = srcData.Rows.Count;
+                }
+
+                // 2. 取目标库当前类型全部对象名（仅 name）
+                var tgtSql = @"
+SELECT o.name
+FROM sys.objects o
+WHERE o.type = @objType
+  AND o.is_ms_shipped = 0";
+                var tgtNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using (var conn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr))
+                {
+                    conn.Open();
+                    using var cmd = new Microsoft.Data.SqlClient.SqlCommand(tgtSql, conn);
+                    cmd.Parameters.AddWithValue("@objType", objectType);
+                    using var reader = cmd.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        var n = reader["name"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(n)) tgtNames.Add(n);
+                    }
+                }
+
+                // 3. 差集：源有 - 目标有
+                var missingRows = srcData.AsEnumerable()
+                    .Where(r => !tgtNames.Contains(r["对象名称"]?.ToString() ?? ""))
+                    .ToList();
+
+                var missingDt = missingRows.Count > 0
+                    ? missingRows.CopyToDataTable()
+                    : srcData.Clone();
+
+                this.Invoke(new Action(() =>
+                {
+                    if (dgvSearchResults.Columns.Contains("chk"))
+                    {
+                        dgvSearchResults.Columns.Remove("chk");
+                    }
+                    dgvSearchResults.DataSource = missingRows.Count > 0 ? (object)missingDt : null;
+
+                    if (missingRows.Count > 0)
+                    {
+                        var checkCol = new DataGridViewCheckBoxColumn
+                        {
+                            HeaderText = "选择",
+                            Width = 50,
+                            Name = "chk"
+                        };
+                        dgvSearchResults.Columns.Insert(0, checkCol);
+                        dgvSearchResults.AutoResizeColumns();
+                        if (dgvSearchResults.Columns.Contains("创建时间"))
+                            dgvSearchResults.Columns["创建时间"].Visible = false;
+                        if (dgvSearchResults.Columns.Contains("修改时间"))
+                            dgvSearchResults.Columns["修改时间"].Visible = false;
+
+                        // 默认全选，方便一键【添加选中】到复制列表
+                        foreach (DataGridViewRow row in dgvSearchResults.Rows)
+                        {
+                            row.Selected = true;
+                            var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                            if (checkCell != null) checkCell.Value = true;
+                        }
+                    }
+
+                    lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
+                    var missing = missingRows.Count;
+                    var hint = hasKeyword ? "（已按关键字过滤）" : "";
+                    lblSearchProgress.Text = $"源库共 {srcTotal} 个{typeDisplay}{hint}，缺失 {missing} 个";
+                    lblSearchProgress.ForeColor = missing > 0 ? Color.FromArgb(228, 94, 29) : Color.Green;
+                }));
+            }
+            catch (Exception ex)
+            {
+                this.Invoke(new Action(() =>
+                {
+                    lblSearchProgress.Text = "查询缺失对象失败";
+                    lblSearchProgress.ForeColor = Color.Red;
+                    MessageBox.Show($"查询缺失对象失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }));
+            }
+            finally
+            {
+                this.Invoke(new Action(() =>
+                {
+                    btnFindMissing.Enabled = true;
+                    btnSearch.Enabled = true;
+                }));
+            }
+        });
+    }
+
+    /// <summary>
+    /// 构造 SqlClient 连接串：Windows 集成身份验证 vs 用户名密码
+    /// </summary>
+    private string BuildConnString(string server, string dbName, string user, string password)
+    {
+        if (string.IsNullOrEmpty(user))
+        {
+            return $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;";
+        }
+        var pwd = string.IsNullOrEmpty(password) ? "" : EncryptionService.Decrypt(password);
+        return $"Server={server};Database={dbName};User Id={user};Password={pwd};TrustServerCertificate=True;";
+    }
+
+    /// <summary>
+    /// 对象类型代码 → 中文显示名
+    /// </summary>
+    private string GetTypeDisplay(string objectType)
+    {
+        return objectType switch
+        {
+            "U" => "表",
+            "V" => "视图",
+            "TF" => "表值函数",
+            "FN" => "标量值函数",
+            "P" => "存储过程",
+            _ => "对象"
+        };
+    }
+
+    /// <summary>
     /// 添加选中：把搜索结果中勾选的对象名追加到 txtObjects（去重）
     /// </summary>
     private void BtnAddSelected_Click(object? sender, EventArgs e)

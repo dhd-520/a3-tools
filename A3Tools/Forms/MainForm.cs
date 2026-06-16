@@ -795,83 +795,77 @@ public partial class MainForm : Form, IToolContext
         bool useCdp = account != null
             && account.HasWebAutoLogin
             && CdpHelper.IsCdpSupported(browser);
-        if (useCdp && !newWindow)
-        {
-            CdpHelper.CdpLog("Tab 模式启用 CDP：用独占 user-data-dir 隔离现有浏览器进程");
-        }
         int cdpPort = 0;
         string? cdpUserDataDir = null;
         string fullArgs = "";
+        // 【2026-06-16 新增】Tab 模式优先复用现有浏览器，不启动新进程
+        bool useExistingBrowser = false;
+        if (useCdp && !newWindow)
+        {
+            CdpHelper.CdpLog("Tab 模式启用 CDP：先查现有浏览器是否已启用调试端口");
+        }
         if (useCdp)
         {
-            // Edge 单实例 IPC 是按 --user-data-dir 隔离的
-            // 只要用独占 user-data-dir 启动新 Edge，调试端口就不会被原有 Edge 实例拦截
-            // 不用杀旧进程
-
-            // 检查现有浏览器进程是否已启用调试端口（多 debug port 冲突会争抢）
-            try
+            // 【2026-06-16 修复】Tab 模式：在决定是否启动新进程之前先查现有浏览器
+            // 之前在 Process.Start 之后才查，FindExistingBrowserDebugPort 会把刚启动的新进程误认成“现有浏览器”
+            if (!newWindow)
             {
-                string procName = browser == "msedge" ? "msedge" : (browser == "chrome" ? "chrome" : "");
-                if (!string.IsNullOrEmpty(procName))
+                int existingPort = CdpHelper.FindExistingBrowserDebugPort(browser);
+                if (existingPort > 0)
                 {
-                    var procs = Process.GetProcessesByName(procName);
-                    int existingDebugPort = 0;
-                    foreach (var p in procs)
+                    CdpHelper.CdpLog($"✓ Tab 模式：现有 {browser} 已启用调试端口 {existingPort}，复用现有浏览器开新 Tab（不启动新进程）");
+                    useExistingBrowser = true;
+                    cdpPort = existingPort;
+                }
+                else
+                {
+                    CdpHelper.CdpLog($"Tab 模式：现有 {browser} 未启用调试端口，启动新进程");
+                }
+            }
+
+            if (!useExistingBrowser)
+            {
+                // Edge 单实例 IPC 是按 --user-data-dir 隔离的
+                // 只要用独占 user-data-dir 启动新 Edge，调试端口就不会被原有 Edge 实例拦截
+                // 不用杀旧进程
+
+                cdpPort = CdpHelper.FindFreePort();
+                if (newWindow)
+                {
+                    // 新窗口模式：独占 user-data-dir（避免现有实例 lock 冲突）
+                    cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+                }
+                else
+                {
+                    // Tab 模式：复制现有 profile 关键文件到 temp 目录
+                    // 【重要】不能用现有 user-data-dir：Edge/Chrome 会在该目录创建 lockfile，
+                    //         新进程检测到 lock 会把 URL 转发给现有实例并退出
+                    cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+                    string? existingProfile = GetExistingBrowserUserDataDir(browser);
+                    if (string.IsNullOrEmpty(existingProfile) || !Directory.Exists(existingProfile))
                     {
-                        try
-                        {
-                            var mgr = p.GetType();
-                            // 用 WMI 拿命令行
-                            var searcher = new System.Management.ManagementObjectSearcher(
-                                $"SELECT CommandLine FROM Win32_Process WHERE ProcessId={p.Id}");
-                            foreach (var obj in searcher.Get())
-                            {
-                                var cmd = obj["CommandLine"]?.ToString() ?? "";
-                                var match = System.Text.RegularExpressions.Regex.Match(
-                                    cmd, @"--remote-debugging-port=(\d+)");
-                                if (match.Success && int.TryParse(match.Groups[1].Value, out int existingPort))
-                                {
-                                    existingDebugPort = existingPort;
-                                    break;
-                                }
-                            }
-                            if (existingDebugPort > 0) break;
-                        }
-                        catch { }
+                        existingProfile = GetDefaultUserDataDir(browser);
                     }
-                    CdpHelper.CdpLog($"现有 {procName} 进程：{procs.Length} 个，其中调试端口：{(existingDebugPort > 0 ? existingDebugPort.ToString() : "无")}");
+                    CdpHelper.CdpLog($"Tab 模式现有 profile: {existingProfile}");
+                    CopyBrowserProfile(existingProfile, cdpUserDataDir, browser);
                 }
+                // 先算出完整命令，用于日志（打印完整参数，不裁断）
+                fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
+                CdpHelper.CdpLog($"准备启动浏览器：exe={browserPath}");
+                CdpHelper.CdpLog($"完整参数：{fullArgs}");
+                CdpHelper.CdpLog($"调试端口：{cdpPort}, user-data-dir={cdpUserDataDir}");
             }
-            catch (Exception ex)
-            {
-                CdpHelper.CdpLog($"检查现有浏览器调试端口失败: {ex.Message}");
-            }
+        }
 
-            cdpPort = CdpHelper.FindFreePort();
-            if (newWindow)
+        // 【2026-06-16 新增】复用现有浏览器：跳过 Process.Start，直接进 CDP 自动登录
+        if (useExistingBrowser)
+        {
+            CdpHelper.CdpLog("复用现有浏览器进程，不启动新进程");
+            if (useCdp)
             {
-                // 新窗口模式：独占 user-data-dir（避免现有实例 lock 冲突）
-                cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+                _ = RunCdpAutoLoginAsync(cdpPort, url, account!, browser, newWindow, useExistingBrowser: true);
             }
-            else
-            {
-                // Tab 模式：复制现有 profile 关键文件到 temp 目录
-                // 【重要】不能用现有 user-data-dir：Edge/Chrome 会在该目录创建 lockfile，
-                //         新进程检测到 lock 会把 URL 转发给现有实例并退出
-                cdpUserDataDir = CdpHelper.GetTempUserDataDir();
-                string? existingProfile = GetExistingBrowserUserDataDir(browser);
-                if (string.IsNullOrEmpty(existingProfile) || !Directory.Exists(existingProfile))
-                {
-                    existingProfile = GetDefaultUserDataDir(browser);
-                }
-                CdpHelper.CdpLog($"Tab 模式现有 profile: {existingProfile}");
-                CopyBrowserProfile(existingProfile, cdpUserDataDir, browser);
-            }
-            // 先算出完整命令，用于日志（打印完整参数，不裁断）
-            fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
-            CdpHelper.CdpLog($"准备启动浏览器：exe={browserPath}");
-            CdpHelper.CdpLog($"完整参数：{fullArgs}");
-            CdpHelper.CdpLog($"调试端口：{cdpPort}, user-data-dir={cdpUserDataDir}");
+            return;
         }
 
         if (!string.IsNullOrEmpty(browserPath) && File.Exists(browserPath))
@@ -1037,43 +1031,19 @@ public partial class MainForm : Form, IToolContext
 
     /// <summary>
     /// CDP 自动登录（异步）：连接远程调试端口 → 填表 → 提交
+    /// 【2026-06-16 重构】使用 browser-level session + pageSessionId 路由，
+    ///                    修复 page-level WebSocket 在 page 导航后被销毁的问题
     /// </summary>
-    private async Task RunCdpAutoLoginAsync(int port, string url, Account account, string browser, bool isNewWindow)
+    /// <param name="port">CDP 远程调试端口</param>
+    /// <param name="url">要打开的 URL</param>
+    /// <param name="account">账套（含登录凭证）</param>
+    /// <param name="browser">浏览器类型</param>
+    /// <param name="isNewWindow">是否“启动新窗口”模式</param>
+    /// <param name="useExistingBrowser">Tab 模式且现有浏览器已启用调试端口时为 true，
+    ///                                  不启动新进程，直接复用现有浏览器开新 Tab</param>
+    private async Task RunCdpAutoLoginAsync(int port, string url, Account account, string browser, bool isNewWindow, bool useExistingBrowser = false)
     {
-        try
-        {
-            // === 【Tab 模式】优先复用现有浏览器，在现有窗口开新 Tab ===
-            if (!isNewWindow)
-            {
-                int existingPort = CdpHelper.FindExistingBrowserDebugPort(browser);
-                if (existingPort > 0)
-                {
-                    CdpHelper.CdpLog($"Tab 模式：发现现有 {browser} 调试端口 {existingPort}，在该窗口开新 Tab");
-                    string? existingWs = await CdpHelper.CreateNewTabInExistingBrowserAsync(existingPort, url);
-                    if (!string.IsNullOrEmpty(existingWs))
-                    {
-                        CdpHelper.CdpLog($"✓ 已在现有 {browser} 中开新 Tab，wsUrl={existingWs}");
-                        await DoAutoLoginAsync(existingWs, url, account);
-                        return;
-                    }
-                    CdpHelper.CdpLog("现有浏览器开新 Tab 失败，回退到启动新进程");
-                }
-                else
-                {
-                    CdpHelper.CdpLog($"Tab 模式：现有 {browser} 未启用调试端口，启动新进程（会开新窗口）");
-                }
-            }
-            // 【新窗口模式】或【Tab 模式回退】启动新进程
-            await DoAutoLoginAsync(null, url, account, port);
-        }
-        catch (Exception ex)
-        {
-            CdpHelper.CdpLog($"✗ 自动登录异常: {ex.GetType().Name}: {ex.Message}");
-        }
-    }
-
-    private async Task DoAutoLoginAsync(string? existingWsUrl, string url, Account account, int port = 0)
-    {
+        CdpSession? session = null;
         try
         {
             // 从设置中读取选择器配置
@@ -1081,13 +1051,8 @@ public partial class MainForm : Form, IToolContext
             string usernameSel = settings.WebUsernameSelector;
             string passwordSel = settings.WebPasswordSelector;
             string submitSel = settings.WebSubmitSelector;
-
-            // 使用账套的 ServerUsername（默认 admin）和 ServerPassword
             string username = account.ServerUsername;
             string password = account.ServerPassword;
-
-            CdpHelper.CdpLog($"开始自动登录：账号={username} 密码长度={password?.Length ?? 0}");
-            CdpHelper.CdpLog($"选择器：user={usernameSel} pwd={passwordSel} btn={submitSel}");
 
             // 检查必要参数
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
@@ -1101,27 +1066,46 @@ public partial class MainForm : Form, IToolContext
                 return;
             }
 
-            // 等浏览器起来（CDP 端口开始监听）
-            string? wsUrl = existingWsUrl;
-            if (string.IsNullOrEmpty(wsUrl))
+            string? pageSessionId = null;
+
+            if (useExistingBrowser)
             {
-                for (int i = 0; i < 30; i++)  // 最多等 6 秒
+                // === 【Tab 模式复用现有浏览器】在现有窗口开新 Tab ===
+                CdpHelper.CdpLog($"Tab 模式：现有 {browser} 调试端口 {port}，用 Target.createTarget 在该窗口开新 Tab");
+                var created = await CdpHelper.CreateNewTabAsync(port, url);
+                if (created == null)
                 {
-                    // 优先拿 page target 的 WebSocket URL（有 Page 域，能调 Page.navigate / Page.enable）
-                    // /json/version 是 browser-level，只有 Browser/Target 域
-                    wsUrl = await CdpHelper.GetPageWebSocketUrlAsync(port);
-                    if (!string.IsNullOrEmpty(wsUrl)) break;
+                    CdpHelper.CdpLog("✗ 现有浏览器开新 Tab 失败，跳过自动登录");
+                    return;
+                }
+                (session, pageSessionId) = created.Value;
+                CdpHelper.CdpLog($"✓ 已在现有 {browser} 中开新 Tab，pageSessionId={pageSessionId}");
+            }
+            else
+            {
+                // === 【新进程】连 browser-level session，attach 到已打开 URL 的 page target ===
+                // 最多等 30 次 × 200ms = 6s，等新进程起来并启动 CDP
+                CdpHelper.CdpLog($"等待新进程 CDP 启动 (port={port})...");
+                for (int i = 0; i < 30; i++)
+                {
+                    var attached = await CdpHelper.AttachToPageAsync(port, url);
+                    if (attached != null)
+                    {
+                        (session, pageSessionId) = attached.Value;
+                        break;
+                    }
                     await Task.Delay(200);
                 }
+                if (session == null || pageSessionId == null)
+                {
+                    CdpHelper.CdpLog("✗ 拿不到 page session，浏览器可能启动失败（看上面 cdp.log）");
+                    return;
+                }
             }
-            if (string.IsNullOrEmpty(wsUrl))
-            {
-                CdpHelper.CdpLog("✗ 拿不到 page WebSocket URL，浏览器可能启动失败（看上面 cdp.log）");
-                return;
-            }
-            CdpHelper.CdpLog($"✓ 已连接到 page CDP: {wsUrl}");
 
-            using var session = await CdpSession.ConnectAsync(wsUrl);
+            CdpHelper.CdpLog($"开始自动登录：账号={username} 密码长度={password?.Length ?? 0}");
+            CdpHelper.CdpLog($"选择器：user={usernameSel} pwd={passwordSel} btn={submitSel}");
+
             bool ok = await CdpHelper.AutoLoginAsync(
                 session,
                 url,
@@ -1130,9 +1114,8 @@ public partial class MainForm : Form, IToolContext
                 submitSel,
                 username,
                 password,
-                timeoutMs: 10000);
-
-            await session.CloseAsync();
+                timeoutMs: 10000,
+                sessionId: pageSessionId);
 
             if (ok)
             {
@@ -1146,6 +1129,12 @@ public partial class MainForm : Form, IToolContext
         catch (Exception ex)
         {
             CdpHelper.CdpLog($"✗ 自动登录异常: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            // browser-level session 生命周期由调用方控制（不要在这里 Dispose）
+            // 页面可能还在加载后续操作，后续调用还会用
+            // 这里仅输出调试
         }
     }
 

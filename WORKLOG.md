@@ -1,5 +1,79 @@
 ﻿# A3Tools 工作日志
 
+## 2026-06-16 (续)
+
+### CDP 自动登录切到 browser-level session 架构（新增页签模式修复）
+
+**问题：** 昨天实现的"新增页签模式"自动登录不生效。从 cdp.log 看到 3 个根因：
+1. `FindExistingBrowserDebugPort` 在 `Process.Start` 之后才调，会把刚启动的新进程误认成"现有浏览器"，走错分支
+2. `/json/new` HTTP 端点返回 **405 Method Not Allowed**（Edge 111+ 已禁用）
+3. 连的是 page-level WebSocket，page 导航后 WebSocket 直接 Aborted，CDP session 失效
+
+**方案：** 走 browser-level session + Target domain（CDP 标准做法）
+
+**实现：**
+
+1. **`CdpSession.cs`**
+   - `OnEvent` 签名从 `Action<string, JsonElement>` 改成 `Action<string, JsonElement, string?>`，第三个参数是 sessionId（null 表示 browser-level 事件）
+   - `HandleMessage` 解析消息时提取 `sessionId` 字段，透传给 OnEvent 订阅者
+   - `SendCommandAsync` 加可选 `string? sessionId` 参数：非 null 时消息体里带 `sessionId` 路由到具体 page
+   - `EvaluateAsync` 同样加 `string? sessionId` 参数
+
+2. **`CdpHelper.cs`**
+   - 新增 `ConnectBrowserLevelAsync(int port)`：连 `/json/version` 的 wsUrl，拿 browser-level session
+   - 新增 `CreateNewTabAsync(int port, string url)`：用 `Target.setAutoAttach({flatten:true})` + `Target.createTarget({url})` + `Target.attachToTarget` 拿 pageSessionId，避开被 Edge 禁用的 `/json/new` HTTP 端点
+   - 新增 `AttachToPageAsync(int port, string? urlFilter)`：连 browser-level session 后用 `Target.getTargets` 找现有 page（优先匹配 urlFilter），attach 拿到 pageSessionId
+   - `AutoLoginAsync` 加 `string? sessionId` 参数，所有 Page/Runtime/Input 命令带 sessionId 路由
+   - `OnLoadEvent` 事件过滤：仅接受 `evtSessionId == sessionId` 的事件（避免其他 page/iframe 事件干扰）
+   - 旧 `CreateNewTabInExistingBrowserAsync`（用 `/json/new`）保留为旧路径注释
+
+3. **`MainForm.cs`**
+   - 调换流程顺序：Tab 模式 + useCdp 时**先** `FindExistingBrowserDebugPort`，查到设置 `useExistingBrowser=true` 并 `cdpPort=existingPort`，**不启动新进程**直接调 `RunCdpAutoLoginAsync(..., useExistingBrowser: true)`
+   - 旧的内嵌 WMI 查现有端口代码（嵌套在 useCdp 块内）已合并到新的 `CdpHelper.FindExistingBrowserDebugPort` 之前调用
+   - `RunCdpAutoLoginAsync` 加 `bool useExistingBrowser = false` 参数：
+     - `useExistingBrowser=true` → 调 `CreateNewTabAsync` 拿 `(browserSession, pageSessionId)`
+     - `useExistingBrowser=false`（新进程场景）→ 循环等 6s 后调 `AttachToPageAsync(port, url)` 拿 `(browserSession, pageSessionId)`
+   - 合并 `DoAutoLoginAsync` 进 `RunCdpAutoLoginAsync`（避免多层调用），统一调 `AutoLoginAsync(session, url, ..., sessionId: pageSessionId)`
+
+**影响：** 两个模式（启动新窗口 / 新增页签）都改成 browser-level session，page 导航后 WebSocket 不再断。Tab 模式优先复用现有浏览器，避免无谓启动新进程。
+
+**编译：** `dotnet build A3Tools` 通过，0 错误。
+
+---
+
+## 2026-06-16
+
+### 跨库复制数据库对象新增【缺失对象】按钮
+
+**需求：** 在 CrossDbCopyTableForm 下方查询区域，【查询】按钮旁边新增【缺失对象】按钮，点击后把源库有但目标库没有的对象展示在下方（与【查询】共用类型和关键字）。
+
+**实现：**
+
+1. **Designer.cs（`Forms/CrossDbCopyTableForm.Designer.cs`）**
+   - 新增 `btnFindMissing` 按钮字段
+   - 位置：x=664, y=5, 宽 120x41（接在 btnSearch 右边）
+   - 颜色：橙 #e45e1d（与 btnSearch/btnAddSelected/btnClearSelected/btnCompareTables 区分）
+   - 调整 btnAddSelected（x=790）、btnClearSelected（x=916）、btnCompareTables（x=1044）位置右移
+
+2. **Form.cs（`Forms/CrossDbCopyTableForm.cs`）**
+   - 新增 `BtnFindMissing_Click` 处理器
+   - 校验源/目标库连接信息 + 对象类型
+   - 步骤：
+     1. 查源库：取当前类型全部对象（含元数据）→ `srcData`（支持关键字过滤）
+     2. 查目标库：取当前类型全部对象名 → `tgtNames` HashSet
+     3. 差集：`srcData.AsEnumerable().Where(r => !tgtNames.Contains(...))` → `missingRows`
+     4. 回填到 `dgvSearchResults`（与查询共用同一 DataGridView），默认全选复选框
+     5. 状态行：`源库共 N 个XXX（已按关键字过滤），缺失 M 个`，缺失 > 0 橙色，否则绿色
+   - 抽取公共方法：
+     - `BuildConnString(server, dbName, user, password)`：统一连接串构造（Windows 集成 vs 用户名密码，密码走 EncryptionService.Decrypt）
+     - `GetTypeDisplay(objectType)`：U→表、V→视图、TF→表值函数、FN→标量值函数、P→存储过程
+
+**影响：** 只影响 CrossDbCopyTableForm（跨库复制数据库对象工具），其他 5 个跨库复制工具未改动。
+
+**编译：** `dotnet build A3Tools.Plugins.Default` 通过，0 错误。
+
+---
+
 ## 2026-06-10
 
 ### 版本更新 v1.3.0

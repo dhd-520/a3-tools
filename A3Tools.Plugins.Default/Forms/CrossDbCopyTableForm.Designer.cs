@@ -43,6 +43,7 @@ partial class CrossDbCopyTableForm
     private Label lblSearchKeyword;
     private TextBox txtSearchKeyword;
     private Button btnSearch;
+    private Button btnFindMissing;
     private DataGridView dgvSearchResults;
     private Button btnAddSelected;
     private Button btnClearSelected;
@@ -97,6 +98,7 @@ partial class CrossDbCopyTableForm
         lblSearchKeyword = new Label();
         txtSearchKeyword = new TextBox();
         btnSearch = new Button();
+        btnFindMissing = new Button();
         btnAddSelected = new Button();
         btnClearSelected = new Button();
         btnCompareTables = new Button();
@@ -565,6 +567,7 @@ partial class CrossDbCopyTableForm
         pnlSearch.Controls.Add(lblSearchKeyword);
         pnlSearch.Controls.Add(txtSearchKeyword);
         pnlSearch.Controls.Add(btnSearch);
+        pnlSearch.Controls.Add(btnFindMissing);
         pnlSearch.Controls.Add(btnAddSelected);
         pnlSearch.Controls.Add(btnClearSelected);
         pnlSearch.Controls.Add(btnCompareTables);
@@ -610,6 +613,21 @@ partial class CrossDbCopyTableForm
         btnSearch.UseVisualStyleBackColor = false;
         btnSearch.Click += BtnSearch_Click;
         // 
+        // btnFindMissing
+        // 
+        btnFindMissing.BackColor = Color.FromArgb(228, 94, 29);
+        btnFindMissing.FlatAppearance.BorderSize = 0;
+        btnFindMissing.FlatStyle = FlatStyle.Flat;
+        btnFindMissing.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnFindMissing.ForeColor = Color.White;
+        btnFindMissing.Location = new Point(664, 5);
+        btnFindMissing.Name = "btnFindMissing";
+        btnFindMissing.Size = new Size(120, 41);
+        btnFindMissing.TabIndex = 35;
+        btnFindMissing.Text = "缺失对象";
+        btnFindMissing.UseVisualStyleBackColor = false;
+        btnFindMissing.Click += BtnFindMissing_Click;
+        // 
         // btnAddSelected
         // 
         btnAddSelected.BackColor = Color.FromArgb(57, 181, 74);
@@ -617,7 +635,7 @@ partial class CrossDbCopyTableForm
         btnAddSelected.FlatStyle = FlatStyle.Flat;
         btnAddSelected.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         btnAddSelected.ForeColor = Color.White;
-        btnAddSelected.Location = new Point(664, 4);
+        btnAddSelected.Location = new Point(790, 5);
         btnAddSelected.Name = "btnAddSelected";
         btnAddSelected.Size = new Size(120, 41);
         btnAddSelected.TabIndex = 29;
@@ -632,7 +650,7 @@ partial class CrossDbCopyTableForm
         btnClearSelected.FlatStyle = FlatStyle.Flat;
         btnClearSelected.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         btnClearSelected.ForeColor = Color.White;
-        btnClearSelected.Location = new Point(790, 4);
+        btnClearSelected.Location = new Point(916, 5);
         btnClearSelected.Name = "btnClearSelected";
         btnClearSelected.Size = new Size(122, 41);
         btnClearSelected.TabIndex = 33;
@@ -647,7 +665,7 @@ partial class CrossDbCopyTableForm
         btnCompareTables.FlatStyle = FlatStyle.Flat;
         btnCompareTables.Font = new Font("微软雅黑", 10F, FontStyle.Bold, GraphicsUnit.Point);
         btnCompareTables.ForeColor = Color.White;
-        btnCompareTables.Location = new Point(918, 3);
+        btnCompareTables.Location = new Point(1044, 5);
         btnCompareTables.Name = "btnCompareTables";
         btnCompareTables.Size = new Size(120, 41);
         btnCompareTables.TabIndex = 34;

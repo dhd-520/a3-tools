@@ -11,6 +11,13 @@ namespace A3Tools.Services;
 /// Chrome DevTools Protocol (CDP) 会话封装
 /// 用于在外部 Chrome/Edge 浏览器中自动填写并提交网页表单
 /// 协议说明：https://chromedevtools.github.io/devtools-protocol/
+///
+/// 【browser-level session 模式】
+/// 1. 连到 /json/version 的 webSocketDebuggerUrl
+/// 2. 发送 Target.setAutoAttach({flatten:true}) 以自动 attach 到所有 target
+/// 3. 所有 page-level 命令带 sessionId 参数路由到具体 page
+/// 4. page 导航不会销毁 WebSocket 连接（连接是 browser-level 的）
+/// 5. Target.attachedToTarget / Target.detachedFromTarget / page-level 事件都带 sessionId
 /// </summary>
 public class CdpSession : IDisposable
 {
@@ -19,7 +26,12 @@ public class CdpSession : IDisposable
     private int _nextId = 0;
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pending = new();
 
-    public event Action<string, JsonElement>? OnEvent;
+    /// <summary>
+    /// 事件订阅：(method, params, sessionId)
+    /// sessionId 为 null 表示是 browser-level 事件（如 Target.attachedToTarget）
+    /// sessionId 非空表示是某个 page-level session 的事件
+    /// </summary>
+    public event Action<string, JsonElement, string?>? OnEvent;
 
     public bool IsOpen => _ws.State == WebSocketState.Open;
 
@@ -37,15 +49,31 @@ public class CdpSession : IDisposable
     /// <summary>
     /// 发送 CDP 命令并等待响应
     /// </summary>
-    public async Task<JsonElement> SendCommandAsync(string method, object? parameters = null, int timeoutMs = 10000)
+    /// <param name="method">CDP 方法名（如 Page.navigate）</param>
+    /// <param name="parameters">参数对象</param>
+    /// <param name="timeoutMs">超时毫秒</param>
+    /// <param name="sessionId">仅在 browser-level session 下使用：路由到具体 page 的 sessionId</param>
+    public async Task<JsonElement> SendCommandAsync(string method, object? parameters = null, int timeoutMs = 10000, string? sessionId = null)
     {
         int id = Interlocked.Increment(ref _nextId);
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = tcs;
 
-        var message = parameters == null
-            ? (object)new { id, method }
-            : new { id, method, @params = parameters };
+        object message;
+        if (sessionId != null)
+        {
+            // browser-level: 带 sessionId 路由到 page
+            message = parameters == null
+                ? (object)new { id, method, sessionId }
+                : new { id, method, @params = parameters, sessionId };
+        }
+        else
+        {
+            // page-level 或 browser-level（不带 sessionId）
+            message = parameters == null
+                ? (object)new { id, method }
+                : new { id, method, @params = parameters };
+        }
         var json = JsonSerializer.Serialize(message);
         var bytes = Encoding.UTF8.GetBytes(json);
         await _ws.SendAsync(bytes, WebSocketMessageType.Text, true, _cts.Token);
@@ -60,14 +88,14 @@ public class CdpSession : IDisposable
     /// <summary>
     /// 执行 JS 表达式并返回结果
     /// </summary>
-    public async Task<JsonElement> EvaluateAsync(string expression, int timeoutMs = 10000)
+    public async Task<JsonElement> EvaluateAsync(string expression, int timeoutMs = 10000, string? sessionId = null)
     {
         return await SendCommandAsync("Runtime.evaluate", new
         {
             expression,
             returnByValue = true,
             awaitPromise = false
-        }, timeoutMs);
+        }, timeoutMs, sessionId);
     }
 
     private async Task ReadLoopAsync()
@@ -100,6 +128,13 @@ public class CdpSession : IDisposable
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
+            // 提取 sessionId（如果有）
+            string? msgSessionId = null;
+            if (root.TryGetProperty("sessionId", out var sidEl) && sidEl.ValueKind == JsonValueKind.String)
+            {
+                msgSessionId = sidEl.GetString();
+            }
+
             if (root.TryGetProperty("id", out var idEl))
             {
                 int id = idEl.GetInt32();
@@ -120,7 +155,7 @@ public class CdpSession : IDisposable
             {
                 var method = methodEl.GetString() ?? "";
                 var @params = root.TryGetProperty("params", out var p) ? p.Clone() : default;
-                try { OnEvent?.Invoke(method, @params); }
+                try { OnEvent?.Invoke(method, @params, msgSessionId); }
                 catch (Exception ex) { Debug.WriteLine($"CDP event handler error: {ex.Message}"); }
             }
         }
@@ -398,6 +433,9 @@ public static class CdpHelper
     /// <summary>
     /// 在现有浏览器中通过 CDP 创建新 Tab，返回新 Tab 的 WebSocket URL
     /// 【Tab 模式用】需先调用 FindExistingBrowserDebugPort 拿到端口
+    ///
+    /// 【2026-06-16 调整】Edge 111+ 禁用 /json/new HTTP 端点（返回 405），改用 Target.createTarget
+    /// 本方法保留为旧路径仅供调试对比，建议改用 CreateNewTabViaTargetAsync
     /// </summary>
     public static async Task<string?> CreateNewTabInExistingBrowserAsync(int port, string url)
     {
@@ -436,6 +474,193 @@ public static class CdpHelper
     }
 
     /// <summary>
+    /// 连接到 browser-level WebSocket（从 /json/version 拿）
+    /// browser-level session 可控制整个浏览器（开/关/导航 tab），
+    /// page-level 命令需 Target.attachToTarget 后带 sessionId 路由
+    /// </summary>
+    public static async Task<CdpSession?> ConnectBrowserLevelAsync(int port)
+    {
+        var wsUrl = await GetWebSocketUrlAsync(port);
+        if (string.IsNullOrEmpty(wsUrl))
+        {
+            CdpLog("ConnectBrowserLevelAsync: 拿不到 browser wsUrl");
+            return null;
+        }
+        var session = await CdpSession.ConnectAsync(wsUrl);
+        CdpLog($"✓ 已连接 browser-level session: {wsUrl}");
+        return session;
+    }
+
+    /// <summary>
+    /// 连上 browser-level session 后，查找现有 page target 并 attach
+    /// 【新进程场景用】新进程启动后需找到 URL 命令行参数打开的那个 page
+    ///
+    /// 优先匹配 urlFilter（导航 URL 相同的 page），找不到则取第一个 type=page
+    /// 返回 (browserSession, pageSessionId)
+    /// </summary>
+    public static async Task<(CdpSession browserSession, string pageSessionId)?> AttachToPageAsync(int port, string? urlFilter = null)
+    {
+        var session = await ConnectBrowserLevelAsync(port);
+        if (session == null) return null;
+
+        try
+        {
+            // enable discover + auto-attach（flatten 模式）
+            await session.SendCommandAsync("Target.setDiscoverTargets", new { discover = true });
+            await session.SendCommandAsync("Target.setAutoAttach", new
+            {
+                autoAttach = true,
+                waitForDebuggerOnStart = false,
+                flatten = true
+            });
+
+            // 拿 targets 列表
+            var targetsResult = await session.SendCommandAsync("Target.getTargets");
+            if (!targetsResult.TryGetProperty("targetInfos", out var arrEl) || arrEl.ValueKind != JsonValueKind.Array)
+            {
+                CdpLog("✗ Target.getTargets 返回无效");
+                session.Dispose();
+                return null;
+            }
+
+            string? matchedTargetId = null;
+            string? firstPageTargetId = null;
+            string? matchedUrl = null;
+            foreach (var t in arrEl.EnumerateArray())
+            {
+                if (!t.TryGetProperty("type", out var typeEl)) continue;
+                if (typeEl.GetString() != "page") continue;
+                if (!t.TryGetProperty("targetId", out var tidEl)) continue;
+                var tid = tidEl.GetString();
+                if (string.IsNullOrEmpty(tid)) continue;
+
+                var pageUrl = t.TryGetProperty("url", out var uEl) ? uEl.GetString() ?? "" : "";
+                if (firstPageTargetId == null) firstPageTargetId = tid;
+                if (urlFilter != null && pageUrl.StartsWith(urlFilter, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedTargetId = tid;
+                    matchedUrl = pageUrl;
+                    break;
+                }
+            }
+            var targetToAttach = matchedTargetId ?? firstPageTargetId;
+            if (string.IsNullOrEmpty(targetToAttach))
+            {
+                CdpLog("✗ 找不到任何 page target");
+                session.Dispose();
+                return null;
+            }
+            CdpLog($"✓ 选中 page target: id={targetToAttach} url={matchedUrl ?? "(任意)"}");
+
+            // attach
+            var attachResult = await session.SendCommandAsync("Target.attachToTarget", new
+            {
+                targetId = targetToAttach,
+                flatten = true
+            });
+            string? pageSessionId = null;
+            if (attachResult.TryGetProperty("sessionId", out var psidEl))
+            {
+                pageSessionId = psidEl.GetString();
+            }
+            if (string.IsNullOrEmpty(pageSessionId))
+            {
+                CdpLog($"✗ Target.attachToTarget 返回无效: {attachResult}");
+                session.Dispose();
+                return null;
+            }
+            CdpLog($"✓ Attach 成功: pageSessionId={pageSessionId}");
+            return (session, pageSessionId);
+        }
+        catch (Exception ex)
+        {
+            CdpLog($"AttachToPageAsync 异常: {ex.GetType().Name}: {ex.Message}");
+            session.Dispose();
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 通过 CDP WebSocket 在现有浏览器创建新 Tab（避开 Edge 禁用的 /json/new 端点）
+    /// 【Tab 模式主路径】返回 (browserSession, pageSessionId)
+    /// 调用方后续用 browserSession + pageSessionId 调 AutoLoginAsync
+    ///
+    /// 流程：
+    /// 1. 连 browser-level WebSocket
+    /// 2. Target.setAutoAttach({flatten:true}) 以接收所有 target 的事件
+    /// 3. Target.createTarget({url}) 创建新 page
+    /// 4. Target.attachToTarget({targetId, flatten:true}) 拿到 pageSessionId
+    /// </summary>
+    public static async Task<(CdpSession browserSession, string pageSessionId)?> CreateNewTabAsync(int port, string url)
+    {
+        var session = await ConnectBrowserLevelAsync(port);
+        if (session == null)
+        {
+            CdpLog("CreateNewTabAsync: 连不上 browser-level session");
+            return null;
+        }
+
+        try
+        {
+            // 1. 启用 Target domain
+            await session.SendCommandAsync("Target.setDiscoverTargets", new { discover = true });
+
+            // 2. setAutoAttach（flatten 模式：所有 target 事件直接发到本 session）
+            //    waitForDebuggerOnStart=false：不要在每个 target 创建时停住调试器
+            var autoAttachResult = await session.SendCommandAsync("Target.setAutoAttach", new
+            {
+                autoAttach = true,
+                waitForDebuggerOnStart = false,
+                flatten = true
+            });
+            CdpLog($"✓ Target.setAutoAttach 启用 flatten 模式");
+
+            // 3. 创建新 target
+            var createResult = await session.SendCommandAsync("Target.createTarget", new { url });
+            string? targetId = null;
+            if (createResult.TryGetProperty("targetId", out var tidEl))
+            {
+                targetId = tidEl.GetString();
+            }
+            if (string.IsNullOrEmpty(targetId))
+            {
+                CdpLog($"✗ Target.createTarget 返回无效: {createResult}");
+                session.Dispose();
+                return null;
+            }
+            CdpLog($"✓ Target.createTarget 成功: targetId={targetId}");
+
+            // 4. attachToTarget 拿 pageSessionId
+            //    flatten=true 表示会话不独立，事件直接进本 session 的事件流
+            var attachResult = await session.SendCommandAsync("Target.attachToTarget", new
+            {
+                targetId,
+                flatten = true
+            });
+            string? pageSessionId = null;
+            if (attachResult.TryGetProperty("sessionId", out var psidEl))
+            {
+                pageSessionId = psidEl.GetString();
+            }
+            if (string.IsNullOrEmpty(pageSessionId))
+            {
+                CdpLog($"✗ Target.attachToTarget 返回无效: {attachResult}");
+                session.Dispose();
+                return null;
+            }
+            CdpLog($"✓ 已 attach 到 page: pageSessionId={pageSessionId}");
+
+            return (session, pageSessionId);
+        }
+        catch (Exception ex)
+        {
+            CdpLog($"CreateNewTabAsync 异常: {ex.GetType().Name}: {ex.Message}");
+            session.Dispose();
+            return null;
+        }
+    }
+
+    /// <summary>
     /// 自动登录：导航 + 轮询填表 + 提交
     /// 适合 SPA 登录页（Angular/Vue/React/antd-mobile），会等表单元素渲染后再填
     /// </summary>
@@ -447,23 +672,26 @@ public static class CdpHelper
         string submitSel,
         string username,
         string password,
-        int timeoutMs = 15000)
+        int timeoutMs = 15000,
+        string? sessionId = null)
     {
         // 启用 Page + Runtime + Input domain
         // Input domain 提供 Input.insertText（模拟真实键盘输入，触发 React 受控组件 onChange）
-        await session.SendCommandAsync("Page.enable");
-        await session.SendCommandAsync("Runtime.enable");
-        await session.SendCommandAsync("Input.setIgnoreInputEvents", new { ignore = false });
+        // 【browser-level session】所有 page-level 命令带 sessionId 路由
+        await session.SendCommandAsync("Page.enable", null, 10000, sessionId);
+        await session.SendCommandAsync("Runtime.enable", null, 10000, sessionId);
+        await session.SendCommandAsync("Input.setIgnoreInputEvents", new { ignore = false }, 10000, sessionId);
 
         // 1. 导航前先订阅 Page.loadEventFired 事件（页面真的加载完了才触发表单轮询）
         // 2. SPA 页面需要下载 JS bundle + bootstrap framework + 渲染表单，仅靠 readyState 不够，
         //    还要等表单元素实际出现在 DOM 中
         var loadEventTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnLoadEvent(string method, JsonElement p)
+        void OnLoadEvent(string method, JsonElement p, string? evtSessionId)
         {
-            if (method == "Page.loadEventFired")
+            // 【browser-level session】仅接受当前 page 的事件，避免其他 page/iframe 事件干扰
+            if (method == "Page.loadEventFired" && (sessionId == null || evtSessionId == sessionId))
             {
-                CdpLog("✓ 页面 loadEventFired（页面主资源加载完成）");
+                CdpLog($"✓ 页面 loadEventFired（页面主资源加载完成）sessionId={evtSessionId ?? "<null>"}");
                 loadEventTcs.TrySetResult(true);
             }
         }
@@ -473,7 +701,7 @@ public static class CdpHelper
         {
             // 导航到目标 URL
             CdpLog($"导航到：{url}");
-            await session.SendCommandAsync("Page.navigate", new { url });
+            await session.SendCommandAsync("Page.navigate", new { url }, 10000, sessionId);
 
             // 3. 等 loadEventFired 事件（页面主资源加载完）
             //    超时 10 秒（避诼 SPA 卡死），超时也继续填表（页面可能从缓存加载）
@@ -651,7 +879,7 @@ public static class CdpHelper
             attempt++;
             try
             {
-                var result = await session.EvaluateAsync(script);
+                var result = await session.EvaluateAsync(script, 10000, sessionId);
                 if (result.TryGetProperty("result", out var resultEl) &&
                     resultEl.TryGetProperty("value", out var valueEl) &&
                     valueEl.ValueKind == JsonValueKind.Object)
@@ -685,23 +913,23 @@ public static class CdpHelper
                             // 0. 【重要】先用 CDP Input.insertText 重填（JS 填的不一定生效）
                             //    思路：JS focus input → C# 发 Input.insertText → 触发真实 input 事件 → React state 同步
                             CdpLog("=== 阶段 0：用 Input.insertText 重填账号（CDP 原生键盘输入） ===");
-                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({uSelJs})?.focus(); document.querySelector({uSelJs})?.select();" });
+                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({uSelJs})?.focus(); document.querySelector({uSelJs})?.select();" }, 10000, sessionId);
                             await Task.Delay(100);
-                            await session.SendCommandAsync("Input.insertText", new { text = username });
+                            await session.SendCommandAsync("Input.insertText", new { text = username }, 10000, sessionId);
                             await Task.Delay(200);
                             CdpLog($"=== 阶段 0：用 Input.insertText 重填密码 ===");
-                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({pSelJs})?.focus(); document.querySelector({pSelJs})?.select();" });
+                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({pSelJs})?.focus(); document.querySelector({pSelJs})?.select();" }, 10000, sessionId);
                             await Task.Delay(100);
-                            await session.SendCommandAsync("Input.insertText", new { text = password });
+                            await session.SendCommandAsync("Input.insertText", new { text = password }, 10000, sessionId);
                             await Task.Delay(300);
                             // 验证：拿一下当前 uVal
-                            var verifyResult = await session.EvaluateAsync($@"JSON.stringify({{u: document.querySelector({uSelJs})?.value, p: document.querySelector({pSelJs})?.value}})");
+                            var verifyResult = await session.EvaluateAsync($@"JSON.stringify({{u: document.querySelector({uSelJs})?.value, p: document.querySelector({pSelJs})?.value}})", 10000, sessionId);
                             CdpLog($"填表后验证: {verifyResult}");
                             // 1. 如果不在视口内，先滚动到可见
                             if (!inViewport)
                             {
                                 CdpLog("按钮不在视口内，滚动到可见");
-                                await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({bSelJs})?.scrollIntoView({{block:'center'}});" });
+                                await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({bSelJs})?.scrollIntoView({{block:'center'}});" }, 10000, sessionId);
                                 await Task.Delay(200);
                             }
                             // 2. 送完整点击事件链：touch + mouse + pointer（antd-mobile 是移动端 UI 可能听 touch）
@@ -710,14 +938,14 @@ public static class CdpHelper
                             {
                                 type = "touchStart",
                                 touchPoints = new[] { new { x = btnX, y = btnY, id = 1 } }
-                            });
+                            }, 10000, sessionId);
                             await Task.Delay(50);
                             // touchEnd
                             await session.SendCommandAsync("Input.dispatchTouchEvent", new
                             {
                                 type = "touchEnd",
                                 touchPoints = new object[] { }
-                            });
+                            }, 10000, sessionId);
                             await Task.Delay(50);
                             // 鼠标移动
                             await session.SendCommandAsync("Input.dispatchMouseEvent", new
@@ -725,7 +953,7 @@ public static class CdpHelper
                                 type = "mouseMoved",
                                 x = btnX,
                                 y = btnY
-                            });
+                            }, 10000, sessionId);
                             // 鼠标按下
                             await session.SendCommandAsync("Input.dispatchMouseEvent", new
                             {
@@ -734,7 +962,7 @@ public static class CdpHelper
                                 y = btnY,
                                 button = "left",
                                 clickCount = 1
-                            });
+                            }, 10000, sessionId);
                             // 鼠标抬起
                             await session.SendCommandAsync("Input.dispatchMouseEvent", new
                             {
@@ -743,7 +971,7 @@ public static class CdpHelper
                                 y = btnY,
                                 button = "left",
                                 clickCount = 1
-                            });
+                            }, 10000, sessionId);
                             CdpLog("✓ 已发送 touch + mouse + pointer 完整事件链");
                             // 3. 靠底：直接调用 React onClick handler
                             if (hasReactOnClick)
@@ -762,12 +990,12 @@ public static class CdpHelper
   }}
   return 'no onClick';
 }})()";
-                                var callResult = await session.EvaluateAsync(jsCallOnClick);
+                                var callResult = await session.EvaluateAsync(jsCallOnClick, 10000, sessionId);
                                 CdpLog($"React onClick 调用结果: {callResult}");
                             }
                             await Task.Delay(1500);
                             // 验证：检查 URL 是否变了
-                            var urlResult = await session.EvaluateAsync("window.location.href");
+                            var urlResult = await session.EvaluateAsync("window.location.href", 10000, sessionId);
                             string afterUrl = urlResult.GetProperty("result").GetProperty("value").GetString() ?? "";
                             CdpLog($"点击后 URL: {afterUrl}");
                         }
