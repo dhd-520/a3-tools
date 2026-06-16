@@ -23,6 +23,10 @@ public partial class CrossDbCopyTableForm : Form
         { "P",   "存储过程" }
     };
 
+    // 搜索区过滤行：存原始 DataTable + 可过滤的 DataView
+    private DataTable? _originalDt;
+    private DataView? _dataView;
+
     public CrossDbCopyTableForm(IToolContext context, Account? currentAccount)
     {
         _context = context;
@@ -42,6 +46,16 @@ public partial class CrossDbCopyTableForm : Form
         // 搜索区 DataGridView 多选 + 复选框联动
         dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         dgvSearchResults.MultiSelect = true;
+
+        // 过滤行 TextBox：TextChanged 触发实时过滤
+        txtFilterName.TextChanged += (s, e) => ApplyFilter();
+        txtFilterType.TextChanged += (s, e) => ApplyFilter();
+
+        // 列宽变化时同步过滤行 TextBox 位置/宽度
+        dgvSearchResults.ColumnWidthChanged += (s, e) => SyncFilterRowPositions();
+        // 列增删 / DataSource 变化时也要重同步
+        dgvSearchResults.ColumnAdded += (s, e) => SyncFilterRowPositions();
+        dgvSearchResults.DataSourceChanged += (s, e) => SyncFilterRowPositions();
 
         dgvSearchResults.SelectionChanged += (s, e) =>
         {
@@ -137,6 +151,10 @@ public partial class CrossDbCopyTableForm : Form
 
         var objectType = ((ObjectTypeItem)cboObjectType.SelectedItem).Value;
 
+        // 点击查询时清空过滤框（避免旧过滤误伤新结果）
+        txtFilterName.Clear();
+        txtFilterType.Clear();
+
         lblSearchProgress.Text = "查询中...";
         lblSearchProgress.ForeColor = Color.Blue;
         dgvSearchResults.DataSource = null;
@@ -181,7 +199,10 @@ ORDER BY o.name";
                     {
                         dgvSearchResults.Columns.Remove("chk");
                     }
-                    dgvSearchResults.DataSource = dt;
+                    // 用 DataView 包衰装源 DataTable，过滤只走 RowFilter（不修改源数据）
+                    _originalDt = dt;
+                    _dataView = new DataView(dt);
+                    dgvSearchResults.DataSource = _dataView;
                     var checkCol = new DataGridViewCheckBoxColumn
                     {
                         HeaderText = "选择",
@@ -206,6 +227,10 @@ ORDER BY o.name";
                     lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
                     lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
                     lblSearchProgress.ForeColor = Color.Green;
+                    // 重新应用过滤（新数据加载后过滤条件仍生效）
+                    ApplyFilter();
+                    // 列都设好了才能拿到真实列宽，此处同步过滤行 TextBox 位置/宽度
+                    SyncFilterRowPositions();
                 }));
             }
             catch (Exception ex)
@@ -256,6 +281,10 @@ ORDER BY o.name";
         var objectType = ((ObjectTypeItem)cboObjectType.SelectedItem).Value;
         var keyword = txtSearchKeyword.Text.Trim();
         var typeDisplay = GetTypeDisplay(objectType);
+
+        // 点击缺失对象时清空过滤框（避免旧过滤误伤新结果）
+        txtFilterName.Clear();
+        txtFilterType.Clear();
 
         lblSearchProgress.Text = "查询缺失对象中...";
         lblSearchProgress.ForeColor = Color.Blue;
@@ -340,7 +369,19 @@ WHERE o.type = @objType
                     {
                         dgvSearchResults.Columns.Remove("chk");
                     }
-                    dgvSearchResults.DataSource = missingRows.Count > 0 ? (object)missingDt : null;
+                    if (missingRows.Count > 0)
+                    {
+                        // 用 DataView 包装以支持过滤
+                        _originalDt = missingDt;
+                        _dataView = new DataView(missingDt);
+                        dgvSearchResults.DataSource = _dataView;
+                    }
+                    else
+                    {
+                        _originalDt = null;
+                        _dataView = null;
+                        dgvSearchResults.DataSource = null;
+                    }
 
                     if (missingRows.Count > 0)
                     {
@@ -371,6 +412,10 @@ WHERE o.type = @objType
                     var hint = hasKeyword ? "（已按关键字过滤）" : "";
                     lblSearchProgress.Text = $"源库共 {srcTotal} 个{typeDisplay}{hint}，缺失 {missing} 个";
                     lblSearchProgress.ForeColor = missing > 0 ? Color.FromArgb(228, 94, 29) : Color.Green;
+                    // 重新应用过滤（新数据加载后过滤条件仍生效）
+                    ApplyFilter();
+                    // 列都设好了才能拿到真实列宽，此处同步过滤行 TextBox 位置/宽度
+                    SyncFilterRowPositions();
                 }));
             }
             catch (Exception ex)
@@ -421,6 +466,78 @@ WHERE o.type = @objType
             _ => "对象"
         };
     }
+
+    /// <summary>
+    /// 应用过滤：根据 txtFilterName/txtFilterType 文本动态过滤 DataView
+    /// 多列 AND 逻辑，大小写不敏感子串匹配
+    /// </summary>
+    private void ApplyFilter()
+    {
+        if (_dataView == null) return;
+        var filters = new List<string>();
+        var name = txtFilterName.Text.Trim();
+        if (!string.IsNullOrEmpty(name))
+        {
+            filters.Add($"[对象名称] LIKE '%{EscapeLike(name)}%'");
+        }
+        var type = txtFilterType.Text.Trim();
+        if (!string.IsNullOrEmpty(type))
+        {
+            filters.Add($"[类型描述] LIKE '%{EscapeLike(type)}%'");
+        }
+        _dataView.RowFilter = filters.Count > 0 ? string.Join(" AND ", filters) : "";
+    }
+
+    /// <summary>
+    /// 同步过滤行 TextBox 位置/宽度与 dgvSearchResults 列对齐
+    /// chk 列不参与过滤（占位宽度）
+    /// </summary>
+    private void SyncFilterRowPositions()
+    {
+        if (dgvSearchResults.Columns.Count == 0) return;
+        // pnlFilterRow 与 dgvSearchResults 同为 pnlSearch 的子控件
+        // TextBox 是 pnlFilterRow 的子控件，其 X 是相对 pnlFilterRow 的
+        // 对齐公式：dgvSearchResults.Left + RowHeaders + chk列宽 - pnlFilterRow.Left
+        int x = dgvSearchResults.Left - pnlFilterRow.Left;
+        if (dgvSearchResults.RowHeadersVisible)
+        {
+            x += dgvSearchResults.RowHeadersWidth;
+        }
+        if (dgvSearchResults.Columns.Contains("chk") && dgvSearchResults.Columns["chk"].Visible)
+        {
+            x += dgvSearchResults.Columns["chk"].Width;
+        }
+        // 垂直居中（考虑 FixedSingle 边框占 2px）
+        int y = (pnlFilterRow.ClientSize.Height - txtFilterName.PreferredHeight) / 2;
+        if (y < 0) y = 0;
+
+        if (dgvSearchResults.Columns.Contains("对象名称") && dgvSearchResults.Columns["对象名称"].Visible)
+        {
+            txtFilterName.Visible = true;
+            txtFilterName.Location = new Point(x, y);
+            txtFilterName.Width = dgvSearchResults.Columns["对象名称"].Width;
+            x += txtFilterName.Width;
+        }
+        else
+        {
+            txtFilterName.Visible = false;
+        }
+        if (dgvSearchResults.Columns.Contains("类型描述") && dgvSearchResults.Columns["类型描述"].Visible)
+        {
+            txtFilterType.Visible = true;
+            txtFilterType.Location = new Point(x, y);
+            txtFilterType.Width = dgvSearchResults.Columns["类型描述"].Width;
+        }
+        else
+        {
+            txtFilterType.Visible = false;
+        }
+    }
+
+    /// <summary>
+    /// 转义 DataView.RowFilter LIKE 模式中的单引号（双重转义）
+    /// </summary>
+    private static string EscapeLike(string s) => s.Replace("'", "''");
 
     /// <summary>
     /// 添加选中：把搜索结果中勾选的对象名追加到 txtObjects（去重）

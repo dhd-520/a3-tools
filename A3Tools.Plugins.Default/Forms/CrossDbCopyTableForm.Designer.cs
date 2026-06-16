@@ -44,6 +44,9 @@ partial class CrossDbCopyTableForm
     private TextBox txtSearchKeyword;
     private Button btnSearch;
     private Button btnFindMissing;
+    private Panel pnlFilterRow;
+    private TextBox txtFilterName;
+    private TextBox txtFilterType;
     private DataGridView dgvSearchResults;
     private Button btnAddSelected;
     private Button btnClearSelected;
@@ -99,6 +102,9 @@ partial class CrossDbCopyTableForm
         txtSearchKeyword = new TextBox();
         btnSearch = new Button();
         btnFindMissing = new Button();
+        pnlFilterRow = new Panel();
+        txtFilterName = new TextBox();
+        txtFilterType = new TextBox();
         btnAddSelected = new Button();
         btnClearSelected = new Button();
         btnCompareTables = new Button();
@@ -109,6 +115,7 @@ partial class CrossDbCopyTableForm
         sourceLayout.SuspendLayout();
         targetLayout.SuspendLayout();
         pnlSearch.SuspendLayout();
+        pnlFilterRow.SuspendLayout();
         ((System.ComponentModel.ISupportInitialize)dgvSearchResults).BeginInit();
         SuspendLayout();
         // 
@@ -146,7 +153,7 @@ partial class CrossDbCopyTableForm
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle());
         tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        tableLayoutPanel1.Size = new Size(1214, 1050);
+        tableLayoutPanel1.Size = new Size(1214, 1070);
         tableLayoutPanel1.TabIndex = 0;
         // 
         // sourceLayout
@@ -568,6 +575,7 @@ partial class CrossDbCopyTableForm
         pnlSearch.Controls.Add(txtSearchKeyword);
         pnlSearch.Controls.Add(btnSearch);
         pnlSearch.Controls.Add(btnFindMissing);
+        pnlSearch.Controls.Add(pnlFilterRow);
         pnlSearch.Controls.Add(btnAddSelected);
         pnlSearch.Controls.Add(btnClearSelected);
         pnlSearch.Controls.Add(btnCompareTables);
@@ -576,7 +584,7 @@ partial class CrossDbCopyTableForm
         pnlSearch.Dock = DockStyle.Fill;
         pnlSearch.Location = new Point(13, 657);
         pnlSearch.Name = "pnlSearch";
-        pnlSearch.Size = new Size(1188, 380);
+        pnlSearch.Size = new Size(1188, 400);
         pnlSearch.TabIndex = 32;
         // 
         // lblSearchKeyword
@@ -627,6 +635,39 @@ partial class CrossDbCopyTableForm
         btnFindMissing.Text = "缺失对象";
         btnFindMissing.UseVisualStyleBackColor = false;
         btnFindMissing.Click += BtnFindMissing_Click;
+        // 
+        // pnlFilterRow
+        // 
+        pnlFilterRow.BackColor = Color.FromArgb(245, 248, 250);
+        pnlFilterRow.BorderStyle = BorderStyle.FixedSingle;
+        pnlFilterRow.Controls.Add(txtFilterName);
+        pnlFilterRow.Controls.Add(txtFilterType);
+        pnlFilterRow.Location = new Point(10, 50);
+        pnlFilterRow.Name = "pnlFilterRow";
+        pnlFilterRow.Size = new Size(1161, 28);
+        pnlFilterRow.TabIndex = 35;
+        // 
+        // txtFilterName
+        // 
+        txtFilterName.BorderStyle = BorderStyle.FixedSingle;
+        txtFilterName.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        txtFilterName.ForeColor = Color.DimGray;
+        txtFilterName.Location = new Point(50, 1);
+        txtFilterName.Name = "txtFilterName";
+        txtFilterName.PlaceholderText = "过滤 对象名称";
+        txtFilterName.Size = new Size(200, 35);
+        txtFilterName.TabIndex = 0;
+        // 
+        // txtFilterType
+        // 
+        txtFilterType.BorderStyle = BorderStyle.FixedSingle;
+        txtFilterType.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        txtFilterType.ForeColor = Color.DimGray;
+        txtFilterType.Location = new Point(252, 1);
+        txtFilterType.Name = "txtFilterType";
+        txtFilterType.PlaceholderText = "过滤 类型描述";
+        txtFilterType.Size = new Size(150, 35);
+        txtFilterType.TabIndex = 1;
         // 
         // btnAddSelected
         // 
@@ -689,13 +730,13 @@ partial class CrossDbCopyTableForm
         dgvSearchResults.AllowUserToDeleteRows = false;
         dgvSearchResults.BackgroundColor = Color.White;
         dgvSearchResults.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-        dgvSearchResults.Location = new Point(10, 50);
+        dgvSearchResults.Location = new Point(10, 83);
         dgvSearchResults.Name = "dgvSearchResults";
         dgvSearchResults.ReadOnly = true;
         dgvSearchResults.RowHeadersWidth = 72;
         dgvSearchResults.RowTemplate.Height = 25;
         dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvSearchResults.Size = new Size(1161, 311);
+        dgvSearchResults.Size = new Size(1161, 278);
         dgvSearchResults.TabIndex = 31;
         // 
         // spacerPanel
@@ -709,7 +750,7 @@ partial class CrossDbCopyTableForm
         // 
         AutoScaleDimensions = new SizeF(14F, 30F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(1214, 1050);
+        ClientSize = new Size(1214, 1070);
         Controls.Add(tableLayoutPanel1);
         Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -726,6 +767,8 @@ partial class CrossDbCopyTableForm
         targetLayout.PerformLayout();
         pnlSearch.ResumeLayout(false);
         pnlSearch.PerformLayout();
+        pnlFilterRow.ResumeLayout(false);
+        pnlFilterRow.PerformLayout();
         ((System.ComponentModel.ISupportInitialize)dgvSearchResults).EndInit();
         ResumeLayout(false);
     }
