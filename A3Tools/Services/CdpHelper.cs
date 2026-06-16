@@ -867,21 +867,44 @@ public static class CdpHelper
                             string btnClass = valueEl.TryGetProperty("btnClass", out var clsEl) ? clsEl.GetString() ?? "" : "";
                             CdpLog($"按钮: 位置({btnX:F0},{btnY:F0}) tag={btnTag} class={btnClass} 文本=\"{btnText}\"");
                             CdpLog($"      在视口内={inViewport} 有React onClick={hasReactOnClick}");
-                            // 0. 【重要】先用 CDP Input.insertText 重填（JS 填的不一定生效）
-                            //    思路：JS focus input → C# 发 Input.insertText → 触发真实 input 事件 → React state 同步
-                            CdpLog("=== 阶段 0：用 Input.insertText 重填账号（CDP 原生键盘输入） ===");
-                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({uSelJs})?.focus(); document.querySelector({uSelJs})?.select();" }, 10000, sessionId);
-                            await Task.Delay(100);
-                            await session.SendCommandAsync("Input.insertText", new { text = username }, 10000, sessionId);
-                            await Task.Delay(200);
-                            CdpLog($"=== 阶段 0：用 Input.insertText 重填密码 ===");
-                            await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({pSelJs})?.focus(); document.querySelector({pSelJs})?.select();" }, 10000, sessionId);
-                            await Task.Delay(100);
-                            await session.SendCommandAsync("Input.insertText", new { text = password }, 10000, sessionId);
-                            await Task.Delay(300);
-                            // 验证：拿一下当前 uVal
-                            var verifyResult = await session.EvaluateAsync($@"JSON.stringify({{u: document.querySelector({uSelJs})?.value, p: document.querySelector({pSelJs})?.value}})", 10000, sessionId);
-                            CdpLog($"填表后验证: {verifyResult}");
+                            // 0. 【重要】用 CDP Input.insertText 重填（JS 填的 React state 不一定生效）
+                            //    思路：先填账号 → 验证 → 再填密码 → 验证，每个 insertText 后等 React state 同步
+                            //    修正 2026-06-16：之前 100ms delay 不够，React 异步 state 还没同步就被下一个 focus + select 切走
+                            //                   造成【账号填成空】或【密码填到账号位置】两个症状
+                            async Task FillAndVerifyAsync(string selJs, string value, string label)
+                            {
+                                for (int retry = 0; retry < 3; retry++)
+                                {
+                                    // 1. focus + select：select 会选中所有现有内容，后续 insertText 覆盖
+                                    await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({selJs})?.focus(); document.querySelector({selJs})?.select();" }, 10000, sessionId);
+                                    await Task.Delay(300);  // 焦点稳定 + 选中状态生效
+                                    // 2. CDP 原生 insertText（模拟真实键盘，触发 React onChange）
+                                    await session.SendCommandAsync("Input.insertText", new { text = value }, 10000, sessionId);
+                                    await Task.Delay(500);  // 等 React state 同步（onChange 是异步的）
+                                    // 3. 验证：读 input.value，确认填入正确
+                                    var verify = await session.EvaluateAsync($"document.querySelector({selJs})?.value", 10000, sessionId);
+                                    string? actual = null;
+                                    if (verify.TryGetProperty("result", out var rEl) && rEl.TryGetProperty("value", out var vEl) && vEl.ValueKind == JsonValueKind.String)
+                                    {
+                                        actual = vEl.GetString();
+                                    }
+                                    if (actual == value)
+                                    {
+                                        CdpLog($"✓ {label} 填入成功（{value.Length} 字符）");
+                                        return;
+                                    }
+                                    CdpLog($"⚠️ {label} 第 {retry + 1} 次填入后值不符：actual=\"{actual}\" expected=\"{value}\"");
+                                    // 不符重试：清空再填
+                                    await session.SendCommandAsync("Runtime.evaluate", new { expression = $"document.querySelector({selJs})?.focus(); document.querySelector({selJs})?.value = ''; document.querySelector({selJs})?.dispatchEvent(new Event('input', {{bubbles: true}}));" }, 10000, sessionId);
+                                    await Task.Delay(200);
+                                }
+                                CdpLog($"✗ {label} 重试 3 次后仍未填入正确（last expected=\"{value}\"）");
+                            }
+
+                            CdpLog("=== 阶段 0：用 Input.insertText 重填账号 ===");
+                            await FillAndVerifyAsync(uSelJs, username, "账号");
+                            CdpLog("=== 阶段 0：用 Input.insertText 重填密码 ===");
+                            await FillAndVerifyAsync(pSelJs, password, "密码");
                             // 1. 如果不在视口内，先滚动到可见
                             if (!inViewport)
                             {
