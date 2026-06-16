@@ -1,4 +1,111 @@
-﻿# A3Tools 工作日志
+﻿
+## 2026-06-16 (再续3)
+
+### CDP Tab 模式简化：放弃 Tab 模式下的自动登录
+
+**问题：** 多次尝试让 Tab 模式在用户原 Edge 实例里开新 Tab + CDP 自动登录均未稳定成功：
+- 方案 A：用主 profile 启动独立 Edge → 会与系统 Edge 冲突
+- 方案 B：独占 user-data-dir + browser-level session → 以新窗口出现，不是 Tab
+- 方案 C：注入调试端口 → 依赖用户重启 Edge，未能完整验证
+
+**最终方案 1（2026-06-16 17:00 确定）：**
+- Tab 模式（未勾选"启动新窗口"）→ 只走 ShellExecute 跳板（explorer.exe 打开 URL）让系统默认浏览器在已开 Edge 实例里开新 Tab，**不自动登录**
+- 新窗口模式（勾选了"启动新窗口"）→ 保留原 CDP 自动登录逻辑不变
+
+**实现（`Forms/MainForm.cs` `LaunchWebBrowser`）：**
+
+- 入口如 `!newWindow` → 走 ShellExecute 后立即 return，**不进入 CDP 逻辑**
+- 启动方式：`Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = "\"" + url + "\"", UseShellExecute = true })`
+- 日志：`Tab 模式：ShellExecute 跳板打开 {url}（不启动新进程，不自动登录）`
+- 剩下所有 CDP + 独占 user-data-dir + 复用现有浏览器逻辑只会在新窗口模式走
+
+**验证：** `dotnet build` 0 错误。
+
+---
+
+## 2026-06-16 (再续2)
+
+### 跨库复制APP表单新增编码规则+标准查询自动复制
+
+**需求：** 参照复制Win表中的复制编码规则、复制标准查询功能，在复制APP表单也增加相应功能。
+
+**规则：**
+1. 编码CODE：`S_APP_CONTROL` 表中 `DATANAME=BILLNO` 或 `DATANAME=CODE` 的行取 `DEFAULTVALUE` 值 → 作为 `S_BILLCODERULE` 的 CODE → 复制主表 + 明细表
+2. 标准查询CODE：`S_APP_CONTROL` 表中 `DATASELECTCODE` 不为空的行 → 取值作为 `S_DATASELECT` 的 CODE → 复制标准查询
+
+**实现（`Forms/CrossDbCopyAppFormForm.cs`）：**
+
+- `CopyAppFormsAsync` 循环里每个 APP_FORM 复制完 6 张子表后，追加调用：
+  - `CopyAppFormCodeRules(srcConn, tgtConn, objectGuid)`
+  - `CopyAppFormStandardQueries(srcConn, tgtConn, objectGuid)`
+- `CopyAppFormCodeRules`：查 `S_APP_CONTROL` WHERE `OBJECTGUID=@guid AND DATANAME IN ('BILLNO','CODE')`，取 `DEFAULTVALUE` 去重后逐条调用 `CopyOneAppFormCodeRule`
+- `CopyOneAppFormCodeRule`：检查目标库 `S_BILLCODERULE` 是否已有 → 没有则复制主表（`CopyTableData` by CODE）+ 明细表（`CopyTableData` by BILLCODERULEGUID）
+- `CopyAppFormStandardQueries`：查 `S_APP_CONTROL` WHERE `OBJECTGUID=@guid AND DATASELECTCODE IS NOT NULL AND DATASELECTCODE<>''`，去重后逐条调用 `CopyOneAppFormStandardQuery`
+- `CopyOneAppFormStandardQuery`：检查目标库 `S_DATASELECT` 是否已有 → 没有则复制
+
+**与 Win 表的区别：**
+- Win 表从 `S_CONTROL.EXTENDS` 解析 `CodeRuleGuid` / `DataSelectCode`（`|@`/`|!` 分隔）
+- APP 表直接从 `S_APP_CONTROL.DEFAULTVALUE` 和 `S_APP_CONTROL.DATASELECTCODE` 取值，不需要 ParseExtends
+
+**教训：** 中间改错地方到 `CrossDbCopyWebObjectForm`（WEB看板复制）上，该表单实际是 `S_WEBOBJECT`/`S_WEBCONTROL`/`S_WEBDATA`/`S_WEBSTYLE`/`S_WEBCMD` 五张表，不涉及 `S_APP_CONTROL`，已用 git checkout 还原；APP 表单对应 `CrossDbCopyAppFormForm`，重写代码至此。
+
+**验证：** `dotnet build` 0 错误（整体 + 插件项目）。
+
+---
+
+## 2026-06-16 (再续)
+
+### 跨库复制表结构搜索结果上方新增过滤行
+
+**需求：** 在 `CrossDbCopyTableForm` 的搜索结果 `dgvSearchResults` 上方新增一行过滤输入区，按列实时过滤。
+
+**实现（方案：DataView.RowFilter + 手动列对齐）：**
+
+1. **`Forms/CrossDbCopyTableForm.Designer.cs`**
+   - 新增字段声明：`pnlFilterRow` / `txtFilterName` / `txtFilterType`
+   - InitializeComponent 里实例化并 `Add` 进 pnlSearch（`pnlFilterRow` 加在 `btnFindMissing` 与 `btnAddSelected` 之间）
+   - `pnlFilterRow.Size = (1161, 28)`、`Location = (10, 50)`、背景色 `#F5F8FA`、`BorderStyle.FixedSingle`
+   - `txtFilterName` PlaceholderText “过滤 对象名称”；`txtFilterType` PlaceholderText “过滤 类型描述”；默认位置/宽度只是占位，运行时由 `SyncFilterRowPositions` 同步
+   - `dgvSearchResults` 向下调：`Location.Y` 50 → 83、`Size.Height` 311 → 278，让出 33px 给过滤行
+
+2. **`Forms/CrossDbCopyTableForm.cs`**
+   - 新增字段 `_originalDt` / `_dataView`
+   - 构造函数里：
+     - `txtFilterName.TextChanged` / `txtFilterType.TextChanged` → `ApplyFilter()`
+     - `dgvSearchResults.ColumnWidthChanged` / `ColumnAdded` / `DataSourceChanged` → `SyncFilterRowPositions()`
+   - 新增三个方法（文件中部，`BtnAddSelected_Click` 之前）：
+     - `ApplyFilter()`：多列 AND、`LIKE '%xxx%'`、走 `_dataView.RowFilter`，源 DataTable 不动
+     - `SyncFilterRowPositions()`：以 chk 列宽为偏移起点，依次计算 【对象名称】【类型描述】列的 X/Width 赋给对应 TextBox；chk 列本身不参与过滤
+     - `EscapeLike()`：单引号双重转义，防 RowFilter 语法错误
+   - `BtnSearch_Click` 查询成功后：用 `_dataView = new DataView(dt)` 包装、`dgvSearchResults.DataSource = _dataView`、并调 `ApplyFilter()` 让过滤条件持续生效
+   - `BtnFindMissing_Click` 同样改成 DataView、走到末尾调 `ApplyFilter()`
+
+**要点：**
+
+- 过滤只动 `RowFilter`，不修改源 DataTable，清空过滤后数据原样返回
+- 三个同步事件避免列动态变化（列宽调整/列增删/重新查询）后过滤行 TextBox 与列位置错位
+- chk 列需要跳过，Width 作为 x 偏移起点；背后列按顺序累加
+- 如果列名变了（后期调列中文），要同步改 `ApplyFilter` 里的 `[对象名称]` / `[类型描述]` 和 `SyncFilterRowPositions` 的列名决定
+
+**验证：** `dotnet build` 0 错误。
+
+### 补丁：过滤行对齐 + 查询时清空过滤框
+
+**问题修复：**
+
+1. **过滤框与列未对齐**：原 `SyncFilterRowPositions` 只在构造函数中调用，那时 `dgvSearchResults.Columns.Count == 0` 直接 return，TextBox 保留在 Designer 默认位置没跟着真实列走。修改：
+   - `BtnSearch_Click` 和 `BtnFindMissing_Click` 两个查询完成都在插 chk 列 + AutoResizeColumns + 设列可见性之后，手动调一次 `SyncFilterRowPositions()`
+   - `SyncFilterRowPositions` 重写：
+     - X 起点改为 `dgvSearchResults.Left - pnlFilterRow.Left`（TextBox 是 pnlFilterRow 子控件，坐标系不同）
+     - 加上 `RowHeadersWidth`（行首列宽）、`chk` 列宽
+     - Y 改为 `(pnlFilterRow.ClientSize.Height - txt.PreferredHeight) / 2` 垂直居中
+     - TextBox 高度不再强设，走系统默认（字体高决定）
+     - 列隐藏时 TextBox 跟着隐藏
+2. **查询时不清空过滤框，老过滤误伤新结果**：`BtnSearch_Click` / `BtnFindMissing_Click` 检验通过进入 `Task.Run` 前，加 `txtFilterName.Clear(); txtFilterType.Clear();`。
+
+**验证：** `dotnet build` 0 错误。
+
+---
 
 ## 2026-06-16 (续)
 
@@ -25,7 +132,7 @@
    - 新增 `AttachToPageAsync(int port, string? urlFilter)`：连 browser-level session 后用 `Target.getTargets` 找现有 page（优先匹配 urlFilter），attach 拿到 pageSessionId
    - `AutoLoginAsync` 加 `string? sessionId` 参数，所有 Page/Runtime/Input 命令带 sessionId 路由
    - `OnLoadEvent` 事件过滤：仅接受 `evtSessionId == sessionId` 的事件（避免其他 page/iframe 事件干扰）
-   - 旧 `CreateNewTabInExistingBrowserAsync`（用 `/json/new`）保留为旧路径注释
+   - 旧 `CreateNewTabInExistingBrowserAsync`（用 `/json/new`）已无人调用，后续清理删除
 
 3. **`MainForm.cs`**
    - 调换流程顺序：Tab 模式 + useCdp 时**先** `FindExistingBrowserDebugPort`，查到设置 `useExistingBrowser=true` 并 `cdpPort=existingPort`，**不启动新进程**直接调 `RunCdpAutoLoginAsync(..., useExistingBrowser: true)`

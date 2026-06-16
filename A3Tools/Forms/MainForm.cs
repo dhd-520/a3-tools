@@ -789,72 +789,49 @@ public partial class MainForm : Form, IToolContext
         bool newWindow = settings.BrowserNewWindow;
         string browserPath = GetBrowserPath(browser);
 
-        // === CDP 自动登录：Chrome/Edge 且账套配置了凭证时走该分支 ===
-        // 两个模式都启用 CDP：用独占 user-data-dir 隔离现有浏览器进程
-        // 调试结果证明独占 user-data-dir 的进程能稳定运行，调试端口有效
+        // === Tab 模式 + CDP：直接 ShellExecute 跳板 在用户原 Edge 开新 Tab，不自动登录 ===
+        // 理由：CDP 自动登录需要独占 user-data-dir 启动独立 Edge 进程，会以新窗口出现
+        //       无法做到“用原 Edge 实例 + 开新 Tab”这种 “原 Tab 模式” 体验
+        // 设计选择：Tab 模式仅用 ShellExecute 跳板（explorer.exe 打开 URL）让系统默认浏览器
+        //       在已开 Edge 实例里 开新 Tab，自动登录表放弃
+        // 提示：用户自己手动输入用户名密码
+        if (!newWindow)
+        {
+            try
+            {
+                CdpHelper.CdpLog($"Tab 模式：ShellExecute 跳板打开 {url}（不启动新进程，不自动登录）");
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "\"" + url + "\"",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("打开浏览器失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            return;
+        }
+
+        // === 新窗口模式：CDP 自动登录 ===
+        // 独占 user-data-dir 启动独立 Edge 进程，调试端口生效后 CDP 接填表
         bool useCdp = account != null
             && account.HasWebAutoLogin
             && CdpHelper.IsCdpSupported(browser);
         int cdpPort = 0;
         string? cdpUserDataDir = null;
         string fullArgs = "";
-        // 【2026-06-16 新增】Tab 模式优先复用现有浏览器，不启动新进程
         bool useExistingBrowser = false;
-        if (useCdp && !newWindow)
-        {
-            CdpHelper.CdpLog("Tab 模式启用 CDP：先查现有浏览器是否已启用调试端口");
-        }
         if (useCdp)
         {
-            // 【2026-06-16 修复】Tab 模式：在决定是否启动新进程之前先查现有浏览器
-            // 之前在 Process.Start 之后才查，FindExistingBrowserDebugPort 会把刚启动的新进程误认成“现有浏览器”
-            if (!newWindow)
-            {
-                int existingPort = CdpHelper.FindExistingBrowserDebugPort(browser);
-                if (existingPort > 0)
-                {
-                    CdpHelper.CdpLog($"✓ Tab 模式：现有 {browser} 已启用调试端口 {existingPort}，复用现有浏览器开新 Tab（不启动新进程）");
-                    useExistingBrowser = true;
-                    cdpPort = existingPort;
-                }
-                else
-                {
-                    CdpHelper.CdpLog($"Tab 模式：现有 {browser} 未启用调试端口，启动新进程");
-                }
-            }
-
-            if (!useExistingBrowser)
-            {
-                // Edge 单实例 IPC 是按 --user-data-dir 隔离的
-                // 只要用独占 user-data-dir 启动新 Edge，调试端口就不会被原有 Edge 实例拦截
-                // 不用杀旧进程
-
-                cdpPort = CdpHelper.FindFreePort();
-                if (newWindow)
-                {
-                    // 新窗口模式：独占 user-data-dir（避免现有实例 lock 冲突）
-                    cdpUserDataDir = CdpHelper.GetTempUserDataDir();
-                }
-                else
-                {
-                    // Tab 模式：复制现有 profile 关键文件到 temp 目录
-                    // 【重要】不能用现有 user-data-dir：Edge/Chrome 会在该目录创建 lockfile，
-                    //         新进程检测到 lock 会把 URL 转发给现有实例并退出
-                    cdpUserDataDir = CdpHelper.GetTempUserDataDir();
-                    string? existingProfile = GetExistingBrowserUserDataDir(browser);
-                    if (string.IsNullOrEmpty(existingProfile) || !Directory.Exists(existingProfile))
-                    {
-                        existingProfile = GetDefaultUserDataDir(browser);
-                    }
-                    CdpHelper.CdpLog($"Tab 模式现有 profile: {existingProfile}");
-                    CopyBrowserProfile(existingProfile, cdpUserDataDir, browser);
-                }
-                // 先算出完整命令，用于日志（打印完整参数，不裁断）
-                fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
-                CdpHelper.CdpLog($"准备启动浏览器：exe={browserPath}");
-                CdpHelper.CdpLog($"完整参数：{fullArgs}");
-                CdpHelper.CdpLog($"调试端口：{cdpPort}, user-data-dir={cdpUserDataDir}");
-            }
+            // 新窗口模式：独占 user-data-dir
+            cdpPort = CdpHelper.FindFreePort();
+            cdpUserDataDir = CdpHelper.GetTempUserDataDir();
+            fullArgs = BuildBrowserArgs(url, browser, newWindow, cdpPort, cdpUserDataDir);
+            CdpHelper.CdpLog($"新窗口模式：准备启动浏览器：exe={browserPath}");
+            CdpHelper.CdpLog($"完整参数：{fullArgs}");
+            CdpHelper.CdpLog($"调试端口：{cdpPort}, user-data-dir={cdpUserDataDir}");
         }
 
         // 【2026-06-16 新增】复用现有浏览器：跳过 Process.Start，直接进 CDP 自动登录
