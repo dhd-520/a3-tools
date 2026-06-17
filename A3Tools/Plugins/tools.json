@@ -11,6 +11,16 @@
       "category": "跨库"
     },
     {
+      "name": "复制配置数据",
+      "description": "复制配置数据（标准查询/系统参数/自定义数据源）到目标数据库",
+      "library": "A3Tools.Plugins.Default.dll",
+      "className": "A3Tools.Plugins.Default.CrossDbCopyConfigDataTool",
+      "methodName": "Execute",
+      "enabled": true,
+      "icon": "",
+      "category": "跨库"
+    },
+    {
       "name": "复制Win表单",
       "description": "复制Win表单到目标账套",
       "library": "A3Tools.Plugins.Default.dll",

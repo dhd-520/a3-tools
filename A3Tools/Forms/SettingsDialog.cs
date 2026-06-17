@@ -18,6 +18,12 @@ public partial class SettingsDialog : Form
     private Button btnSsmsBrowse = null!;
     private Button btnSsmsClear = null!;
     private CheckBox chkBrowserNewWindow = null!;
+    private Panel sepAutoLogin = null!;
+    private CheckBox chkClientAutoLogin = null!;
+    private CheckBox chkDevToolsAutoLogin = null!;
+    private Label lblDevToolsPassword = null!;
+    private TextBox txtDevToolsPassword = null!;
+    private Label hintDevTools = null!;
 
     public string AppDirectory { get; private set; } = string.Empty;
     public string TrayShowHotkey { get; private set; } = "Ctrl+Shift+Z";
@@ -40,6 +46,9 @@ public partial class SettingsDialog : Form
         txtUsernameSel.Text = settings.WebUsernameSelector;
         txtPasswordSel.Text = settings.WebPasswordSelector;
         txtSubmitSel.Text = settings.WebSubmitSelector;
+        chkClientAutoLogin.Checked = settings.ClientAutoLogin;
+        chkDevToolsAutoLogin.Checked = settings.DevToolsAutoLogin;
+        txtDevToolsPassword.Text = settings.DevToolsPassword;  // LoadSettings 已自动解密
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -77,6 +86,9 @@ public partial class SettingsDialog : Form
         settings.WebUsernameSelector = txtUsernameSel.Text.Trim();
         settings.WebPasswordSelector = txtPasswordSel.Text.Trim();
         settings.WebSubmitSelector = txtSubmitSel.Text.Trim();
+        settings.ClientAutoLogin = chkClientAutoLogin.Checked;
+        settings.DevToolsAutoLogin = chkDevToolsAutoLogin.Checked;
+        settings.DevToolsPassword = txtDevToolsPassword.Text;  // 明文，SaveSettings 自动加密
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();

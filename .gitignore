@@ -28,6 +28,10 @@ DATA/*.json
 *.tmp
 *.bak
 
+# Office lock files
+~*.*
+Thumbs.db
+
 # Build release
 release/
 

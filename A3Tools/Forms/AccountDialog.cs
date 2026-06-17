@@ -58,19 +58,15 @@ public partial class AccountDialog : Form
         this.txtDatabase.Text = account.Database;
         this.txtDatabaseName.Text = account.DatabaseName;
         this.txtDbUser.Text = account.DbUser;
-        // 密码已经是解密后的，直接使用
         this.txtDbPassword.Text = account.DbPassword;
         this.cboRemoteType.Text = account.RemoteType;
         this.txtRemoteAddress.Text = account.RemoteAddress;
         this.txtRemoteUser.Text = account.RemoteUser;
-        // 密码已经是解密后的，直接使用
         this.txtRemotePassword.Text = account.RemotePassword;
         this.txtRemark.Text = account.Remark;
 
-        // 网页版自动登录字段（用户名默认 admin）
         this.txtServerUsername.Text = account.ServerUsername;
 
-        // Root模式显示明文密码
         if (ShowPasswords)
         {
             this.txtServerPassword.UseSystemPasswordChar = false;
@@ -146,7 +142,6 @@ public partial class AccountDialog : Form
             RemoteUser = this.txtRemoteUser.Text.Trim(),
             RemotePassword = this.txtRemotePassword.Text,
             Remark = this.txtRemark.Text.Trim(),
-            // 网页版自动登录字段（用户名）
             ServerUsername = this.txtServerUsername.Text.Trim()
         };
     }

@@ -83,4 +83,14 @@ public class AppSettings
 
     /// <summary>网页登录按钮 CSS 选择器</summary>
     public string WebSubmitSelector { get; set; } = "button[type=submit]";
+
+    // ===== 集成开发工具自动登录 =====
+    /// <summary>启动 A3 客户端时是否自动登录（默认 true）</summary>
+    public bool ClientAutoLogin { get; set; } = true;
+
+    /// <summary>启动集成开发工具时是否自动登录（默认 true）</summary>
+    public bool DevToolsAutoLogin { get; set; } = true;
+
+    /// <summary>集成开发工具密码（AES 加密存储，所有账套共用）</summary>
+    public string DevToolsPassword { get; set; } = string.Empty;
 }

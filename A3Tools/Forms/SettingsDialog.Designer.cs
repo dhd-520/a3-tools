@@ -29,6 +29,12 @@ partial class SettingsDialog
         lblSubmitSel = new Label();
         txtSubmitSel = new TextBox();
         hintWebSel = new Label();
+        lblDevToolsPassword = new Label();
+        txtDevToolsPassword = new TextBox();
+        hintDevTools = new Label();
+        sepAutoLogin = new Panel();
+        chkClientAutoLogin = new CheckBox();
+        chkDevToolsAutoLogin = new CheckBox();
         bottom = new Panel();
         btnCancel = new Button();
         btnOK = new Button();
@@ -36,9 +42,9 @@ partial class SettingsDialog
         mainPanel.SuspendLayout();
         bottom.SuspendLayout();
         SuspendLayout();
-        // 
+        //
         // titleBar
-        // 
+        //
         titleBar.BackColor = Color.FromArgb(24, 145, 176);
         titleBar.Controls.Add(lblTitle);
         titleBar.Dock = DockStyle.Top;
@@ -46,9 +52,9 @@ partial class SettingsDialog
         titleBar.Name = "titleBar";
         titleBar.Size = new Size(1152, 60);
         titleBar.TabIndex = 2;
-        // 
+        //
         // lblTitle
-        // 
+        //
         lblTitle.Dock = DockStyle.Fill;
         lblTitle.Font = new Font("微软雅黑", 14F, FontStyle.Bold, GraphicsUnit.Point);
         lblTitle.ForeColor = Color.White;
@@ -59,9 +65,9 @@ partial class SettingsDialog
         lblTitle.TabIndex = 0;
         lblTitle.Text = "⚙️ 设置";
         lblTitle.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // mainPanel
-        // 
+        //
         mainPanel.BackColor = Color.White;
         mainPanel.Controls.Add(lblAppDir);
         mainPanel.Controls.Add(txtAppDir);
@@ -85,24 +91,30 @@ partial class SettingsDialog
         mainPanel.Controls.Add(lblSubmitSel);
         mainPanel.Controls.Add(txtSubmitSel);
         mainPanel.Controls.Add(hintWebSel);
+        mainPanel.Controls.Add(sepAutoLogin);
+        mainPanel.Controls.Add(chkClientAutoLogin);
+        mainPanel.Controls.Add(chkDevToolsAutoLogin);
+        mainPanel.Controls.Add(lblDevToolsPassword);
+        mainPanel.Controls.Add(txtDevToolsPassword);
+        mainPanel.Controls.Add(hintDevTools);
         mainPanel.Dock = DockStyle.Fill;
         mainPanel.Location = new Point(0, 60);
         mainPanel.Name = "mainPanel";
-        mainPanel.Size = new Size(1152, 960);
+        mainPanel.Size = new Size(1152, 1200);
         mainPanel.TabIndex = 1;
-        // 
+        //
         // lblAppDir
-        // 
+        //
         lblAppDir.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblAppDir.Location = new Point(36, 30);
         lblAppDir.Name = "lblAppDir";
         lblAppDir.Size = new Size(220, 50);
         lblAppDir.TabIndex = 0;
-        lblAppDir.Text = "应用程序目录：";
+        lblAppDir.Text = "应用程序目录:";
         lblAppDir.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // txtAppDir
-        // 
+        //
         txtAppDir.BackColor = Color.FromArgb(248, 248, 248);
         txtAppDir.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtAppDir.Location = new Point(36, 80);
@@ -110,9 +122,9 @@ partial class SettingsDialog
         txtAppDir.ReadOnly = true;
         txtAppDir.Size = new Size(800, 41);
         txtAppDir.TabIndex = 1;
-        // 
+        //
         // btnBrowse
-        // 
+        //
         btnBrowse.BackColor = Color.FromArgb(245, 245, 245);
         btnBrowse.Cursor = Cursors.Hand;
         btnBrowse.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
@@ -125,29 +137,29 @@ partial class SettingsDialog
         btnBrowse.Text = "浏览...";
         btnBrowse.UseVisualStyleBackColor = false;
         btnBrowse.Click += BtnBrowse_Click;
-        // 
+        //
         // hint
-        // 
+        //
         hint.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hint.ForeColor = Color.FromArgb(150, 150, 150);
         hint.Location = new Point(36, 124);
         hint.Name = "hint";
         hint.Size = new Size(958, 30);
         hint.TabIndex = 3;
-        hint.Text = "设置A3应用程序所在目录，用于启动账套时定位程序";
-        // 
+        hint.Text = "设置A3应用程序所在目录,用于启动账套时定位程序";
+        //
         // lblSsmsPath
-        // 
+        //
         lblSsmsPath.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblSsmsPath.Location = new Point(36, 160);
         lblSsmsPath.Name = "lblSsmsPath";
         lblSsmsPath.Size = new Size(220, 50);
         lblSsmsPath.TabIndex = 4;
-        lblSsmsPath.Text = "数据库管理器路径：";
+        lblSsmsPath.Text = "数据库管理器路径:";
         lblSsmsPath.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // txtSsmsPath
-        // 
+        //
         txtSsmsPath.BackColor = Color.FromArgb(248, 248, 248);
         txtSsmsPath.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtSsmsPath.Location = new Point(36, 210);
@@ -155,9 +167,9 @@ partial class SettingsDialog
         txtSsmsPath.ReadOnly = true;
         txtSsmsPath.Size = new Size(800, 41);
         txtSsmsPath.TabIndex = 5;
-        // 
+        //
         // btnSsmsBrowse
-        // 
+        //
         btnSsmsBrowse.BackColor = Color.FromArgb(245, 245, 245);
         btnSsmsBrowse.Cursor = Cursors.Hand;
         btnSsmsBrowse.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
@@ -170,9 +182,9 @@ partial class SettingsDialog
         btnSsmsBrowse.Text = "浏览...";
         btnSsmsBrowse.UseVisualStyleBackColor = false;
         btnSsmsBrowse.Click += BtnSsmsBrowse_Click;
-        // 
+        //
         // btnSsmsClear
-        // 
+        //
         btnSsmsClear.BackColor = Color.FromArgb(245, 245, 245);
         btnSsmsClear.Cursor = Cursors.Hand;
         btnSsmsClear.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
@@ -185,29 +197,29 @@ partial class SettingsDialog
         btnSsmsClear.Text = "清除";
         btnSsmsClear.UseVisualStyleBackColor = false;
         btnSsmsClear.Click += BtnSsmsClear_Click;
-        // 
+        //
         // hintSsms
-        // 
+        //
         hintSsms.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintSsms.ForeColor = Color.FromArgb(150, 150, 150);
         hintSsms.Location = new Point(36, 254);
         hintSsms.Name = "hintSsms";
         hintSsms.Size = new Size(958, 30);
         hintSsms.TabIndex = 8;
-        hintSsms.Text = "设置SSMS可执行文件路径，为空则自动查找";
-        // 
+        hintSsms.Text = "设置SSMS可执行文件路径,为空则自动查找";
+        //
         // lblLaunchTitle
-        // 
+        //
         lblLaunchTitle.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblLaunchTitle.Location = new Point(36, 290);
         lblLaunchTitle.Name = "lblLaunchTitle";
         lblLaunchTitle.Size = new Size(220, 50);
         lblLaunchTitle.TabIndex = 9;
-        lblLaunchTitle.Text = "启动选项：";
+        lblLaunchTitle.Text = "启动选项:";
         lblLaunchTitle.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // chkShowLaunchDialog
-        // 
+        //
         chkShowLaunchDialog.Checked = true;
         chkShowLaunchDialog.CheckState = CheckState.Checked;
         chkShowLaunchDialog.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
@@ -216,29 +228,29 @@ partial class SettingsDialog
         chkShowLaunchDialog.Size = new Size(400, 36);
         chkShowLaunchDialog.TabIndex = 10;
         chkShowLaunchDialog.Text = "启动时弹出启动选项选择窗口";
-        // 
+        //
         // hintLaunch
-        // 
+        //
         hintLaunch.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintLaunch.ForeColor = Color.FromArgb(150, 150, 150);
         hintLaunch.Location = new Point(36, 376);
         hintLaunch.Name = "hintLaunch";
         hintLaunch.Size = new Size(958, 30);
         hintLaunch.TabIndex = 11;
-        hintLaunch.Text = "不勾选则按上次选择直接启动（首次使用会弹出选择）";
-        // 
+        hintLaunch.Text = "不勾选则按上次选择直接启动(首次使用会弹出选择)";
+        //
         // lblBrowserLaunch
-        // 
+        //
         lblBrowserLaunch.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblBrowserLaunch.Location = new Point(36, 420);
         lblBrowserLaunch.Name = "lblBrowserLaunch";
         lblBrowserLaunch.Size = new Size(341, 50);
         lblBrowserLaunch.TabIndex = 12;
-        lblBrowserLaunch.Text = "浏览器启动方式：";
+        lblBrowserLaunch.Text = "浏览器启动方式:";
         lblBrowserLaunch.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // chkBrowserNewWindow
-        // 
+        //
         chkBrowserNewWindow.Checked = true;
         chkBrowserNewWindow.CheckState = CheckState.Checked;
         chkBrowserNewWindow.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
@@ -246,81 +258,81 @@ partial class SettingsDialog
         chkBrowserNewWindow.Name = "chkBrowserNewWindow";
         chkBrowserNewWindow.Size = new Size(500, 36);
         chkBrowserNewWindow.TabIndex = 13;
-        chkBrowserNewWindow.Text = "启动新窗口（不勾选则在当前浏览器中打开新Tab）";
-        // 
+        chkBrowserNewWindow.Text = "启动新窗口(不勾选则在当前浏览器中打开新Tab)";
+        //
         // lblWebSelectors
-        // 
+        //
         lblWebSelectors.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         lblWebSelectors.ForeColor = Color.FromArgb(24, 145, 176);
         lblWebSelectors.Location = new Point(36, 510);
         lblWebSelectors.Name = "lblWebSelectors";
         lblWebSelectors.Size = new Size(341, 30);
         lblWebSelectors.TabIndex = 14;
-        lblWebSelectors.Text = "🌐 网页版自动登录选择器：";
+        lblWebSelectors.Text = "🌐 网页版自动登录选择器:";
         lblWebSelectors.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // lblUsernameSel
-        // 
+        //
         lblUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         lblUsernameSel.Location = new Point(36, 550);
         lblUsernameSel.Name = "lblUsernameSel";
         lblUsernameSel.Size = new Size(180, 30);
         lblUsernameSel.TabIndex = 15;
-        lblUsernameSel.Text = "用户名选择器：";
+        lblUsernameSel.Text = "用户名选择器:";
         lblUsernameSel.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // txtUsernameSel
-        // 
+        //
         txtUsernameSel.BackColor = Color.FromArgb(248, 248, 248);
         txtUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         txtUsernameSel.Location = new Point(220, 548);
         txtUsernameSel.Name = "txtUsernameSel";
         txtUsernameSel.Size = new Size(500, 34);
         txtUsernameSel.TabIndex = 16;
-        txtUsernameSel.PlaceholderText = "例：#username 或 input[ng-model=username]";
-        // 
+        txtUsernameSel.PlaceholderText = "例:#username 或 input[ng-model=username]";
+        //
         // lblPasswordSel
-        // 
+        //
         lblPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         lblPasswordSel.Location = new Point(36, 590);
         lblPasswordSel.Name = "lblPasswordSel";
         lblPasswordSel.Size = new Size(180, 30);
         lblPasswordSel.TabIndex = 17;
-        lblPasswordSel.Text = "密码选择器：";
+        lblPasswordSel.Text = "密码选择器:";
         lblPasswordSel.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // txtPasswordSel
-        // 
+        //
         txtPasswordSel.BackColor = Color.FromArgb(248, 248, 248);
         txtPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         txtPasswordSel.Location = new Point(220, 588);
         txtPasswordSel.Name = "txtPasswordSel";
         txtPasswordSel.Size = new Size(500, 34);
         txtPasswordSel.TabIndex = 18;
-        txtPasswordSel.PlaceholderText = "例：#password 或 input[type=password]";
-        // 
+        txtPasswordSel.PlaceholderText = "例:#password 或 input[type=password]";
+        //
         // lblSubmitSel
-        // 
+        //
         lblSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         lblSubmitSel.Location = new Point(36, 630);
         lblSubmitSel.Name = "lblSubmitSel";
         lblSubmitSel.Size = new Size(180, 30);
         lblSubmitSel.TabIndex = 19;
-        lblSubmitSel.Text = "登录按钮选择器：";
+        lblSubmitSel.Text = "登录按钮选择器:";
         lblSubmitSel.TextAlign = ContentAlignment.MiddleLeft;
-        // 
+        //
         // txtSubmitSel
-        // 
+        //
         txtSubmitSel.BackColor = Color.FromArgb(248, 248, 248);
         txtSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         txtSubmitSel.Location = new Point(220, 628);
         txtSubmitSel.Name = "txtSubmitSel";
         txtSubmitSel.Size = new Size(500, 34);
         txtSubmitSel.TabIndex = 20;
-        txtSubmitSel.PlaceholderText = "例：button[type=submit] 或 .login-btn";
-        // 
+        txtSubmitSel.PlaceholderText = "例:button[type=submit] 或 .login-btn";
+        //
         // hintWebSel
-        // 
+        //
         hintWebSel.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintWebSel.ForeColor = Color.FromArgb(150, 150, 150);
         hintWebSel.Location = new Point(220, 665);
@@ -329,20 +341,87 @@ partial class SettingsDialog
         hintWebSel.TabIndex = 21;
         hintWebSel.Text = "用浏览器 F12 → Elements 面板查看登录页 input 元素的 id/class/name";
         // 
-        // bottom
+        // lblDevToolsPassword
         // 
+        lblDevToolsPassword.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
+        lblDevToolsPassword.ForeColor = Color.FromArgb(24, 145, 176);
+        lblDevToolsPassword.Location = new Point(36, 810);
+        lblDevToolsPassword.Name = "lblDevToolsPassword";
+        lblDevToolsPassword.Size = new Size(341, 30);
+        lblDevToolsPassword.TabIndex = 22;
+        lblDevToolsPassword.Text = "🛠️ 集成开发工具自动登录:";
+        lblDevToolsPassword.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // txtDevToolsPassword
+        // 
+        txtDevToolsPassword.BackColor = Color.FromArgb(248, 248, 248);
+        txtDevToolsPassword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtDevToolsPassword.Location = new Point(36, 850);
+        txtDevToolsPassword.Name = "txtDevToolsPassword";
+        txtDevToolsPassword.Size = new Size(500, 34);
+        txtDevToolsPassword.TabIndex = 23;
+        txtDevToolsPassword.PlaceholderText = "集成开发工具密码(AES 加密存储,所有账套共用)";
+        txtDevToolsPassword.UseSystemPasswordChar = true;
+        // 
+        // hintDevTools
+        // 
+        hintDevTools.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        hintDevTools.ForeColor = Color.FromArgb(150, 150, 150);
+        hintDevTools.Location = new Point(36, 890);
+        hintDevTools.Name = "hintDevTools";
+        hintDevTools.Size = new Size(900, 60);
+        hintDevTools.TabIndex = 24;
+        hintDevTools.Text = "启动集成开发工具时，会先填客户端账号密码（用账套 ServerUsername + ServerPassword），\n通过后再填这个开发工具密码（开发账号默认记住，不需要输入）";
+        // 
+        // bottom
+        //
+        sepAutoLogin.BackColor = Color.FromArgb(220, 220, 220);
+        sepAutoLogin.Location = new Point(36, 700);
+        sepAutoLogin.Name = "sepAutoLogin";
+        sepAutoLogin.Size = new Size(1080, 1);
+        sepAutoLogin.TabIndex = 25;
+        //
+        // chkClientAutoLogin
+        //
+        chkClientAutoLogin.Checked = true;
+        chkClientAutoLogin.CheckState = CheckState.Checked;
+        chkClientAutoLogin.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
+        chkClientAutoLogin.ForeColor = Color.FromArgb(24, 145, 176);
+        chkClientAutoLogin.Location = new Point(36, 715);
+        chkClientAutoLogin.Name = "chkClientAutoLogin";
+        chkClientAutoLogin.Size = new Size(500, 36);
+        chkClientAutoLogin.TabIndex = 26;
+        chkClientAutoLogin.Text = "🚀 启动 A3 客户端时自动登录";
+        chkClientAutoLogin.UseVisualStyleBackColor = true;
+        //
+        // chkDevToolsAutoLogin
+        //
+        chkDevToolsAutoLogin.Checked = true;
+        chkDevToolsAutoLogin.CheckState = CheckState.Checked;
+        chkDevToolsAutoLogin.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
+        chkDevToolsAutoLogin.ForeColor = Color.FromArgb(24, 145, 176);
+        chkDevToolsAutoLogin.Location = new Point(36, 755);
+        chkDevToolsAutoLogin.Name = "chkDevToolsAutoLogin";
+        chkDevToolsAutoLogin.Size = new Size(500, 36);
+        chkDevToolsAutoLogin.TabIndex = 27;
+        chkDevToolsAutoLogin.Text = "🛠️ 启动集成开发工具时自动登录(两步)";
+        chkDevToolsAutoLogin.UseVisualStyleBackColor = true;
+        //
+        // bottom
+        //
         bottom.BackColor = Color.FromArgb(248, 248, 248);
         bottom.Controls.Add(btnCancel);
         bottom.Controls.Add(btnOK);
         bottom.Dock = DockStyle.Bottom;
-        bottom.Location = new Point(0, 942);
+        bottom.Location = new Point(0, 1182);
         bottom.Name = "bottom";
         bottom.Size = new Size(1152, 78);
         bottom.TabIndex = 0;
+        bottom.TabIndex = 0;
         bottom.Resize += Bottom_Resize;
-        // 
+        //
         // btnCancel
-        // 
+        //
         btnCancel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         btnCancel.BackColor = Color.White;
         btnCancel.Cursor = Cursors.Hand;
@@ -356,9 +435,9 @@ partial class SettingsDialog
         btnCancel.TabIndex = 0;
         btnCancel.Text = "取消";
         btnCancel.UseVisualStyleBackColor = false;
-        // 
+        //
         // btnOK
-        // 
+        //
         btnOK.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         btnOK.BackColor = Color.FromArgb(24, 145, 176);
         btnOK.Cursor = Cursors.Hand;
@@ -374,13 +453,13 @@ partial class SettingsDialog
         btnOK.Text = "确定";
         btnOK.UseVisualStyleBackColor = false;
         btnOK.Click += BtnOK_Click;
-        // 
+        //
         // SettingsDialog
-        // 
+        //
         AcceptButton = btnOK;
         BackColor = Color.White;
         CancelButton = btnCancel;
-        ClientSize = new Size(1152, 1020);
+        ClientSize = new Size(1152, 1260);
         Controls.Add(bottom);
         Controls.Add(mainPanel);
         Controls.Add(titleBar);

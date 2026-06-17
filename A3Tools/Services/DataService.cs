@@ -240,7 +240,7 @@ public class DataService
     }
 
     /// <summary>
-    /// 加载设置
+    /// 加载设置（自动解密 DevToolsPassword 等加密字段）
     /// </summary>
     public AppSettings LoadSettings()
     {
@@ -250,7 +250,13 @@ public class DataService
         try
         {
             string json = File.ReadAllText(_settingsFile);
-            return JsonSerializer.Deserialize<AppSettings>(json, _jsonOptions) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, _jsonOptions) ?? new AppSettings();
+
+            // 解密集成开发工具密码
+            if (!string.IsNullOrEmpty(settings.DevToolsPassword))
+                settings.DevToolsPassword = EncryptionService.Decrypt(settings.DevToolsPassword);
+
+            return settings;
         }
         catch (Exception ex)
         {
@@ -268,10 +274,14 @@ public class DataService
     }
 
     /// <summary>
-    /// 保存设置
+    /// 保存设置（自动加密 DevToolsPassword 等加密字段）
     /// </summary>
     public void SaveSettings(AppSettings settings)
     {
+        // 加密集成开发工具密码（避免重复加密）
+        if (!string.IsNullOrEmpty(settings.DevToolsPassword) && !IsEncrypted(settings.DevToolsPassword))
+            settings.DevToolsPassword = EncryptionService.Encrypt(settings.DevToolsPassword);
+
         string json = JsonSerializer.Serialize(settings, _jsonOptions);
         File.WriteAllText(_settingsFile, json);
     }

@@ -753,7 +753,27 @@ public partial class MainForm : Form, IToolContext
             string exe1 = Path.Combine(appDir, "君则A3.exe");
             if (File.Exists(exe1))
             {
-                var p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
+                Process? p;
+                // 客户端自动登录：复用 ServerUsername + ServerPassword
+                // 受 Settings.ClientAutoLogin 开关控制
+                var appSettingsClient = _dataService.LoadSettings();
+                if (appSettingsClient.ClientAutoLogin
+                    && !string.IsNullOrEmpty(account.ServerPassword)
+                    && !string.IsNullOrEmpty(account.ServerUsername))
+                {
+                    p = Win32AutoLoginHelper.LaunchAndAutoLogin(
+                        exe1,
+                        windowTitleContains: "君则A3",
+                        accountName: account.Name,
+                        username: account.ServerUsername,
+                        password: account.ServerPassword,
+                        timeoutMs: 30000);
+                }
+                else
+                {
+                    p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
+                }
+
                 if (p != null)
                 {
                     _processIds.Add(p.Id);
@@ -767,7 +787,33 @@ public partial class MainForm : Form, IToolContext
             string exe2 = Path.Combine(appDir, "君则A3集成开发工具.exe");
             if (File.Exists(exe2))
             {
-                var p = Process.Start(new ProcessStartInfo { FileName = exe2, WorkingDirectory = appDir, UseShellExecute = true });
+                Process? p;
+                // 开发工具自动登录：两步登录
+                // 步骤 1：复用 ServerUsername + ServerPassword（客户端登录）
+                // 步骤 2：从 Settings.DevToolsPassword 读开发工具密码（仅填密码，开发账号默认记住）
+                // 受 Settings.DevToolsAutoLogin 开关控制
+                var appSettings = _dataService.LoadSettings();
+                string devToolsPassword = appSettings.DevToolsPassword;
+                if (appSettings.DevToolsAutoLogin
+                    && !string.IsNullOrEmpty(account.ServerPassword)
+                    && !string.IsNullOrEmpty(account.ServerUsername)
+                    && !string.IsNullOrEmpty(devToolsPassword))
+                {
+                    p = Win32AutoLoginHelper.LaunchAndAutoLoginDevTools(
+                        exe2,
+                        windowTitleContains: "IDE授权登录",  // 兼容保留（内部不使用）
+                        accountName: account.Name,
+                        clientUsername: account.ServerUsername,
+                        clientPassword: account.ServerPassword,
+                        devPassword: devToolsPassword,
+                        stepTimeoutMs: 30000,
+                        transitionDelayMs: 2000);
+                }
+                else
+                {
+                    p = Process.Start(new ProcessStartInfo { FileName = exe2, WorkingDirectory = appDir, UseShellExecute = true });
+                }
+
                 if (p != null)
                 {
                     _processIds.Add(p.Id);
@@ -1091,7 +1137,7 @@ public partial class MainForm : Form, IToolContext
                 submitSel,
                 username,
                 password,
-                timeoutMs: 10000,
+                timeoutMs: 45000,
                 sessionId: pageSessionId);
 
             if (ok)
@@ -1100,7 +1146,7 @@ public partial class MainForm : Form, IToolContext
             }
             else
             {
-                CdpHelper.CdpLog("✗ 自动登录超时（10s 内未找到表单元素）");
+                CdpHelper.CdpLog($"✗ 自动登录超时（45000ms 内未完成填表 + 点击 + URL 跳转）");
             }
         }
         catch (Exception ex)

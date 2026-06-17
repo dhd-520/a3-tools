@@ -114,6 +114,21 @@ public class CrossDbCopyTableTool
 }
 
 /// <summary>
+/// 跨库复制配置数据工具
+/// </summary>
+public class CrossDbCopyConfigDataTool
+{
+    public string Name => "跨库复制配置数据";
+    public string Description => "复制配置数据（标准查询/系统参数/自定义数据源）到目标数据库";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.CrossDbCopyConfigDataForm(context, account);
+        form.Show();
+    }
+}
+
+/// <summary>
 /// 跨库复制Win表单工具
 /// </summary>
 public class CrossDbCopyWinFormTool

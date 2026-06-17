@@ -629,7 +629,7 @@ public static class CdpHelper
         string submitSel,
         string username,
         string password,
-        int timeoutMs = 15000,
+        int timeoutMs = 45000,
         string? sessionId = null)
     {
         // 启用 Page + Runtime + Input domain
@@ -661,13 +661,13 @@ public static class CdpHelper
             await session.SendCommandAsync("Page.navigate", new { url }, 10000, sessionId);
 
             // 3. 等 loadEventFired 事件（页面主资源加载完）
-            //    超时 10 秒（避诼 SPA 卡死），超时也继续填表（页面可能从缓存加载）
+            //    超时 30 秒（避诼 SPA 卡死 / 网络慢），超时也继续填表（页面可能从缓存加载）
             var loadTask = loadEventTcs.Task;
-            var loadTimeoutTask = Task.Delay(10000);
+            var loadTimeoutTask = Task.Delay(30000);
             var loadDone = await Task.WhenAny(loadTask, loadTimeoutTask);
             if (loadDone == loadTimeoutTask)
             {
-                CdpLog("⚠️ loadEventFired 超时（10s），强制继续填表");
+                CdpLog("⚠️ loadEventFired 超时（30s），强制继续填表");
             }
             else
             {
