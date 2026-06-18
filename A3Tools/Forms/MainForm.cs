@@ -1121,7 +1121,7 @@ public partial class MainForm : Form, IToolContext
                 }
                 if (session == null || pageSessionId == null)
                 {
-                    CdpHelper.CdpLog("✗ 拿不到 page session，浏览器可能启动失败（看上面 cdp.log）");
+                    CdpHelper.CdpLog("✗ 拿不到 page session，浏览器可能启动失败（请在 VS Debug 输出中查看 CDP 日志）");
                     return;
                 }
             }

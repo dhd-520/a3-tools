@@ -114,19 +114,12 @@ public static class Win32AutoLoginHelper
     #endregion
 
     /// <summary>
-    /// 日志（与 CdpHelper 风格一致，写到 cdp.log 同目录的 win32-login.log）
+    /// Win32 自动登录调试日志：仅输出到 VS Debug 窗口，不再写入 win32-login.log 文件。
     /// </summary>
     public static void WinLog(string msg)
     {
-        try
-        {
-            string baseDir = AppContext.BaseDirectory;
-            string logPath = Path.Combine(baseDir, "win32-login.log");
-            string line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}\n";
-            File.AppendAllText(logPath, line, Encoding.UTF8);
-            Debug.WriteLine(line.TrimEnd());
-        }
-        catch { }
+        string line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}";
+        Debug.WriteLine(line);
     }
 
     /// <summary>

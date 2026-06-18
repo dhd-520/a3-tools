@@ -227,19 +227,12 @@ public static class CdpHelper
     }
 
     /// <summary>
-    /// 写日志到文件 + Debug 输出（双写）
-    /// 文件位置：A3Tools 同目录的 cdp.log（方便不开 VS 也能排查问题）
+    /// CDP 调试日志：仅输出到 VS Debug 窗口，不再写入 cdp.log 文件。
     /// </summary>
     public static void CdpLog(string msg)
     {
         var line = $"[{DateTime.Now:HH:mm:ss.fff}] [CDP] {msg}";
         Debug.WriteLine(line);
-        try
-        {
-            var logPath = Path.Combine(AppContext.BaseDirectory, "cdp.log");
-            File.AppendAllText(logPath, line + Environment.NewLine);
-        }
-        catch { }
     }
 
     /// <summary>

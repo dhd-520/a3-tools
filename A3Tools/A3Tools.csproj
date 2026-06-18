@@ -45,15 +45,19 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
-    <None Update="Plugins\A3Tools.Plugins.Default.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-    </None>
   </ItemGroup>
 
-  <!-- 构建/发布后复制插件 DLL 到 Plugins 子目录（插件 DLL 不进单文件包，需保持为独立文件） -->
-  <Target Name="CopyPluginsToFolder" AfterTargets="Build;Publish">
+  <!-- 构建后复制插件 DLL 到输出目录 Plugins 子目录（插件 DLL 不进单文件包，需保持为独立文件） -->
+  <Target Name="CopyPluginsToFolder" AfterTargets="Build">
     <Copy SourceFiles="$(OutputPath)A3Tools.Plugins.Default.dll" DestinationFolder="$(OutputPath)Plugins" Condition="Exists('$(OutputPath)A3Tools.Plugins.Default.dll')" />
+    <!-- A3Tools.Common 被插件项目引用，必须和插件 DLL 放在同一目录，否则 Assembly.LoadFrom 加载插件会失败，工具箱显示 0 个 -->
+    <Copy SourceFiles="$(OutputPath)A3Tools.Common.dll" DestinationFolder="$(OutputPath)Plugins" Condition="Exists('$(OutputPath)A3Tools.Common.dll')" />
+  </Target>
+
+  <!-- 发布后复制真正构建出来的插件 DLL 到发布目录 Plugins 子目录，避免复制 A3Tools\Plugins 下的旧 DLL -->
+  <Target Name="CopyPluginsToPublishFolder" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <Copy SourceFiles="$(OutputPath)Plugins\A3Tools.Plugins.Default.dll" DestinationFolder="$(PublishDir)Plugins" Condition="Exists('$(OutputPath)Plugins\A3Tools.Plugins.Default.dll')" />
+    <Copy SourceFiles="$(OutputPath)Plugins\A3Tools.Common.dll" DestinationFolder="$(PublishDir)Plugins" Condition="Exists('$(OutputPath)Plugins\A3Tools.Common.dll')" />
   </Target>
 
   <!-- 复制图标到输出目录（托盘图标用，单文件发布时也保留为独立文件，方便运行时加载） -->

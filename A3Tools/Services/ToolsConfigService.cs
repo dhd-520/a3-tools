@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using A3Tools.Models;
 
@@ -18,7 +19,13 @@ public class ToolsConfigService
     
     public ToolsConfigService()
     {
-        string appDir = AppDomain.CurrentDomain.BaseDirectory;
+        // 优先使用 AppContext.BaseDirectory（.NET 6+，单文件发布下指向 exe 真实目录）
+        // AppDomain.CurrentDomain.BaseDirectory 在单文件发布下可能指向解压临时目录，导致找不到 exe 旁边的 Plugins/tools.json
+        string appDir = AppContext.BaseDirectory;
+        if (string.IsNullOrEmpty(appDir) || !Directory.Exists(appDir))
+        {
+            appDir = AppDomain.CurrentDomain.BaseDirectory;
+        }
         _pluginsDir = Path.Combine(appDir, "Plugins");
         _toolsConfigFile = Path.Combine(_pluginsDir, "tools.json");
         
@@ -51,7 +58,7 @@ public class ToolsConfigService
         
         try
         {
-            string json = File.ReadAllText(_toolsConfigFile);
+            string json = File.ReadAllText(_toolsConfigFile, Encoding.UTF8);
             var config = JsonSerializer.Deserialize<ToolsConfiguration>(json, _jsonOptions);
             Tools = config?.Tools ?? new List<ToolConfig>();
             
@@ -74,7 +81,7 @@ public class ToolsConfigService
         {
             var config = new ToolsConfiguration { Tools = Tools };
             string json = JsonSerializer.Serialize(config, _jsonOptions);
-            File.WriteAllText(_toolsConfigFile, json);
+            File.WriteAllText(_toolsConfigFile, json, Encoding.UTF8);
         }
         catch (Exception ex)
         {
@@ -105,7 +112,7 @@ public class ToolsConfigService
         };
         
         string json = JsonSerializer.Serialize(defaultTools, _jsonOptions);
-        File.WriteAllText(_toolsConfigFile, json);
+        File.WriteAllText(_toolsConfigFile, json, Encoding.UTF8);
     }
     
     /// <summary>
