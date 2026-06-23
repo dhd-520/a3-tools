@@ -26,6 +26,17 @@ public partial class MainForm : Form, IToolContext
     private int _titleClickCount = 0;
     private DateTime _lastTitleClickTime = DateTime.MinValue;
     private const string ROOT_PASSWORD = "xiaopacai"; // Root模式密码
+
+    // 账套列表中需要脱敏显示的列（正常模式显示 ***，Root 模式才显示明文）
+    private static readonly HashSet<string> _sensitiveColumnNames = new(StringComparer.Ordinal)
+    {
+        nameof(Account.Database),
+        nameof(Account.DatabaseName),
+        nameof(Account.DbUser),
+        nameof(Account.RemoteAddress),
+        nameof(Account.RemoteUser),
+    };
+    private const string MaskedPlaceholder = "***";
     private bool _isHiddenToTray = false; // 是否已隐藏到托盘
     private const int WM_SYSCOMMAND = 0x0112;
     private const int SC_MINIMIZE = 0xF020;
@@ -207,6 +218,10 @@ public partial class MainForm : Form, IToolContext
         // 远程连接
         if (!string.IsNullOrEmpty(settings.RemoteHotkey))
             _hotkeyManager.ReregisterHotkey(7, settings.RemoteHotkey);
+
+        // 刷新账套列表
+        if (!string.IsNullOrEmpty(settings.RefreshHotkey))
+            _hotkeyManager.ReregisterHotkey(8, settings.RefreshHotkey);
     }
 
     private void OnHotkeyPressed(object? sender, int hotkeyId)
@@ -235,6 +250,9 @@ public partial class MainForm : Form, IToolContext
                     break;
                 case 7:
                     if (tabControl.SelectedTab == tabLaunch) BtnRemote_Click(null, EventArgs.Empty);
+                    break;
+                case 8:
+                    if (tabControl.SelectedTab == tabLaunch) BtnRefresh_Click(null, EventArgs.Empty);
                     break;
             }
         }));
@@ -291,12 +309,14 @@ public partial class MainForm : Form, IToolContext
 
         this.btnLaunch.Click += BtnLaunch_Click;
         this.btnSettings.Click += BtnSettings_Click;
+        this.btnRefresh.Click += BtnRefresh_Click;
         this.btnConnectDB.Click += BtnConnectDB_Click;
         this.btnRemote.Click += BtnRemote_Click;
         this.tabControl.SelectedIndexChanged += TabControl_SelectedIndexChanged;
         this.dgvAccounts.DoubleClick += DgvAccounts_DoubleClick;
         this.dgvAccounts.KeyDown += DgvAccounts_KeyDown;
         this.dgvAccounts.ColumnWidthChanged += DgvAccounts_ColumnWidthChanged;
+        this.dgvAccounts.CellFormatting += DgvAccounts_CellFormatting;
         this.menuCopyAccount.Click += MenuCopyAccount_Click;
         this.menuHotkeySettings.Click += MenuHotkeySettings_Click;
         this.menuAbout.Click += MenuAbout_Click;
@@ -440,6 +460,26 @@ public partial class MainForm : Form, IToolContext
 
     private void BtnAdd_Click(object? sender, EventArgs e) => ShowAccountDialog(null);
     private void BtnImport_Click(object? sender, EventArgs e) => ImportFromXml();
+    private void BtnRefresh_Click(object? sender, EventArgs e) => RefreshAccountList();
+
+    /// <summary>
+    /// 刷新账套列表：从磁盘重新加载 + 重新应用当前搜索关键字 + 刷新状态栏。
+    /// 被按钮点击、全局快捷键共用。
+    /// </summary>
+    private void RefreshAccountList()
+    {
+        try
+        {
+            LoadAccounts();
+            LoadAccountStatuses();
+            RefreshStatusGrid();
+            this.txtSearch?.Focus();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"刷新失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
 
     private void ImportFromXml()
     {
@@ -540,6 +580,31 @@ public partial class MainForm : Form, IToolContext
     private void BtnLaunch_Click(object? sender, EventArgs e) => LaunchSelectedAccount();
 
     private void DgvAccounts_DoubleClick(object? sender, EventArgs e) => EditSelectedAccount();
+
+    /// <summary>
+    /// 账套列表单元格格式化：正常模式下对敏感字段脱敏（显示 ***），Root 模式显示明文。
+    /// 触发时机：加载、滚动、Root 模式切换后 Invalidate。
+    /// </summary>
+    private void DgvAccounts_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+        if (this.dgvAccounts.Rows.Count <= e.RowIndex) return;
+        if (this.dgvAccounts.Columns.Count <= e.ColumnIndex) return;
+
+        var col = this.dgvAccounts.Columns[e.ColumnIndex];
+        if (!_sensitiveColumnNames.Contains(col.DataPropertyName)) return;
+
+        // Root 模式：放行，使用默认绑定值
+        if (_isRootMode) return;
+
+        var acc = this.dgvAccounts.Rows[e.RowIndex].DataBoundItem as Account;
+        var prop = typeof(Account).GetProperty(col.DataPropertyName);
+        var raw = prop?.GetValue(acc) as string;
+
+        // 空值保持空白；非空统一 *** 脱敏
+        e.Value = string.IsNullOrEmpty(raw) ? string.Empty : MaskedPlaceholder;
+        e.FormattingApplied = true;
+    }
 
     private void DgvAccounts_KeyDown(object? sender, KeyEventArgs e)
     {
@@ -686,6 +751,14 @@ public partial class MainForm : Form, IToolContext
         var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
         if (account == null) return;
 
+        // 保证主窗在最前端：
+        // - 托盘隐藏状态：ShowFromTray() 恢复 + 拉前台
+        // - 正常但非激活状态：ForceForegroundWindow 拉前台（避免启动后主窗被压在后看不见）
+        if (_isHiddenToTray)
+            ShowFromTray();
+        else if (Form.ActiveForm != this)
+            ForceForegroundWindow(this.Handle);
+
         var settings = _dataService.LoadSettings();
         if (string.IsNullOrEmpty(settings.AppDirectory) || !Directory.Exists(settings.AppDirectory))
         {
@@ -700,7 +773,7 @@ public partial class MainForm : Form, IToolContext
         if (shouldShowDialog)
         {
             // 弹出启动选项选择对话框
-            using var dialog = new LaunchOptionsDialog(settings.LaunchDesktop, settings.LaunchDevTools, settings.LaunchWeb, settings.SelectedBrowser);
+            using var dialog = new LaunchOptionsDialog(settings.LaunchDesktop, settings.LaunchDevTools, settings.LaunchWeb, settings.SelectedBrowser, account.Name, account.Code);
             if (dialog.ShowDialog() != DialogResult.OK) return;
 
             // 保存用户的选择
@@ -753,31 +826,40 @@ public partial class MainForm : Form, IToolContext
             string exe1 = Path.Combine(appDir, "君则A3.exe");
             if (File.Exists(exe1))
             {
-                Process? p;
-                // 客户端自动登录：复用 ServerUsername + ServerPassword
-                // 受 Settings.ClientAutoLogin 开关控制
-                var appSettingsClient = _dataService.LoadSettings();
-                if (appSettingsClient.ClientAutoLogin
-                    && !string.IsNullOrEmpty(account.ServerPassword)
-                    && !string.IsNullOrEmpty(account.ServerUsername))
+                // 按账套判断：A3 客户端进程名都一样，全局去重会误伤其他账套
+                // 改为查「这个账套 Code」是否已经启动过客户端 → 有则只切到前台
+                if (TryBringAccountProcessesToFront(account.Code, "client"))
                 {
-                    p = Win32AutoLoginHelper.LaunchAndAutoLogin(
-                        exe1,
-                        windowTitleContains: "君则A3",
-                        accountName: account.Name,
-                        username: account.ServerUsername,
-                        password: account.ServerPassword,
-                        timeoutMs: 30000);
+                    ShowToast($"账套【{account.Name}】客户端已在运行，已切到前台");
                 }
                 else
                 {
-                    p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
-                }
+                    Process? p;
+                    // 客户端自动登录：复用 ServerUsername + ServerPassword
+                    // 受 Settings.ClientAutoLogin 开关控制
+                    var appSettingsClient = _dataService.LoadSettings();
+                    if (appSettingsClient.ClientAutoLogin
+                        && !string.IsNullOrEmpty(account.ServerPassword)
+                        && !string.IsNullOrEmpty(account.ServerUsername))
+                    {
+                        p = Win32AutoLoginHelper.LaunchAndAutoLogin(
+                            exe1,
+                            windowTitleContains: "君则A3",
+                            accountName: account.Name,
+                            username: account.ServerUsername,
+                            password: account.ServerPassword,
+                            timeoutMs: 30000);
+                    }
+                    else
+                    {
+                        p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
+                    }
 
-                if (p != null)
-                {
-                    _processIds.Add(p.Id);
-                    RecordProcess(account.Code, p.Id, "client");
+                    if (p != null)
+                    {
+                        _processIds.Add(p.Id);
+                        RecordProcess(account.Code, p.Id, "client");
+                    }
                 }
             }
         }
@@ -787,37 +869,45 @@ public partial class MainForm : Form, IToolContext
             string exe2 = Path.Combine(appDir, "君则A3集成开发工具.exe");
             if (File.Exists(exe2))
             {
-                Process? p;
-                // 开发工具自动登录：两步登录
-                // 步骤 1：复用 ServerUsername + ServerPassword（客户端登录）
-                // 步骤 2：从 Settings.DevToolsPassword 读开发工具密码（仅填密码，开发账号默认记住）
-                // 受 Settings.DevToolsAutoLogin 开关控制
-                var appSettings = _dataService.LoadSettings();
-                string devToolsPassword = appSettings.DevToolsPassword;
-                if (appSettings.DevToolsAutoLogin
-                    && !string.IsNullOrEmpty(account.ServerPassword)
-                    && !string.IsNullOrEmpty(account.ServerUsername)
-                    && !string.IsNullOrEmpty(devToolsPassword))
+                // 按账套判断：开发工具进程名也都一样，全局去重会误伤其他账套
+                if (TryBringAccountProcessesToFront(account.Code, "dev"))
                 {
-                    p = Win32AutoLoginHelper.LaunchAndAutoLoginDevTools(
-                        exe2,
-                        windowTitleContains: "IDE授权登录",  // 兼容保留（内部不使用）
-                        accountName: account.Name,
-                        clientUsername: account.ServerUsername,
-                        clientPassword: account.ServerPassword,
-                        devPassword: devToolsPassword,
-                        stepTimeoutMs: 30000,
-                        transitionDelayMs: 2000);
+                    ShowToast($"账套【{account.Name}】开发工具已在运行，已切到前台");
                 }
                 else
                 {
-                    p = Process.Start(new ProcessStartInfo { FileName = exe2, WorkingDirectory = appDir, UseShellExecute = true });
-                }
+                    Process? p;
+                    // 开发工具自动登录：两步登录
+                    // 步骤 1：复用 ServerUsername + ServerPassword（客户端登录）
+                    // 步骤 2：从 Settings.DevToolsPassword 读开发工具密码（仅填密码，开发账号默认记住）
+                    // 受 Settings.DevToolsAutoLogin 开关控制
+                    var appSettings = _dataService.LoadSettings();
+                    string devToolsPassword = appSettings.DevToolsPassword;
+                    if (appSettings.DevToolsAutoLogin
+                        && !string.IsNullOrEmpty(account.ServerPassword)
+                        && !string.IsNullOrEmpty(account.ServerUsername)
+                        && !string.IsNullOrEmpty(devToolsPassword))
+                    {
+                        p = Win32AutoLoginHelper.LaunchAndAutoLoginDevTools(
+                            exe2,
+                            windowTitleContains: "IDE授权登录",  // 兼容保留（内部不使用）
+                            accountName: account.Name,
+                            clientUsername: account.ServerUsername,
+                            clientPassword: account.ServerPassword,
+                            devPassword: devToolsPassword,
+                            stepTimeoutMs: 30000,
+                            transitionDelayMs: 100);
+                    }
+                    else
+                    {
+                        p = Process.Start(new ProcessStartInfo { FileName = exe2, WorkingDirectory = appDir, UseShellExecute = true });
+                    }
 
-                if (p != null)
-                {
-                    _processIds.Add(p.Id);
-                    RecordProcess(account.Code, p.Id, "dev");
+                    if (p != null)
+                    {
+                        _processIds.Add(p.Id);
+                        RecordProcess(account.Code, p.Id, "dev");
+                    }
                 }
             }
         }
@@ -826,6 +916,14 @@ public partial class MainForm : Form, IToolContext
         {
             string url = account.Server.TrimEnd('/') + "/h5comerp/#/login";
             LaunchWebBrowser(url, settings.SelectedBrowser, account.Code, account);
+        }
+
+        // 启动成功（已记录在案）后自动隐藏到托盘，释放屏幕交给 A3
+        // 取消 if-else 走过的都是「什么也没启动」场景，不隐藏避免误伤
+        // _processIds 是启动过的进程集合（web 启动不进这里），有内容说明至少起了一个
+        if (_processIds.Count > 0 && !_isHiddenToTray)
+        {
+            this.BeginInvoke(new Action(() => HideToTray()));
         }
     }
 
@@ -910,8 +1008,10 @@ public partial class MainForm : Form, IToolContext
             };
             try
             {
-                // Edge/Firefox 用 ShellExecute，Process.Start 返回 null 或立即退出的进程
-                var existingPids = useShellExecute ? GetExistingBrowserPids(browser) : null;
+                // Edge/Chrome 是多进程浏览器，Process.Start 返回的 PID 可能只是壳进程，
+                // 也可能 2 秒后退出并把窗口转交给其它新进程。
+                // 所以启动前先记录现有 PID，启动后按差集登记该账套新增的所有浏览器进程。
+                var existingPids = GetExistingBrowserPids(browser);
 
                 CdpHelper.CdpLog($"调用 Process.Start，useShellExecute={useShellExecute}");
                 var p = Process.Start(startInfo);
@@ -924,7 +1024,7 @@ public partial class MainForm : Form, IToolContext
                     {
                         if (p.HasExited)
                         {
-                            CdpHelper.CdpLog($"⚠️ 进程 2 秒后已退出 (ExitCode={p.ExitCode})，可能是 Edge 单实例转发给了已有进程");
+                            CdpHelper.CdpLog($"⚠️ 进程 2 秒后已退出 (ExitCode={p.ExitCode})，可能是 Edge 单实例转发给了其它进程");
                         }
                         else
                         {
@@ -935,14 +1035,11 @@ public partial class MainForm : Form, IToolContext
                     {
                         CdpHelper.CdpLog($"检查进程状态失败: {ex.Message}");
                     }
-                    _processIds.Add(p.Id);
-                    _processLaunchModes[p.Id] = newWindow;
-                    RecordProcess(accountCode, p.Id, "web");
                 }
                 else
                 {
-                    // 进程立即退出！可能是 Edge 单实例把 URL 转发给老进程了
-                    CdpHelper.CdpLog($"⚠️ 进程立即退出 (HasExited={p?.HasExited})，可能是 Edge 单实例转发给了已有进程");
+                    // 进程立即退出！可能是 Edge 单实例把 URL 转发给其它进程了
+                    CdpHelper.CdpLog($"⚠️ 进程立即退出 (HasExited={p?.HasExited})，可能是 Edge 单实例转发给了其它进程");
                     // 如果是 CDP 模式，等一等再尝试 CDP 连接（可能有新进程）
                     if (useCdp)
                     {
@@ -951,18 +1048,22 @@ public partial class MainForm : Form, IToolContext
                     }
                 }
 
-                if (useShellExecute && existingPids != null)
+                var recordedWebPid = false;
+                var newPids = GetNewBrowserPids(browser, existingPids);
+                foreach (var newPid in newPids)
                 {
-                    // ShellExecute 模式：等待浏览器启动，然后查找新进程
-                    CdpHelper.CdpLog("ShellExecute 模式，等待 500ms 后查找新进程...");
-                    System.Threading.Thread.Sleep(500);
-                    var newPids = GetNewBrowserPids(browser, existingPids);
-                    foreach (var newPid in newPids)
-                    {
-                        _processIds.Add(newPid);
-                        _processLaunchModes[newPid] = newWindow;
-                        RecordProcess(accountCode, newPid, "web");
-                    }
+                    _processIds.Add(newPid);
+                    _processLaunchModes[newPid] = newWindow;
+                    RecordProcess(accountCode, newPid, "web");
+                    recordedWebPid = true;
+                }
+
+                // 兜底：如果没找到新增 PID，但 Process.Start 返回的进程仍存活，至少登记它。
+                if (!recordedWebPid && p != null && !p.HasExited)
+                {
+                    _processIds.Add(p.Id);
+                    _processLaunchModes[p.Id] = newWindow;
+                    RecordProcess(accountCode, p.Id, "web");
                 }
 
                 // CDP 自动登录：浏览器启动后异步执行
@@ -986,9 +1087,10 @@ public partial class MainForm : Form, IToolContext
                 CdpHelper.CdpLog($"注册表找到浏览器：{foundPath}");
                 // 使用注册表找到的路径启动
                 string args = BuildBrowserArgs(url, browser, newWindow, useCdp ? cdpPort : 0, useCdp ? cdpUserDataDir : null);
-                bool useShellExecute = browser == "msedge" || browser == "firefox";
+                bool useShellExecute = false;
                 try
                 {
+                    var existingPids = GetExistingBrowserPids(browser);
                     var startInfo = new ProcessStartInfo
                     {
                         FileName = foundPath,
@@ -997,7 +1099,18 @@ public partial class MainForm : Form, IToolContext
                         CreateNoWindow = !useShellExecute
                     };
                     var p = Process.Start(startInfo);
-                    if (p != null)
+                    System.Threading.Thread.Sleep(useCdp ? 2000 : 500);
+
+                    var recordedWebPid = false;
+                    foreach (var newPid in GetNewBrowserPids(browser, existingPids))
+                    {
+                        _processIds.Add(newPid);
+                        _processLaunchModes[newPid] = newWindow;
+                        RecordProcess(accountCode, newPid, "web");
+                        recordedWebPid = true;
+                    }
+
+                    if (!recordedWebPid && p != null && !p.HasExited)
                     {
                         _processIds.Add(p.Id);
                         _processLaunchModes[p.Id] = newWindow;
@@ -1290,7 +1403,7 @@ public partial class MainForm : Form, IToolContext
             return browser switch
             {
                 "chrome" => $"--new-window --start-maximized --no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
-                "msedge" => $"--new-window --start-maximized{userDataPart}{cdpPart} \"{url}\"",
+                "msedge" => $"--new-window --start-maximized --no-first-run --no-default-browser-check --disable-features=msEdgeFirstRunExperience --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
                 "firefox" => $"-new-window -start-maximized \"{url}\"",
                 "360se" => $"--new-window --start-maximized \"{url}\"",
                 _ => $"--new-window --start-maximized{userDataPart}{cdpPart} \"{url}\""
@@ -1303,7 +1416,7 @@ public partial class MainForm : Form, IToolContext
             return browser switch
             {
                 "chrome" => $"--no-first-run --no-default-browser-check --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
-                "msedge" => $"{userDataPart}{cdpPart} \"{url}\"",
+                "msedge" => $"--no-first-run --no-default-browser-check --disable-features=msEdgeFirstRunExperience --disable-extensions --disable-background-networking --disable-sync --disable-translate --disable-background-timer-throttling --disable-renderer-backgrounding{userDataPart}{cdpPart} \"{url}\"",
                 "firefox" => $"\"{url}\"",
                 "360se" => $"\"{url}\"",
                 _ => $"{userDataPart}{cdpPart} \"{url}\""
@@ -1738,6 +1851,12 @@ public partial class MainForm : Form, IToolContext
             this.lblTitle.ForeColor = Color.White;
             this.menuCopyAccount.Visible = false;
         }
+
+        // 切换 Root 模式后重绘账套列表，重新走 CellFormatting 决定是否脱敏
+        if (this.dgvAccounts != null && !this.dgvAccounts.IsDisposed)
+        {
+            this.dgvAccounts.Invalidate();
+        }
     }
 
     #endregion
@@ -2051,10 +2170,20 @@ public partial class MainForm : Form, IToolContext
                 var p = Process.GetProcessById(pid);
                 if (p != null && !p.HasExited)
                 {
-                    p.Kill();
+                    try
+                    {
+                        // Edge/Chrome 等浏览器是多进程结构，只杀主 PID 可能留下窗口进程。
+                        // 使用进程树关闭，确保账套运行情况中的“关闭”能真正关掉新增浏览器窗口。
+                        p.Kill(entireProcessTree: true);
+                    }
+                    catch
+                    {
+                        p.Kill();
+                    }
                 }
             }
             catch { }
+            _processIds.Remove(pid);
             _processLaunchModes.Remove(pid);
         }
 
@@ -2127,6 +2256,87 @@ public partial class MainForm : Form, IToolContext
         RefreshStatusGrid();
     }
 
+    /// <summary>
+    /// 按账套 Code + 进程类型（如 "client" / "dev"）查找仍存活的进程 ID 列表。
+    /// 自动过滤已退出的进程（GetProcessById 抛异常 = 已死），并同步清理死进程 + 对应的 ProcessIds。
+    /// 用于「按账套判断是否已启动」场景：A3 客户端/开发工具进程名都一样，必须按账套 Code 区分。
+    /// </summary>
+    /// <param name="code">账套代号</param>
+    /// <param name="processType">进程类型："client" / "dev" / "web" / "db" / "remote"</param>
+    /// <returns>仍存活的 PID 列表（空 = 该账套未启动此类型进程）</returns>
+    private List<int> GetActiveAccountProcessIds(string code, string processType)
+    {
+        var result = new List<int>();
+        if (string.IsNullOrEmpty(code) || !_accountStatuses.ContainsKey(code)) return result;
+
+        var status = _accountStatuses[code];
+        var dead = new List<int>();
+
+        foreach (var pid in status.ProcessIds)
+        {
+            try
+            {
+                var p = Process.GetProcessById(pid);
+                if (p != null && !p.HasExited)
+                {
+                    // 仅收集匹配类型的存活进程（用 AccountStatus 上的 bool 标记判断更稳）
+                    bool typeMatch = processType switch
+                    {
+                        "client" => status.IsClientRunning,
+                        "dev" => status.IsDevToolsRunning,
+                        "web" => status.IsWebRunning,
+                        "db" => status.IsDbConnected,
+                        "remote" => status.IsRemoteConnected,
+                        _ => true, // 未指定类型时不过滤
+                    };
+                    if (typeMatch) result.Add(pid);
+                }
+                else
+                {
+                    dead.Add(pid);
+                }
+            }
+            catch
+            {
+                // GetProcessById 进程不存在时抛 ArgumentException → 视为已退出
+                dead.Add(pid);
+            }
+        }
+
+        // 顺手清掉死进程，避免列表越长越脏
+        foreach (var pid in dead)
+        {
+            status.ProcessIds.Remove(pid);
+            _processIds.Remove(pid);
+            _processLaunchModes.Remove(pid);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 尝试把指定账套已启动的某类进程全部切到前台。
+    /// 多个实例时只切第一个存活实例；都死了视为「未启动」，返回 false 让调用方走启动流程。
+    /// </summary>
+    private bool TryBringAccountProcessesToFront(string code, string processType)
+    {
+        var pids = GetActiveAccountProcessIds(code, processType);
+        if (pids.Count == 0) return false;
+
+        int pid = pids[0];
+        if (Win32AutoLoginHelper.BringProcessByIdToFront(pid))
+        {
+            return true;
+        }
+
+        // 切前台失败（可能窗口已最小化到不显示/或窗口已销毁），把死 PID 清掉
+        if (_accountStatuses.TryGetValue(code, out var status))
+            status.ProcessIds.Remove(pid);
+        _processIds.Remove(pid);
+        _processLaunchModes.Remove(pid);
+        return false;
+    }
+
     #endregion
 
     #region 托盘相关
@@ -2166,8 +2376,51 @@ public partial class MainForm : Form, IToolContext
         RegisterAllHotkeys();
         this.menuHide.Text = "隐藏到托盘";
 
-        this.Activate();
+        // 从托盘恢复时强制拉到最前端（避免需要手动点任务栏）
+        ForceForegroundWindow(this.Handle);
     }
+
+    /// <summary>
+    /// 强制将指定窗口拉到最前端（突破 Windows 不许后台进程抢焦点的限制）。
+    /// 实现思路：
+    ///   1. 先调用 AllowSetForegroundWindow 让「当前前台窗口的进程」允许我们抢焦点
+    ///   2. 再调用 SetForegroundWindow + BringToFront + Activate
+    /// Win32 限制：Vista 之后默认不允许后台进程强行 SetForegroundWindow，
+    /// 必须先调 AllowSetForegroundWindow(前台进程 ID) 才能拿到焦点。
+    /// </summary>
+    private void ForceForegroundWindow(IntPtr hWnd)
+    {
+        try
+        {
+            // 拿到当前前台窗口的进程 ID
+            IntPtr fgHwnd = GetForegroundWindow();
+            if (fgHwnd != IntPtr.Zero)
+            {
+                GetWindowThreadProcessId(fgHwnd, out uint fgPid);
+                AllowSetForegroundWindow((int)fgPid);
+            }
+            SetForegroundWindow(hWnd);
+            this.BringToFront();
+            this.Activate();
+        }
+        catch
+        {
+            // 退化路径：仅走 WinForms 自带的 Activate
+            this.Activate();
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     /// <summary>
     /// 拦截窗体消息，处理托盘模式下的最小化
     /// </summary>

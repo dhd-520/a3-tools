@@ -55,6 +55,15 @@ public static class Win32AutoLoginHelper
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -110,6 +119,151 @@ public static class Win32AutoLoginHelper
     private static readonly IntPtr HWND_NOTOPMOST = new(-2);
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    // ShowWindow 命令
+    private const int SW_SHOW = 5;
+
+    #endregion
+
+    #region 进程运行检测 + 拉到前台
+
+    /// <summary>
+    /// 判断指定进程名是否已在运行（进程名不带 .exe 后缀）
+    /// </summary>
+    public static bool IsProcessRunning(string processName)
+    {
+        if (string.IsNullOrEmpty(processName)) return false;
+        var processes = Process.GetProcessesByName(processName);
+        return processes.Length > 0;
+    }
+
+    /// <summary>
+    /// 按 PID 查找进程的主窗口句柄（优先 MainWindowHandle，拿不到时 EnumWindows 兜底）
+    /// </summary>
+    public static bool TryGetProcessWindow(int processId, out IntPtr hWnd)
+    {
+        hWnd = IntPtr.Zero;
+        try
+        {
+            var proc = Process.GetProcessById(processId);
+            if (proc == null || proc.HasExited) return false;
+
+            IntPtr found = proc.MainWindowHandle;
+
+            // 拿不到主窗口句柄时，枚举所有顶层窗口找该进程的窗口
+            if (found == IntPtr.Zero)
+            {
+                EnumWindows((h, _) =>
+                {
+                    GetWindowThreadProcessId(h, out uint pid);
+                    if (pid == (uint)processId)
+                    {
+                        found = h;
+                        return false; // 停止枚举
+                    }
+                    return true;
+                }, IntPtr.Zero);
+            }
+
+            hWnd = found;
+            return hWnd != IntPtr.Zero;
+        }
+        catch
+        {
+            hWnd = IntPtr.Zero;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 按 PID 把进程的主窗口拉到前台。流程：找主窗口 → 最小化恢复 → AllowSetForegroundWindow → SetForegroundWindow。
+    /// 用于「按账套切前台」场景（不同账套 A3 客户端进程名相同，必须按 PID 区分）。
+    /// </summary>
+    /// <param name="processId">目标进程 ID</param>
+    /// <returns>是否成功拉到前台</returns>
+    public static bool BringProcessByIdToFront(int processId)
+    {
+        if (!TryGetProcessWindow(processId, out IntPtr hWnd)) return false;
+        return BringWindowToFront(hWnd);
+    }
+
+    /// <summary>
+    /// 把指定窗口句柄拉到前台（最小化恢复 + 抢焦点三件套）。
+    /// </summary>
+    private static bool BringWindowToFront(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero) return false;
+        try
+        {
+            if (IsIconic(hWnd))
+                ShowWindow(hWnd, SW_RESTORE);
+            else
+                ShowWindow(hWnd, SW_SHOW);
+
+            IntPtr fgHwnd = GetForegroundWindow();
+            if (fgHwnd != IntPtr.Zero)
+            {
+                GetWindowThreadProcessId(fgHwnd, out uint fgPid);
+                AllowSetForegroundWindow((int)fgPid);
+            }
+            SetForegroundWindow(hWnd);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 将指定进程名的首个运行实例的主窗口拉到前台。
+    /// 流程：找主窗口句柄 → 最小化则恢复 → AllowSetForegroundWindow → SetForegroundWindow。
+    /// </summary>
+    /// <param name="processName">进程名（不带 .exe）</param>
+    /// <param name="processId">输出找到的进程 ID</param>
+    /// <returns>是否成功拉到前台</returns>
+    public static bool BringProcessToFront(string processName, out int processId)
+    {
+        processId = 0;
+        if (string.IsNullOrEmpty(processName)) return false;
+
+        Process?[] processes;
+        try
+        {
+            processes = Process.GetProcessesByName(processName);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (processes.Length == 0) return false;
+        var proc = processes[0];
+        if (proc == null) return false;
+
+        processId = proc.Id;
+
+        // 1. 先尝试 MainWindowHandle
+        IntPtr hWnd = proc.MainWindowHandle;
+
+        // 2. 拿不到主窗口句柄时，枚举所有顶层窗口找该进程的窗口
+        if (hWnd == IntPtr.Zero)
+        {
+            EnumWindows((h, _) =>
+            {
+                GetWindowThreadProcessId(h, out uint pid);
+                if (pid == proc.Id)
+                {
+                    hWnd = h;
+                    return false; // 停止枚举
+                }
+                return true;
+            }, IntPtr.Zero);
+        }
+
+        if (hWnd == IntPtr.Zero) return false;
+        return BringWindowToFront(hWnd);
+    }
 
     #endregion
 
@@ -222,7 +376,7 @@ public static class Win32AutoLoginHelper
         string clientPassword,
         string devPassword,
         int stepTimeoutMs = 30000,
-        int transitionDelayMs = 2000)
+        int transitionDelayMs = 1000)
     {
         if (!File.Exists(exePath))
         {
@@ -352,7 +506,7 @@ public static class Win32AutoLoginHelper
         }
 
         // 阶段 2：等控件加载完（再等 800ms 让窗体完全就绪）
-        await Task.Delay(800);
+        await Task.Delay(500);
 
         // 阶段 3：定位 + 填表
         return await FillLoginFormAsync(loginHwnd, accountName, username, password, clickSubmit: true, enterRepeatCount: enterRepeatCount, enterRepeatDelayMs: enterRepeatDelayMs);

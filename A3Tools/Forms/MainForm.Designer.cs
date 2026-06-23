@@ -36,6 +36,7 @@ partial class MainForm
     private Button btnImport = null!;
     private Button btnConnectDB = null!;
     private Button btnRemote = null!;
+    private Button btnRefresh = null!;
     private DataGridView dgvAccounts = null!;
     private Panel descPanel = null!;
     private Label lblDesc = null!;
@@ -416,6 +417,18 @@ partial class MainForm
         btnRemote.Name = "btnRemote";
         btnRemote.Margin = new Padding(0, 0, 10, 0);
 
+        btnRefresh = new Button();
+        btnRefresh.Text = "🔄 刷新";
+        btnRefresh.Size = new Size(100, btnHeight);
+        btnRefresh.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        btnRefresh.FlatAppearance.BorderSize = 1;
+        btnRefresh.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
+        btnRefresh.BackColor = System.Drawing.Color.White;
+        btnRefresh.Font = new Font("微软雅黑", 10F);
+        btnRefresh.Cursor = System.Windows.Forms.Cursors.Hand;
+        btnRefresh.Name = "btnRefresh";
+        btnRefresh.Margin = new Padding(0, 0, 0, 0);
+
         buttonRow.Controls.Add(btnAdd);
         buttonRow.Controls.Add(btnImport);
         buttonRow.Controls.Add(btnEdit);
@@ -424,6 +437,7 @@ partial class MainForm
         buttonRow.Controls.Add(btnSettings);
         buttonRow.Controls.Add(btnConnectDB);
         buttonRow.Controls.Add(btnRemote);
+        buttonRow.Controls.Add(btnRefresh);
         tabLaunch.Controls.Add(buttonRow);
         buttonRow.ResumeLayout(false);
 

@@ -279,7 +279,7 @@ public partial class CrossDbCopyObjectLinkForm : Form
         {
             progressBar.Value = 100;
             lblProgress.Text = "复制完成";
-            MessageBox.Show("单据流转复制完成！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            //MessageBox.Show("单据流转复制完成！", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
             // 不自动关闭，方便继续操作
         }
         else

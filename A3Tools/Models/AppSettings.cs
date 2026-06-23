@@ -74,6 +74,9 @@ public class AppSettings
     /// <summary>远程连接快捷键（如 "Ctrl+R"，为空表示不启用）</summary>
     public string RemoteHotkey { get; set; } = string.Empty;
 
+    /// <summary>刷新账套列表快捷键（如 "F5"，为空表示不启用）</summary>
+    public string RefreshHotkey { get; set; } = "F5";
+
     // ===== 网页版自动登录选择器（设置中配置）=====
     /// <summary>网页登录用户名输入框 CSS 选择器</summary>
     public string WebUsernameSelector { get; set; } = "#username";

@@ -38,6 +38,10 @@ partial class HotkeySettingsForm
         p7 = new Panel();
         txtRemoteHotkey = new TextBox();
         btnClearRemote = new Button();
+        lblRefresh = new Label();
+        p8 = new Panel();
+        txtRefreshHotkey = new TextBox();
+        btnClearRefresh = new Button();
         bottomBar = new Panel();
         btnOK = new Button();
         btnCancel = new Button();
@@ -50,6 +54,7 @@ partial class HotkeySettingsForm
         p5.SuspendLayout();
         p6.SuspendLayout();
         p7.SuspendLayout();
+        p8.SuspendLayout();
         bottomBar.SuspendLayout();
         SuspendLayout();
         // 
@@ -107,10 +112,12 @@ partial class HotkeySettingsForm
         gridMain.Controls.Add(p6, 1, 6);
         gridMain.Controls.Add(lblRemote, 0, 7);
         gridMain.Controls.Add(p7, 1, 7);
+        gridMain.Controls.Add(lblRefresh, 0, 8);
+        gridMain.Controls.Add(p8, 1, 8);
         gridMain.Location = new Point(0, 90);
         gridMain.Name = "gridMain";
         gridMain.Padding = new Padding(20, 10, 20, 0);
-        gridMain.RowCount = 9;
+        gridMain.RowCount = 10;
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
@@ -119,8 +126,9 @@ partial class HotkeySettingsForm
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+        gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        gridMain.Size = new Size(832, 414);
+        gridMain.Size = new Size(832, 464);
         gridMain.TabIndex = 1;
         // 
         // lblColFunc
@@ -459,6 +467,51 @@ partial class HotkeySettingsForm
         btnClearRemote.Text = "清除";
         btnClearRemote.UseVisualStyleBackColor = false;
         btnClearRemote.Click += BtnClear_Click;
+        //
+        // lblRefresh
+        //
+        lblRefresh.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblRefresh.Location = new Point(23, 400);
+        lblRefresh.Name = "lblRefresh";
+        lblRefresh.Size = new Size(190, 46);
+        lblRefresh.TabIndex = 16;
+        lblRefresh.Text = "刷新账套列表快捷键";
+        lblRefresh.TextAlign = ContentAlignment.MiddleLeft;
+        //
+        // p8
+        //
+        p8.Controls.Add(txtRefreshHotkey);
+        p8.Controls.Add(btnClearRefresh);
+        p8.Location = new Point(223, 403);
+        p8.Name = "p8";
+        p8.Size = new Size(586, 44);
+        p8.TabIndex = 17;
+        //
+        // txtRefreshHotkey
+        //
+        txtRefreshHotkey.BackColor = Color.White;
+        txtRefreshHotkey.BorderStyle = BorderStyle.FixedSingle;
+        txtRefreshHotkey.Font = new Font("Consolas", 12F, FontStyle.Regular, GraphicsUnit.Point);
+        txtRefreshHotkey.Location = new Point(0, 7);
+        txtRefreshHotkey.Name = "txtRefreshHotkey";
+        txtRefreshHotkey.ReadOnly = true;
+        txtRefreshHotkey.Size = new Size(410, 40);
+        txtRefreshHotkey.TabIndex = 0;
+        txtRefreshHotkey.KeyDown += TxtBox_KeyDown;
+        //
+        // btnClearRefresh
+        //
+        btnClearRefresh.BackColor = Color.FromArgb(245, 245, 245);
+        btnClearRefresh.Cursor = Cursors.Hand;
+        btnClearRefresh.FlatStyle = FlatStyle.Flat;
+        btnClearRefresh.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnClearRefresh.Location = new Point(420, 6);
+        btnClearRefresh.Name = "btnClearRefresh";
+        btnClearRefresh.Size = new Size(151, 38);
+        btnClearRefresh.TabIndex = 1;
+        btnClearRefresh.Text = "清除";
+        btnClearRefresh.UseVisualStyleBackColor = false;
+        btnClearRefresh.Click += BtnClear_Click;
         // 
         // bottomBar
         // 
@@ -466,7 +519,7 @@ partial class HotkeySettingsForm
         bottomBar.Controls.Add(btnOK);
         bottomBar.Controls.Add(btnCancel);
         bottomBar.Dock = DockStyle.Bottom;
-        bottomBar.Location = new Point(0, 524);
+        bottomBar.Location = new Point(0, 574);
         bottomBar.Name = "bottomBar";
         bottomBar.Size = new Size(864, 70);
         bottomBar.TabIndex = 0;
@@ -511,7 +564,7 @@ partial class HotkeySettingsForm
         AcceptButton = btnOK;
         BackColor = Color.White;
         CancelButton = btnCancel;
-        ClientSize = new Size(864, 594);
+        ClientSize = new Size(864, 644);
         Controls.Add(bottomBar);
         Controls.Add(gridMain);
         Controls.Add(lblHint);
@@ -538,6 +591,8 @@ partial class HotkeySettingsForm
         p6.PerformLayout();
         p7.ResumeLayout(false);
         p7.PerformLayout();
+        p8.ResumeLayout(false);
+        p8.PerformLayout();
         bottomBar.ResumeLayout(false);
         ResumeLayout(false);
     }
@@ -549,4 +604,5 @@ partial class HotkeySettingsForm
     private Panel p5;
     private Panel p6;
     private Panel p7;
+    private Panel p8;
 }

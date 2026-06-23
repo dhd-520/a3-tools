@@ -86,8 +86,8 @@ public class DataService
         var accounts = LoadAccounts();
         foreach (var account in accounts)
         {
-            account.DbPassword = EncryptionService.Decrypt(account.DbPassword ?? "");
-            account.RemotePassword = EncryptionService.Decrypt(account.RemotePassword ?? "");
+            account.DbPassword = DecryptIfEncrypted(account.DbPassword ?? "");
+            account.RemotePassword = DecryptIfEncrypted(account.RemotePassword ?? "");
         }
         return accounts;
     }
@@ -110,24 +110,39 @@ public class DataService
     }
 
     /// <summary>
-    /// 判断字符串是否已加密（Base64格式且长度合理）
+    /// 判断字符串是否已加密。
+    /// 不能只按 Base64 判断：例如 4 位数字 "1234" 也是合法 Base64，
+    /// 会被误判为已加密，导致保存明文、下次加载解密失败变空。
     /// </summary>
     private bool IsEncrypted(string text)
     {
         if (string.IsNullOrEmpty(text)) return false;
-        // Base64加密字符串长度约为明文的1.4倍，且只包含特定字符
-        if (text.Length < 4) return false;
+
         try
         {
-            Convert.FromBase64String(text);
-            // 进一步检查：加密字符串不应该包含中文
-            var bytes = Encoding.UTF8.GetBytes(text);
-            return bytes.Length == text.Length; // 纯ASCII字符
+            byte[] cipherBytes = Convert.FromBase64String(text);
+
+            // AES-CBC + PKCS7 密文长度至少 16 字节，且必须是 16 的整数倍。
+            if (cipherBytes.Length < 16 || cipherBytes.Length % 16 != 0)
+                return false;
+
+            // 能用当前机器密钥成功解密，才认为是本程序加密过的密文。
+            return !string.IsNullOrEmpty(EncryptionService.Decrypt(text));
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// 仅当字段确认为加密密文时才解密；否则按明文兼容处理。
+    /// 用于兼容旧版本误保存的 4 位 Base64-like 明文密码。
+    /// </summary>
+    private string DecryptIfEncrypted(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        return IsEncrypted(text) ? EncryptionService.Decrypt(text) : text;
     }
 
     /// <summary>
@@ -234,8 +249,8 @@ public class DataService
     /// </summary>
     public Account DecryptAccount(Account account)
     {
-        account.DbPasswordDecrypted = EncryptionService.Decrypt(account.DbPassword);
-        account.RemotePasswordDecrypted = EncryptionService.Decrypt(account.RemotePassword);
+        account.DbPasswordDecrypted = DecryptIfEncrypted(account.DbPassword);
+        account.RemotePasswordDecrypted = DecryptIfEncrypted(account.RemotePassword);
         return account;
     }
 
@@ -252,9 +267,9 @@ public class DataService
             string json = File.ReadAllText(_settingsFile);
             var settings = JsonSerializer.Deserialize<AppSettings>(json, _jsonOptions) ?? new AppSettings();
 
-            // 解密集成开发工具密码
+            // 解密集成开发工具密码；如果是旧版本误保存的明文，直接保留并在下次保存时重新加密。
             if (!string.IsNullOrEmpty(settings.DevToolsPassword))
-                settings.DevToolsPassword = EncryptionService.Decrypt(settings.DevToolsPassword);
+                settings.DevToolsPassword = DecryptIfEncrypted(settings.DevToolsPassword);
 
             return settings;
         }

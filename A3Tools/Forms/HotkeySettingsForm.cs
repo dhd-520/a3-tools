@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows.Forms;
 using A3Tools.Services;
 
@@ -6,7 +6,7 @@ namespace A3Tools.Forms;
 
 public partial class HotkeySettingsForm : Form
 {
-    // 字段声明
+    // 瀛楁澹版槑
     private Label lblTitle = null!;
     private Label lblHint = null!;
     private Panel titleBar = null!;
@@ -35,6 +35,9 @@ public partial class HotkeySettingsForm : Form
     private Button btnClearSettings = null!;
     private Button btnClearConnectDB = null!;
     private Button btnClearRemote = null!;
+    private Label lblRefresh = null!;
+    private TextBox txtRefreshHotkey = null!;
+    private Button btnClearRefresh = null!;
     private Button btnOK = null!;
     private Button btnCancel = null!;
 
@@ -45,6 +48,7 @@ public partial class HotkeySettingsForm : Form
     public string SettingsHotkey = string.Empty;
     public string ConnectDBHotkey = string.Empty;
     public string RemoteHotkey = string.Empty;
+    public string RefreshHotkey = string.Empty;
 
     public HotkeySettingsForm()
     {
@@ -63,6 +67,7 @@ public partial class HotkeySettingsForm : Form
         txtSettingsHotkey.Text = settings.SettingsHotkey;
         txtConnectDBHotkey.Text = settings.ConnectDBHotkey;
         txtRemoteHotkey.Text = settings.RemoteHotkey;
+        txtRefreshHotkey.Text = settings.RefreshHotkey;
     }
 
     private void BtnOK_Click(object? sender, EventArgs e)
@@ -74,6 +79,7 @@ public partial class HotkeySettingsForm : Form
         SettingsHotkey = txtSettingsHotkey.Text;
         ConnectDBHotkey = txtConnectDBHotkey.Text;
         RemoteHotkey = txtRemoteHotkey.Text;
+        RefreshHotkey = txtRefreshHotkey.Text;
 
         var dataService = new DataService();
         var settings = dataService.LoadSettings();
@@ -84,6 +90,7 @@ public partial class HotkeySettingsForm : Form
         settings.SettingsHotkey = SettingsHotkey;
         settings.ConnectDBHotkey = ConnectDBHotkey;
         settings.RemoteHotkey = RemoteHotkey;
+        settings.RefreshHotkey = RefreshHotkey;
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();
@@ -110,6 +117,7 @@ public partial class HotkeySettingsForm : Form
         if (sender == btnClearSettings) { txtSettingsHotkey.Text = ""; return; }
         if (sender == btnClearConnectDB) { txtConnectDBHotkey.Text = ""; return; }
         if (sender == btnClearRemote) { txtRemoteHotkey.Text = ""; return; }
+        if (sender == btnClearRefresh) { txtRefreshHotkey.Text = ""; return; }
     }
 
     private void BottomBar_Resize(object? sender, EventArgs e)
@@ -118,3 +126,5 @@ public partial class HotkeySettingsForm : Form
         btnOK.Left = btnCancel.Left - 10 - btnOK.Width;
     }
 }
+
+

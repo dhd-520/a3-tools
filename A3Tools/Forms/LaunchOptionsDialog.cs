@@ -12,11 +12,14 @@ public class LaunchOptionsDialog : Form
     private ComboBox cboBrowser;
     private Button btnOK;
     private Button btnCancel;
+    private Label lblAccountInfo = null!;
 
     public bool LaunchDesktop { get; private set; }
     public bool LaunchDevTools { get; private set; }
     public bool LaunchWeb { get; private set; }
     public string SelectedBrowser { get; private set; } = "chrome";
+    public string AccountName { get; }
+    public string AccountCode { get; }
 
     private static readonly Dictionary<string, string> BrowserMap = new()
     {
@@ -30,12 +33,14 @@ public class LaunchOptionsDialog : Form
     /// <summary>
     /// 使用上次的设置作为默认值
     /// </summary>
-    public LaunchOptionsDialog(bool defaultDesktop, bool defaultDevTools, bool defaultWeb, string defaultBrowser = "chrome")
+    public LaunchOptionsDialog(bool defaultDesktop, bool defaultDevTools, bool defaultWeb, string defaultBrowser = "chrome", string accountName = "", string accountCode = "")
     {
         LaunchDesktop = defaultDesktop;
         LaunchDevTools = defaultDevTools;
         LaunchWeb = defaultWeb;
         SelectedBrowser = defaultBrowser;
+        AccountName = accountName ?? string.Empty;
+        AccountCode = accountCode ?? string.Empty;
 
         InitializeComponent();
         LoadDefaults();
@@ -70,6 +75,24 @@ public class LaunchOptionsDialog : Form
             Padding = new Padding(24, 0, 0, 0)
         };
         titleBar.Controls.Add(lblTitle);
+
+        // 账套信息横幅（在标题栏下方，不影响原标题）
+        var accountBanner = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 44,
+            BackColor = System.Drawing.Color.FromArgb(232, 244, 248)
+        };
+
+        lblAccountInfo = new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+            Padding = new Padding(36, 0, 36, 0),
+            Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold),
+            ForeColor = System.Drawing.Color.FromArgb(24, 145, 176)
+        };
+        accountBanner.Controls.Add(lblAccountInfo);
 
         // 内容区域
         var content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(36, 24, 36, 12) };
@@ -191,6 +214,7 @@ public class LaunchOptionsDialog : Form
 
         this.Controls.Add(bottom);
         this.Controls.Add(content);
+        this.Controls.Add(accountBanner);
         this.Controls.Add(titleBar);
 
         this.AcceptButton = btnOK;
@@ -229,6 +253,18 @@ public class LaunchOptionsDialog : Form
         chkDesktop.Checked = LaunchDesktop;
         chkDevTools.Checked = LaunchDevTools;
         chkWeb.Checked = LaunchWeb;
+
+        // 账套信息文本（例：账套：测试账套 (0001)）
+        if (!string.IsNullOrEmpty(AccountName) || !string.IsNullOrEmpty(AccountCode))
+        {
+            lblAccountInfo.Text = string.IsNullOrEmpty(AccountCode)
+                ? $"当前账套：{AccountName}"
+                : $"当前账套：{AccountName} ({AccountCode})";
+        }
+        else
+        {
+            lblAccountInfo.Text = "当前账套：（未选择）";
+        }
 
         // 选中保存的浏览器
         for (int i = 0; i < cboBrowser.Items.Count; i++)
