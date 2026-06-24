@@ -347,6 +347,7 @@ public partial class CrossDbCopyReportForm : Form
                     TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_REPORTDOUBLECLICK", "REPORTGUID", reportGuid, deleteFirst, "[报表]");
                     TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_REPORTLINKDEFINE", "REPORTGUID", reportGuid, deleteFirst, "[报表]");
                     TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_REPORTSCHEME", "REPORTGUID", reportGuid, deleteFirst, "[报表]");
+                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_REPORTCOLUMNSETTING", "REPORTGUID", reportGuid, deleteFirst, "[报表]");
                     successCount++;
                 }
 
