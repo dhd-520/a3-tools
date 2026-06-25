@@ -1,4 +1,4 @@
-namespace A3Tools.Forms;
+﻿namespace A3Tools.Forms;
 
 partial class AccountDialog
 {
@@ -17,6 +17,8 @@ partial class AccountDialog
     private TextBox txtName = null!;
     private Label lblServer = null!;
     private TextBox txtServer = null!;
+    private Label lblServerBackup = null!;
+    private TextBox txtServerBackup = null!;
     private Label lblServerPassword = null!;
     private TextBox txtServerPassword = null!;
     private Label lblDatabase = null!;
@@ -70,6 +72,8 @@ partial class AccountDialog
         txtName = new TextBox();
         lblServer = new Label();
         txtServer = new TextBox();
+        lblServerBackup = new Label();
+        txtServerBackup = new TextBox();
         lblServerPassword = new Label();
         txtServerPassword = new TextBox();
         lblDatabase = new Label();
@@ -135,6 +139,8 @@ partial class AccountDialog
         contentPanel.Controls.Add(txtName);
         contentPanel.Controls.Add(lblServer);
         contentPanel.Controls.Add(txtServer);
+        contentPanel.Controls.Add(lblServerBackup);
+        contentPanel.Controls.Add(txtServerBackup);
         contentPanel.Controls.Add(lblServerPassword);
         contentPanel.Controls.Add(txtServerPassword);
         contentPanel.Controls.Add(lblDatabase);
@@ -160,7 +166,7 @@ partial class AccountDialog
         contentPanel.Location = new Point(0, 50);
         contentPanel.Name = "contentPanel";
         contentPanel.Padding = new Padding(30, 20, 30, 20);
-        contentPanel.Size = new Size(942, 794);
+        contentPanel.Size = new Size(942, 839);
         contentPanel.TabIndex = 1;
         // 
         // lblCode
@@ -220,111 +226,130 @@ partial class AccountDialog
         txtServer.Size = new Size(590, 41);
         txtServer.TabIndex = 5;
         // 
+        // lblServerBackup
+        // 
+        lblServerBackup.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblServerBackup.ForeColor = Color.FromArgb(80, 80, 80);
+        lblServerBackup.Location = new Point(30, 155);
+        lblServerBackup.Name = "lblServerBackup";
+        lblServerBackup.Size = new Size(210, 35);
+        lblServerBackup.TabIndex = 6;
+        lblServerBackup.Text = "备用地址：";
+        lblServerBackup.TextAlign = ContentAlignment.MiddleRight;
+        // 
+        // txtServerBackup
+        // 
+        txtServerBackup.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        txtServerBackup.Location = new Point(250, 155);
+        txtServerBackup.Name = "txtServerBackup";
+        txtServerBackup.Size = new Size(590, 41);
+        txtServerBackup.TabIndex = 7;
+        // 
         // lblServerPassword
         // 
         lblServerPassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblServerPassword.ForeColor = Color.FromArgb(80, 80, 80);
-        lblServerPassword.Location = new Point(30, 155);
+        lblServerPassword.Location = new Point(30, 200);
         lblServerPassword.Name = "lblServerPassword";
         lblServerPassword.Size = new Size(210, 35);
-        lblServerPassword.TabIndex = 6;
+        lblServerPassword.TabIndex = 8;
         lblServerPassword.Text = "账套密码：";
         lblServerPassword.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtServerPassword
         // 
         txtServerPassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtServerPassword.Location = new Point(250, 155);
+        txtServerPassword.Location = new Point(250, 200);
         txtServerPassword.Name = "txtServerPassword";
         txtServerPassword.Size = new Size(590, 41);
-        txtServerPassword.TabIndex = 7;
+        txtServerPassword.TabIndex = 9;
         txtServerPassword.UseSystemPasswordChar = true;
         // 
         // lblDatabase
         // 
         lblDatabase.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblDatabase.ForeColor = Color.FromArgb(80, 80, 80);
-        lblDatabase.Location = new Point(30, 200);
+        lblDatabase.Location = new Point(30, 245);
         lblDatabase.Name = "lblDatabase";
         lblDatabase.Size = new Size(210, 35);
-        lblDatabase.TabIndex = 8;
+        lblDatabase.TabIndex = 10;
         lblDatabase.Text = "数据库地址：";
         lblDatabase.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtDatabase
         // 
         txtDatabase.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtDatabase.Location = new Point(250, 200);
+        txtDatabase.Location = new Point(250, 245);
         txtDatabase.Name = "txtDatabase";
         txtDatabase.Size = new Size(590, 41);
-        txtDatabase.TabIndex = 9;
+        txtDatabase.TabIndex = 11;
         // 
         // lblDatabaseName
         // 
         lblDatabaseName.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblDatabaseName.ForeColor = Color.FromArgb(80, 80, 80);
-        lblDatabaseName.Location = new Point(30, 245);
+        lblDatabaseName.Location = new Point(30, 290);
         lblDatabaseName.Name = "lblDatabaseName";
         lblDatabaseName.Size = new Size(210, 35);
-        lblDatabaseName.TabIndex = 10;
+        lblDatabaseName.TabIndex = 12;
         lblDatabaseName.Text = "数据库名称：";
         lblDatabaseName.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtDatabaseName
         // 
         txtDatabaseName.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtDatabaseName.Location = new Point(250, 245);
+        txtDatabaseName.Location = new Point(250, 290);
         txtDatabaseName.Name = "txtDatabaseName";
         txtDatabaseName.Size = new Size(590, 41);
-        txtDatabaseName.TabIndex = 11;
+        txtDatabaseName.TabIndex = 13;
         // 
         // lblDbUser
         // 
         lblDbUser.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblDbUser.ForeColor = Color.FromArgb(80, 80, 80);
-        lblDbUser.Location = new Point(30, 290);
+        lblDbUser.Location = new Point(30, 335);
         lblDbUser.Name = "lblDbUser";
         lblDbUser.Size = new Size(210, 35);
-        lblDbUser.TabIndex = 12;
+        lblDbUser.TabIndex = 14;
         lblDbUser.Text = "DB用户名：";
         lblDbUser.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtDbUser
         // 
         txtDbUser.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtDbUser.Location = new Point(250, 290);
+        txtDbUser.Location = new Point(250, 335);
         txtDbUser.Name = "txtDbUser";
         txtDbUser.Size = new Size(590, 41);
-        txtDbUser.TabIndex = 13;
+        txtDbUser.TabIndex = 15;
         // 
         // lblDbPassword
         // 
         lblDbPassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblDbPassword.ForeColor = Color.FromArgb(80, 80, 80);
-        lblDbPassword.Location = new Point(30, 335);
+        lblDbPassword.Location = new Point(30, 380);
         lblDbPassword.Name = "lblDbPassword";
         lblDbPassword.Size = new Size(210, 35);
-        lblDbPassword.TabIndex = 14;
+        lblDbPassword.TabIndex = 16;
         lblDbPassword.Text = "DB密码：";
         lblDbPassword.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtDbPassword
         // 
         txtDbPassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtDbPassword.Location = new Point(250, 335);
+        txtDbPassword.Location = new Point(250, 380);
         txtDbPassword.Name = "txtDbPassword";
         txtDbPassword.Size = new Size(590, 41);
-        txtDbPassword.TabIndex = 15;
+        txtDbPassword.TabIndex = 17;
         txtDbPassword.UseSystemPasswordChar = true;
         // 
         // lblRemoteType
         // 
         lblRemoteType.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblRemoteType.ForeColor = Color.FromArgb(80, 80, 80);
-        lblRemoteType.Location = new Point(30, 390);
+        lblRemoteType.Location = new Point(30, 435);
         lblRemoteType.Name = "lblRemoteType";
         lblRemoteType.Size = new Size(210, 35);
-        lblRemoteType.TabIndex = 16;
+        lblRemoteType.TabIndex = 18;
         lblRemoteType.Text = "远程方式：";
         lblRemoteType.TextAlign = ContentAlignment.MiddleRight;
         // 
@@ -333,77 +358,77 @@ partial class AccountDialog
         cboRemoteType.DropDownStyle = ComboBoxStyle.DropDownList;
         cboRemoteType.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         cboRemoteType.Items.AddRange(new object[] { "RDP", "向日葵", "其他" });
-        cboRemoteType.Location = new Point(250, 390);
+        cboRemoteType.Location = new Point(250, 435);
         cboRemoteType.Name = "cboRemoteType";
         cboRemoteType.Size = new Size(590, 43);
-        cboRemoteType.TabIndex = 17;
+        cboRemoteType.TabIndex = 19;
         // 
         // lblRemoteAddress
         // 
         lblRemoteAddress.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblRemoteAddress.ForeColor = Color.FromArgb(80, 80, 80);
-        lblRemoteAddress.Location = new Point(30, 435);
+        lblRemoteAddress.Location = new Point(30, 480);
         lblRemoteAddress.Name = "lblRemoteAddress";
         lblRemoteAddress.Size = new Size(210, 35);
-        lblRemoteAddress.TabIndex = 18;
+        lblRemoteAddress.TabIndex = 20;
         lblRemoteAddress.Text = "远程地址：";
         lblRemoteAddress.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtRemoteAddress
         // 
         txtRemoteAddress.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtRemoteAddress.Location = new Point(250, 435);
+        txtRemoteAddress.Location = new Point(250, 480);
         txtRemoteAddress.Name = "txtRemoteAddress";
         txtRemoteAddress.Size = new Size(590, 41);
-        txtRemoteAddress.TabIndex = 19;
+        txtRemoteAddress.TabIndex = 21;
         // 
         // lblRemoteUser
         // 
         lblRemoteUser.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblRemoteUser.ForeColor = Color.FromArgb(80, 80, 80);
-        lblRemoteUser.Location = new Point(30, 480);
+        lblRemoteUser.Location = new Point(30, 525);
         lblRemoteUser.Name = "lblRemoteUser";
         lblRemoteUser.Size = new Size(210, 35);
-        lblRemoteUser.TabIndex = 20;
+        lblRemoteUser.TabIndex = 22;
         lblRemoteUser.Text = "远程用户名：";
         lblRemoteUser.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtRemoteUser
         // 
         txtRemoteUser.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtRemoteUser.Location = new Point(250, 480);
+        txtRemoteUser.Location = new Point(250, 525);
         txtRemoteUser.Name = "txtRemoteUser";
         txtRemoteUser.Size = new Size(590, 41);
-        txtRemoteUser.TabIndex = 21;
+        txtRemoteUser.TabIndex = 23;
         // 
         // lblRemotePassword
         // 
         lblRemotePassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblRemotePassword.ForeColor = Color.FromArgb(80, 80, 80);
-        lblRemotePassword.Location = new Point(30, 525);
+        lblRemotePassword.Location = new Point(30, 570);
         lblRemotePassword.Name = "lblRemotePassword";
         lblRemotePassword.Size = new Size(210, 35);
-        lblRemotePassword.TabIndex = 22;
+        lblRemotePassword.TabIndex = 24;
         lblRemotePassword.Text = "远程密码：";
         lblRemotePassword.TextAlign = ContentAlignment.MiddleRight;
         // 
         // txtRemotePassword
         // 
         txtRemotePassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtRemotePassword.Location = new Point(250, 525);
+        txtRemotePassword.Location = new Point(250, 570);
         txtRemotePassword.Name = "txtRemotePassword";
         txtRemotePassword.Size = new Size(590, 41);
-        txtRemotePassword.TabIndex = 23;
+        txtRemotePassword.TabIndex = 25;
         txtRemotePassword.UseSystemPasswordChar = true;
         // 
         // lblRemark
         // 
         lblRemark.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblRemark.ForeColor = Color.FromArgb(80, 80, 80);
-        lblRemark.Location = new Point(30, 570);
+        lblRemark.Location = new Point(30, 615);
         lblRemark.Name = "lblRemark";
         lblRemark.Size = new Size(210, 35);
-        lblRemark.TabIndex = 24;
+        lblRemark.TabIndex = 26;
         lblRemark.Text = "备注：";
         lblRemark.TextAlign = ContentAlignment.MiddleRight;
         // 
@@ -411,12 +436,12 @@ partial class AccountDialog
         // 
         txtRemark.BorderStyle = BorderStyle.FixedSingle;
         txtRemark.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtRemark.Location = new Point(250, 570);
+        txtRemark.Location = new Point(250, 615);
         txtRemark.Multiline = true;
         txtRemark.Name = "txtRemark";
         txtRemark.ScrollBars = ScrollBars.Vertical;
         txtRemark.Size = new Size(590, 60);
-        txtRemark.TabIndex = 25;
+        txtRemark.TabIndex = 27;
         // 
         // pnlWebGroup
         // 
@@ -425,10 +450,10 @@ partial class AccountDialog
         pnlWebGroup.Controls.Add(lblWebHint);
         pnlWebGroup.Controls.Add(lblServerUsername);
         pnlWebGroup.Controls.Add(txtServerUsername);
-        pnlWebGroup.Location = new Point(30, 650);
+        pnlWebGroup.Location = new Point(30, 695);
         pnlWebGroup.Name = "pnlWebGroup";
         pnlWebGroup.Size = new Size(840, 110);
-        pnlWebGroup.TabIndex = 26;
+        pnlWebGroup.TabIndex = 28;
         // 
         // lblWebHint
         // 
@@ -465,7 +490,7 @@ partial class AccountDialog
         footerPanel.Controls.Add(btnCancel);
         footerPanel.Controls.Add(btnSave);
         footerPanel.Dock = DockStyle.Bottom;
-        footerPanel.Location = new Point(0, 844);
+        footerPanel.Location = new Point(0, 889);
         footerPanel.Name = "footerPanel";
         footerPanel.Size = new Size(942, 80);
         footerPanel.TabIndex = 2;
@@ -509,7 +534,7 @@ partial class AccountDialog
         AutoScaleDimensions = new SizeF(16F, 35F);
         AutoScaleMode = AutoScaleMode.Font;
         BackColor = Color.White;
-        ClientSize = new Size(942, 924);
+        ClientSize = new Size(942, 969);
         Controls.Add(contentPanel);
         Controls.Add(footerPanel);
         Controls.Add(titleBar);

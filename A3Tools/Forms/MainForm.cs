@@ -458,7 +458,37 @@ public partial class MainForm : Form, IToolContext
         SetupDataGridViewColumns();
     }
 
-    private void BtnAdd_Click(object? sender, EventArgs e) => ShowAccountDialog(null);
+    private void BtnAdd_Click(object? sender, EventArgs e)
+    {
+        // 弹出下拉菜单选择「手动添加」/「一键添加」
+        if (sender is Control ctrl && this.addMenu != null)
+        {
+            this.addMenu.Show(ctrl, 0, ctrl.Height);
+        }
+    }
+
+    private void MiManualAdd_Click(object? sender, EventArgs e)
+    {
+        ShowAccountDialog(null);
+    }
+
+    private void MiQuickAdd_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new QuickAddAccountDialog();
+        var result = dialog.ShowDialog();
+        if (dialog.SwitchToManual)
+        {
+            // 用户在一键添加窗体里选了「切换为手动添加」 → 弹原有 AccountDialog
+            ShowAccountDialog(null);
+            return;
+        }
+        if (result == DialogResult.OK && dialog.CreatedAccount != null)
+        {
+            LoadAccounts();
+            var added = dialog.CreatedAccount;
+            ShowToast($"账套「{added.Name}」已添加（代码 {added.Code}）");
+        }
+    }
     private void BtnImport_Click(object? sender, EventArgs e) => ImportFromXml();
     private void BtnRefresh_Click(object? sender, EventArgs e) => RefreshAccountList();
 
@@ -1781,7 +1811,14 @@ public partial class MainForm : Form, IToolContext
 
     private void LblTitle_Click(object? sender, EventArgs e)
     {
-        // 连续点击标题5次触发Root模式
+        // Root 模式下单击标题直接弹退出确认
+        if (_isRootMode)
+        {
+            ConfirmExitRootMode();
+            return;
+        }
+
+        // 非 Root 模式：连续点击标题 5 次触发 Root 模式
         var now = DateTime.Now;
         if ((now - _lastTitleClickTime).TotalSeconds > 3)
         {
@@ -1790,9 +1827,25 @@ public partial class MainForm : Form, IToolContext
         _lastTitleClickTime = now;
         _titleClickCount++;
 
-        if (_titleClickCount >= 5 && !_isRootMode)
+        if (_titleClickCount >= 5)
         {
             ShowRootPasswordDialog();
+        }
+    }
+
+    private void ConfirmExitRootMode()
+    {
+        var result = MessageBox.Show(
+            "确认要退出 Root 模式吗？\n退出后将无法查看和复制明文密码。",
+            "退出 Root 模式",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Question);
+
+        if (result == DialogResult.OK)
+        {
+            _isRootMode = false;
+            _titleClickCount = 0;
+            UpdateRootModeUI();
         }
     }
 
@@ -1840,7 +1893,7 @@ public partial class MainForm : Form, IToolContext
     {
         if (_isRootMode)
         {
-            // Root模式下标题显示特殊标识
+            // Root模式下标题显示特殊标识（带小锁提示用户点这里退出）
             this.lblTitle.Text = "🔓 A3工具箱 (Root)";
             this.lblTitle.ForeColor = Color.Yellow;
             this.menuCopyAccount.Visible = true;
@@ -1897,6 +1950,8 @@ public partial class MainForm : Form, IToolContext
         info.AppendLine($"代码：{account.Code}");
         info.AppendLine($"名称：{account.Name}");
         info.AppendLine($"账套地址：{account.Server}");
+        info.AppendLine($"备用地址：{account.ServerBackup}");
+        info.AppendLine($"账套用户名：{account.ServerUsername}");
         info.AppendLine($"账套密码：{account.ServerPassword}");
         info.AppendLine($"数据库地址：{account.Database}");
         info.AppendLine($"数据库名称：{account.DatabaseName}");
@@ -1934,6 +1989,8 @@ public partial class MainForm : Form, IToolContext
         info.AppendLine($"代码：{account.Code}");
         info.AppendLine($"名称：{account.Name}");
         info.AppendLine($"账套地址：{account.Server}");
+        info.AppendLine($"备用地址：{account.ServerBackup}");
+        info.AppendLine($"账套用户名：{account.ServerUsername}");
         info.AppendLine($"账套密码：{account.ServerPassword}");
         info.AppendLine($"数据库地址：{account.Database}");
         info.AppendLine($"数据库名称：{account.DatabaseName}");

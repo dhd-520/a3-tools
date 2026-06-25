@@ -54,6 +54,7 @@ public partial class AccountDialog : Form
         this.txtCode.Enabled = false;
         this.txtName.Text = account.Name;
         this.txtServer.Text = account.Server;
+        this.txtServerBackup.Text = account.ServerBackup;
         this.txtServerPassword.Text = account.ServerPassword;
         this.txtDatabase.Text = account.Database;
         this.txtDatabaseName.Text = account.DatabaseName;
@@ -132,6 +133,7 @@ public partial class AccountDialog : Form
             Code = this.txtCode.Text.Trim(),
             Name = this.txtName.Text.Trim(),
             Server = this.txtServer.Text.Trim(),
+            ServerBackup = this.txtServerBackup.Text.Trim(),
             ServerPassword = this.txtServerPassword.Text,
             Database = this.txtDatabase.Text.Trim(),
             DatabaseName = this.txtDatabaseName.Text.Trim(),

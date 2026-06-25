@@ -28,6 +28,9 @@
     <Compile Update="Forms\SettingsDialog.Designer.cs">
       <DependentUpon>SettingsDialog.cs</DependentUpon>
     </Compile>
+    <Compile Update="Forms\QuickAddAccountDialog.Designer.cs">
+      <DependentUpon>QuickAddAccountDialog.cs</DependentUpon>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />

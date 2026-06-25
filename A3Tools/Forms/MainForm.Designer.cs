@@ -1,4 +1,4 @@
-namespace A3Tools.Forms;
+﻿namespace A3Tools.Forms;
 
 partial class MainForm
 {
@@ -20,6 +20,9 @@ partial class MainForm
     private ToolStripMenuItem menuExit = null!;
     private ToolStripMenuItem menuAbout = null!;
     private ToolStripMenuItem menuCopyAccount = null!;
+    private ContextMenuStrip addMenu = null!;
+    private ToolStripMenuItem miManualAdd = null!;
+    private ToolStripMenuItem miQuickAdd = null!;
     private TabControl tabControl = null!;
     private TabPage tabLaunch = null!;
     private TabPage tabTools = null!;
@@ -80,10 +83,14 @@ partial class MainForm
         menuTrayExit = new ToolStripMenuItem();
         menuShow = new ToolStripMenuItem();
         notifyIcon = new NotifyIcon(components);
+        addMenu = new ContextMenuStrip(components);
+        miManualAdd = new ToolStripMenuItem();
+        miQuickAdd = new ToolStripMenuItem();
         titleBar.SuspendLayout();
         menuStrip.SuspendLayout();
         tabControl.SuspendLayout();
         trayContextMenu.SuspendLayout();
+        addMenu.SuspendLayout();
         SuspendLayout();
         // 
         // titleBar
@@ -107,11 +114,12 @@ partial class MainForm
         lblVersion.Name = "lblVersion";
         lblVersion.Size = new Size(69, 28);
         lblVersion.TabIndex = 0;
-        lblVersion.Text = "v2.0.3";
+        lblVersion.Text = "v2.0.4";
         // 
         // lblTitle
         // 
         lblTitle.AutoSize = true;
+        lblTitle.Cursor = Cursors.Hand;
         lblTitle.Font = new Font("微软雅黑", 16F, FontStyle.Bold, GraphicsUnit.Point);
         lblTitle.ForeColor = Color.White;
         lblTitle.Location = new Point(15, 10);
@@ -242,6 +250,27 @@ partial class MainForm
         notifyIcon.ContextMenuStrip = trayContextMenu;
         notifyIcon.Text = "A3工具箱";
         // 
+        // addMenu
+        // 
+        addMenu.ImageScalingSize = new Size(28, 28);
+        addMenu.Items.AddRange(new ToolStripItem[] { miManualAdd, miQuickAdd });
+        addMenu.Name = "addMenu";
+        addMenu.Size = new Size(169, 72);
+        // 
+        // miManualAdd
+        // 
+        miManualAdd.Name = "miManualAdd";
+        miManualAdd.Size = new Size(168, 34);
+        miManualAdd.Text = "手动添加";
+        miManualAdd.Click += MiManualAdd_Click;
+        // 
+        // miQuickAdd
+        // 
+        miQuickAdd.Name = "miQuickAdd";
+        miQuickAdd.Size = new Size(168, 34);
+        miQuickAdd.Text = "一键添加";
+        miQuickAdd.Click += MiQuickAdd_Click;
+        // 
         // MainForm
         // 
         AutoScaleMode = AutoScaleMode.None;
@@ -262,6 +291,7 @@ partial class MainForm
         menuStrip.PerformLayout();
         tabControl.ResumeLayout(false);
         trayContextMenu.ResumeLayout(false);
+        addMenu.ResumeLayout(false);
         ResumeLayout(false);
         PerformLayout();
     }
@@ -322,8 +352,9 @@ partial class MainForm
         int btnHeight = 41;
 
         btnAdd = new Button();
-        btnAdd.Text = "➕ 新增";
+        btnAdd.Text = "➕ 新增 ▾";
         btnAdd.Size = new Size(110, btnHeight);
+        btnAdd.ContextMenuStrip = addMenu;
         btnAdd.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnAdd.FlatAppearance.BorderSize = 1;
         btnAdd.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);

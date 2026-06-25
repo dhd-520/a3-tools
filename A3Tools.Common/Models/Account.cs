@@ -11,6 +11,7 @@ public class Account
     public string Name { get; set; } = string.Empty;           // 账套名称
     public string Pinyin { get; set; } = string.Empty;          // 账套名称拼音首字母
     public string Server { get; set; } = string.Empty;         // 账套地址
+    public string ServerBackup { get; set; } = string.Empty; // 账套备用地址
     public string ServerUsername { get; set; } = "admin"; // 账套用户名（A3系统默认 admin）
     public string ServerPassword { get; set; } = string.Empty;// 账套密码（加密）
     public string Database { get; set; } = string.Empty;      // 数据库地址
