@@ -114,7 +114,7 @@ partial class AccountDialog
         titleBar.Dock = DockStyle.Top;
         titleBar.Location = new Point(0, 0);
         titleBar.Name = "titleBar";
-        titleBar.Size = new Size(942, 50);
+        titleBar.Size = new Size(900, 50);
         titleBar.TabIndex = 0;
         // 
         // lblTitle
@@ -124,7 +124,7 @@ partial class AccountDialog
         lblTitle.ForeColor = Color.White;
         lblTitle.Location = new Point(0, 0);
         lblTitle.Name = "lblTitle";
-        lblTitle.Size = new Size(942, 50);
+        lblTitle.Size = new Size(900, 50);
         lblTitle.TabIndex = 0;
         lblTitle.Text = "账套编辑";
         lblTitle.TextAlign = ContentAlignment.MiddleCenter;
@@ -166,7 +166,7 @@ partial class AccountDialog
         contentPanel.Location = new Point(0, 50);
         contentPanel.Name = "contentPanel";
         contentPanel.Padding = new Padding(30, 20, 30, 20);
-        contentPanel.Size = new Size(942, 839);
+        contentPanel.Size = new Size(900, 590);
         contentPanel.TabIndex = 1;
         // 
         // lblCode
@@ -490,9 +490,9 @@ partial class AccountDialog
         footerPanel.Controls.Add(btnCancel);
         footerPanel.Controls.Add(btnSave);
         footerPanel.Dock = DockStyle.Bottom;
-        footerPanel.Location = new Point(0, 889);
+        footerPanel.Location = new Point(0, 640);
         footerPanel.Name = "footerPanel";
-        footerPanel.Size = new Size(942, 80);
+        footerPanel.Size = new Size(900, 80);
         footerPanel.TabIndex = 2;
         // 
         // btnCancel
@@ -504,7 +504,7 @@ partial class AccountDialog
         btnCancel.FlatStyle = FlatStyle.Flat;
         btnCancel.Font = new Font("微软雅黑", 12F, FontStyle.Regular, GraphicsUnit.Point);
         btnCancel.ForeColor = Color.FromArgb(80, 80, 80);
-        btnCancel.Location = new Point(772, 14);
+        btnCancel.Location = new Point(730, 14);
         btnCancel.Name = "btnCancel";
         btnCancel.Size = new Size(150, 53);
         btnCancel.TabIndex = 0;
@@ -521,7 +521,7 @@ partial class AccountDialog
         btnSave.FlatStyle = FlatStyle.Flat;
         btnSave.Font = new Font("微软雅黑", 12F, FontStyle.Bold, GraphicsUnit.Point);
         btnSave.ForeColor = Color.White;
-        btnSave.Location = new Point(607, 14);
+        btnSave.Location = new Point(565, 14);
         btnSave.Name = "btnSave";
         btnSave.Size = new Size(150, 53);
         btnSave.TabIndex = 1;
@@ -534,14 +534,16 @@ partial class AccountDialog
         AutoScaleDimensions = new SizeF(16F, 35F);
         AutoScaleMode = AutoScaleMode.Font;
         BackColor = Color.White;
-        ClientSize = new Size(942, 969);
+        ClientSize = new Size(900, 720);
         Controls.Add(contentPanel);
         Controls.Add(footerPanel);
         Controls.Add(titleBar);
         Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        MinimizeBox = true;
+        MinimumSize = new Size(760, 560);
+        SizeGripStyle = SizeGripStyle.Show;
         Name = "AccountDialog";
         StartPosition = FormStartPosition.CenterParent;
         Text = "账套编辑";
