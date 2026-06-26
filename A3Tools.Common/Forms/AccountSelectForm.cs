@@ -1,6 +1,6 @@
 using A3Tools.Models;
 
-namespace A3Tools.Plugins.Default.Forms;
+namespace A3Tools.Common.Forms;
 
 public class AccountSelectForm : Form
 {
@@ -27,9 +27,9 @@ public class AccountSelectForm : Form
         txtSearch = new TextBox();
 
         SuspendLayout();
-        // 
+        //
         // txtSearch
-        // 
+        //
         txtSearch.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         txtSearch.Location = new Point(12, 12);
         txtSearch.Name = "txtSearch";
@@ -37,9 +37,9 @@ public class AccountSelectForm : Form
         txtSearch.Size = new Size(500, 38);
         txtSearch.TabIndex = 0;
         txtSearch.TextChanged += TxtSearch_TextChanged;
-        // 
+        //
         // dgvAccounts
-        // 
+        //
         dgvAccounts.AllowUserToAddRows = false;
         dgvAccounts.AllowUserToDeleteRows = false;
         dgvAccounts.BackgroundColor = Color.White;
@@ -52,9 +52,9 @@ public class AccountSelectForm : Form
         dgvAccounts.Size = new Size(500, 350);
         dgvAccounts.TabIndex = 1;
         dgvAccounts.DoubleClick += DgvAccounts_DoubleClick;
-        // 
+        //
         // btnOK
-        // 
+        //
         btnOK.BackColor = Color.FromArgb(24, 145, 176);
         btnOK.FlatAppearance.BorderSize = 0;
         btnOK.FlatStyle = FlatStyle.Flat;
@@ -67,9 +67,9 @@ public class AccountSelectForm : Form
         btnOK.Text = "确定";
         btnOK.UseVisualStyleBackColor = false;
         btnOK.Click += BtnOK_Click;
-        // 
+        //
         // btnCancel
-        // 
+        //
         btnCancel.BackColor = Color.White;
         btnCancel.FlatAppearance.BorderColor = Color.Gray;
         btnCancel.FlatStyle = FlatStyle.Flat;
@@ -82,9 +82,9 @@ public class AccountSelectForm : Form
         btnCancel.Text = "取消";
         btnCancel.UseVisualStyleBackColor = false;
         btnCancel.Click += BtnCancel_Click;
-        // 
+        //
         // AccountSelectForm
-        // 
+        //
         AutoScaleDimensions = new SizeF(14F, 30F);
         AutoScaleMode = AutoScaleMode.Font;
         ClientSize = new Size(524, 467);
@@ -99,6 +99,8 @@ public class AccountSelectForm : Form
         Name = "AccountSelectForm";
         StartPosition = FormStartPosition.CenterParent;
         Text = "选择账套";
+        KeyPreview = true;
+        KeyDown += AccountSelectForm_KeyDown;
         ResumeLayout(false);
         PerformLayout();
     }
@@ -115,12 +117,15 @@ public class AccountSelectForm : Form
             a.DatabaseName,
             a.Remark
         }).ToList();
-        dgvAccounts.Columns[0].HeaderText = "账套代码";
-        dgvAccounts.Columns[1].HeaderText = "账套名称";
-        dgvAccounts.Columns[2].HeaderText = "数据库地址";
-        dgvAccounts.Columns[3].HeaderText = "数据库名称";
-        dgvAccounts.Columns[4].HeaderText = "备注";
-        dgvAccounts.AutoResizeColumns();
+        if (dgvAccounts.Columns.Count >= 5)
+        {
+            dgvAccounts.Columns[0].HeaderText = "账套代码";
+            dgvAccounts.Columns[1].HeaderText = "账套名称";
+            dgvAccounts.Columns[2].HeaderText = "数据库地址";
+            dgvAccounts.Columns[3].HeaderText = "数据库名称";
+            dgvAccounts.Columns[4].HeaderText = "备注";
+            dgvAccounts.AutoResizeColumns();
+        }
     }
 
     private void TxtSearch_TextChanged(object? sender, EventArgs e)
@@ -167,5 +172,48 @@ public class AccountSelectForm : Form
     {
         DialogResult = DialogResult.Cancel;
         Close();
+    }
+
+    private void AccountSelectForm_KeyDown(object? sender, KeyEventArgs e)
+    {
+        switch (e.KeyCode)
+        {
+            case Keys.Escape:
+                DialogResult = DialogResult.Cancel;
+                Close();
+                e.SuppressKeyPress = true;
+                break;
+            case Keys.Enter:
+                if (dgvAccounts.Focused || txtSearch.Focused)
+                {
+                    SelectAndClose();
+                    e.SuppressKeyPress = true;
+                }
+                break;
+            case Keys.Up:
+                if (dgvAccounts.Rows.Count > 0)
+                {
+                    int newIndex = dgvAccounts.SelectedRows.Count > 0
+                        ? Math.Max(0, dgvAccounts.SelectedRows[0].Index - 1)
+                        : 0;
+                    dgvAccounts.ClearSelection();
+                    dgvAccounts.Rows[newIndex].Selected = true;
+                    dgvAccounts.CurrentCell = dgvAccounts.Rows[newIndex].Cells[0];
+                    e.SuppressKeyPress = true;
+                }
+                break;
+            case Keys.Down:
+                if (dgvAccounts.Rows.Count > 0)
+                {
+                    int newIndex = dgvAccounts.SelectedRows.Count > 0
+                        ? Math.Min(dgvAccounts.Rows.Count - 1, dgvAccounts.SelectedRows[0].Index + 1)
+                        : 0;
+                    dgvAccounts.ClearSelection();
+                    dgvAccounts.Rows[newIndex].Selected = true;
+                    dgvAccounts.CurrentCell = dgvAccounts.Rows[newIndex].Cells[0];
+                    e.SuppressKeyPress = true;
+                }
+                break;
+        }
     }
 }

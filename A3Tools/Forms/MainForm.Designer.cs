@@ -44,6 +44,14 @@ partial class MainForm
     private Panel descPanel = null!;
     private Label lblDesc = null!;
     private Label lblPluginStatus = null!;
+    private Label lblToolsSourceDb = null!;
+    private Button btnToolsSelectSourceDb = null!;
+    private Label lblToolsSourceDbName = null!;
+    private Button btnToolsClearSourceDb = null!;
+    private Label lblToolsTargetDb = null!;
+    private Button btnToolsSelectTargetDb = null!;
+    private Label lblToolsTargetDbName = null!;
+    private Button btnToolsClearTargetDb = null!;
     private Panel scrollPanel = null!;
     private FlowLayoutPanel flpTools = null!;
     private DataGridView dgvStatus = null!;
@@ -509,14 +517,14 @@ partial class MainForm
         // --- 说明面板 ---
         descPanel = new Panel();
         descPanel.SuspendLayout();
-        descPanel.Height = 50;
+        descPanel.Height = 96;
         descPanel.Dock = System.Windows.Forms.DockStyle.Top;
         descPanel.BackColor = System.Drawing.Color.FromArgb(250, 250, 250);
         descPanel.Name = "descPanel";
 
         lblDesc = new Label();
         lblDesc.Text = "选择工具开始操作";
-        lblDesc.Location = new Point(20, 16);
+        lblDesc.Location = new Point(20, 12);
         lblDesc.Font = new Font("微软雅黑", 10F);
         lblDesc.ForeColor = System.Drawing.Color.FromArgb(102, 109, 118);
         lblDesc.AutoSize = true;
@@ -524,14 +532,103 @@ partial class MainForm
 
         lblPluginStatus = new Label();
         lblPluginStatus.Text = "已加载 0 个工具";
-        lblPluginStatus.Location = new Point(500, 16);
+        lblPluginStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        lblPluginStatus.Location = new Point(940, 12);
         lblPluginStatus.Font = new Font("微软雅黑", 9F);
         lblPluginStatus.ForeColor = System.Drawing.Color.FromArgb(150, 150, 150);
         lblPluginStatus.AutoSize = true;
         lblPluginStatus.Name = "lblPluginStatus";
 
+        lblToolsSourceDb = new Label();
+        lblToolsSourceDb.Text = "源数据库：";
+        lblToolsSourceDb.Location = new Point(20, 52);
+        lblToolsSourceDb.Size = new Size(85, 30);
+        lblToolsSourceDb.TextAlign = ContentAlignment.MiddleRight;
+        lblToolsSourceDb.Font = new Font("微软雅黑", 9F);
+        lblToolsSourceDb.ForeColor = System.Drawing.Color.FromArgb(80, 80, 80);
+        lblToolsSourceDb.Name = "lblToolsSourceDb";
+
+        btnToolsSelectSourceDb = new Button();
+        btnToolsSelectSourceDb.Text = "选择源账套…";
+        btnToolsSelectSourceDb.Location = new Point(110, 51);
+        btnToolsSelectSourceDb.Size = new Size(110, 32);
+        btnToolsSelectSourceDb.FlatStyle = FlatStyle.Flat;
+        btnToolsSelectSourceDb.BackColor = Color.FromArgb(24, 145, 176);
+        btnToolsSelectSourceDb.ForeColor = Color.White;
+        btnToolsSelectSourceDb.FlatAppearance.BorderSize = 0;
+        btnToolsSelectSourceDb.Font = new Font("微软雅黑", 9F);
+        btnToolsSelectSourceDb.Cursor = Cursors.Hand;
+        btnToolsSelectSourceDb.Name = "btnToolsSelectSourceDb";
+
+        lblToolsSourceDbName = new Label();
+        lblToolsSourceDbName.Text = "（未选择）";
+        lblToolsSourceDbName.Location = new Point(228, 52);
+        lblToolsSourceDbName.Size = new Size(200, 30);
+        lblToolsSourceDbName.TextAlign = ContentAlignment.MiddleLeft;
+        lblToolsSourceDbName.Font = new Font("微软雅黑", 9F);
+        lblToolsSourceDbName.ForeColor = System.Drawing.Color.FromArgb(120, 120, 120);
+        lblToolsSourceDbName.Name = "lblToolsSourceDbName";
+
+        btnToolsClearSourceDb = new Button();
+        btnToolsClearSourceDb.Text = "清空";
+        btnToolsClearSourceDb.Location = new Point(434, 51);
+        btnToolsClearSourceDb.Size = new Size(68, 32);
+        btnToolsClearSourceDb.FlatStyle = FlatStyle.Flat;
+        btnToolsClearSourceDb.BackColor = Color.White;
+        btnToolsClearSourceDb.Font = new Font("微软雅黑", 8F);
+        btnToolsClearSourceDb.Cursor = Cursors.Hand;
+        btnToolsClearSourceDb.Name = "btnToolsClearSourceDb";
+
+        lblToolsTargetDb = new Label();
+        lblToolsTargetDb.Text = "目标数据库：";
+        lblToolsTargetDb.Location = new Point(516, 52);
+        lblToolsTargetDb.Size = new Size(95, 30);
+        lblToolsTargetDb.TextAlign = ContentAlignment.MiddleRight;
+        lblToolsTargetDb.Font = new Font("微软雅黑", 9F);
+        lblToolsTargetDb.ForeColor = System.Drawing.Color.FromArgb(80, 80, 80);
+        lblToolsTargetDb.Name = "lblToolsTargetDb";
+
+        btnToolsSelectTargetDb = new Button();
+        btnToolsSelectTargetDb.Text = "选择目标账套…";
+        btnToolsSelectTargetDb.Location = new Point(616, 51);
+        btnToolsSelectTargetDb.Size = new Size(120, 32);
+        btnToolsSelectTargetDb.FlatStyle = FlatStyle.Flat;
+        btnToolsSelectTargetDb.BackColor = Color.FromArgb(228, 94, 29);
+        btnToolsSelectTargetDb.ForeColor = Color.White;
+        btnToolsSelectTargetDb.FlatAppearance.BorderSize = 0;
+        btnToolsSelectTargetDb.Font = new Font("微软雅黑", 9F);
+        btnToolsSelectTargetDb.Cursor = Cursors.Hand;
+        btnToolsSelectTargetDb.Name = "btnToolsSelectTargetDb";
+
+        lblToolsTargetDbName = new Label();
+        lblToolsTargetDbName.Text = "（未选择）";
+        lblToolsTargetDbName.Location = new Point(744, 52);
+        lblToolsTargetDbName.Size = new Size(200, 30);
+        lblToolsTargetDbName.TextAlign = ContentAlignment.MiddleLeft;
+        lblToolsTargetDbName.Font = new Font("微软雅黑", 9F);
+        lblToolsTargetDbName.ForeColor = System.Drawing.Color.FromArgb(120, 120, 120);
+        lblToolsTargetDbName.Name = "lblToolsTargetDbName";
+
+        btnToolsClearTargetDb = new Button();
+        btnToolsClearTargetDb.Text = "清空";
+        btnToolsClearTargetDb.Location = new Point(950, 51);
+        btnToolsClearTargetDb.Size = new Size(68, 32);
+        btnToolsClearTargetDb.FlatStyle = FlatStyle.Flat;
+        btnToolsClearTargetDb.BackColor = Color.White;
+        btnToolsClearTargetDb.Font = new Font("微软雅黑", 8F);
+        btnToolsClearTargetDb.Cursor = Cursors.Hand;
+        btnToolsClearTargetDb.Name = "btnToolsClearTargetDb";
+
         descPanel.Controls.Add(lblDesc);
         descPanel.Controls.Add(lblPluginStatus);
+        descPanel.Controls.Add(lblToolsSourceDb);
+        descPanel.Controls.Add(btnToolsSelectSourceDb);
+        descPanel.Controls.Add(lblToolsSourceDbName);
+        descPanel.Controls.Add(btnToolsClearSourceDb);
+        descPanel.Controls.Add(lblToolsTargetDb);
+        descPanel.Controls.Add(btnToolsSelectTargetDb);
+        descPanel.Controls.Add(lblToolsTargetDbName);
+        descPanel.Controls.Add(btnToolsClearTargetDb);
 
         // --- 滚动容器（只竖向滚动）---
         var toolsScrollPanel = new Panel();
@@ -559,6 +656,7 @@ partial class MainForm
         tabTools.SizeChanged += (s, e) =>
         {
             flpTools.Width = tabTools.Width - 20;
+            UpdateToolsHeaderLayout();
         };
 
         toolsScrollPanel.Controls.Add(flpTools);

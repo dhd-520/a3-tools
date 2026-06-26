@@ -33,6 +33,7 @@ public partial class SearchFrontendMenuForm : Form
     {
         _context = context;
         InitializeComponent();
+        LoadPresetAccount();
         FormHotkeyHelper.Setup(this, () => BtnSearch_Click(this, EventArgs.Empty));
         this.KeyDown += (s, e) => { if (e.KeyCode == Keys.S && e.Modifiers == Keys.Control) { SelectAccount(); e.SuppressKeyPress = true; } };
     }
@@ -312,6 +313,28 @@ public partial class SearchFrontendMenuForm : Form
     private void BtnSelectSource_Click(object? sender, EventArgs e)
     {
         SelectAccount();
+    }
+
+    /// <summary>
+    /// 根据主窗体工具箱 Tab 中的源库预选账套自动带入连接信息。
+    /// 预选为空时回退到主窗体当前选中账套。
+    /// 带入后用户仍可在工具内自行修改或重新选择。
+    /// </summary>
+    private void LoadPresetAccount()
+    {
+        var preset = _context.GetToolDatabasePreset();
+        ApplyAccountToDatabaseFields(preset.SourceAccount ?? _context.GetSelectedAccount());
+    }
+
+    private void ApplyAccountToDatabaseFields(Account? account)
+    {
+        if (account == null) return;
+
+        _selectedAccount = account;
+        txtSourceServer.Text = account.Database ?? "";
+        txtSourceDbName.Text = account.DatabaseName ?? "";
+        txtSourceUser.Text = account.DbUser ?? "";
+        txtSourcePassword.Text = account.DbPassword ?? "";
     }
 
     private void SelectAccount()

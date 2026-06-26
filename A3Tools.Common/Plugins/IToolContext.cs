@@ -23,6 +23,12 @@ public interface IToolContext
     List<Account> GetAllAccounts();
 
     /// <summary>
+    /// 获取工具箱 Tab 中预先选择的源/目标数据库账套。
+    /// 工具打开时可用来自动带入连接信息；工具内仍允许用户自行修改。
+    /// </summary>
+    ToolDatabasePreset GetToolDatabasePreset();
+
+    /// <summary>
     /// 显示消息提示
     /// </summary>
     void ShowMessage(string message);

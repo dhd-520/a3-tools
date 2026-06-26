@@ -6,6 +6,7 @@ using System.Xml.Linq;
 using Microsoft.Win32;
 using A3Tools.Models;
 using A3Tools.Plugins;
+using A3Tools.Common.Forms;
 using A3Tools.Services;
 
 namespace A3Tools.Forms;
@@ -22,6 +23,8 @@ public partial class MainForm : Form, IToolContext
     private EdgeDockManager? _edgeDockManager;
     private HotkeyManager? _hotkeyManager;
     private bool _isInitializing = true;
+    private Account? _toolSourceAccount = null;
+    private Account? _toolTargetAccount = null;
     private bool _isRootMode = false;
     private int _titleClickCount = 0;
     private DateTime _lastTitleClickTime = DateTime.MinValue;
@@ -103,6 +106,95 @@ public partial class MainForm : Form, IToolContext
     }
 
     /// <summary>
+    /// 获取工具箱 Tab 中预先选择的源/目标数据库账套。
+    /// 工具打开时会自动带入这两项；工具内仍允许用户自行修改或重新选择。
+    /// </summary>
+    public ToolDatabasePreset GetToolDatabasePreset()
+    {
+        return new ToolDatabasePreset
+        {
+            SourceAccount = _toolSourceAccount,
+            TargetAccount = _toolTargetAccount
+        };
+    }
+
+    private void RefreshToolDbLabels()
+    {
+        if (lblToolsSourceDbName == null || lblToolsTargetDbName == null) return;
+        lblToolsSourceDbName.Text = _toolSourceAccount == null
+            ? "（未选择）"
+            : $"{_toolSourceAccount.Code} - {_toolSourceAccount.Name}";
+        lblToolsTargetDbName.Text = _toolTargetAccount == null
+            ? "（未选择）"
+            : $"{_toolTargetAccount.Code} - {_toolTargetAccount.Name}";
+        UpdateToolsDescLabel();
+    }
+
+    private void BtnToolsSelectSourceDb_Click(object? sender, EventArgs e)
+    {
+        SelectToolAccount(isSource: true);
+    }
+
+    private void BtnToolsSelectTargetDb_Click(object? sender, EventArgs e)
+    {
+        SelectToolAccount(isSource: false);
+    }
+
+    private void BtnToolsClearSourceDb_Click(object? sender, EventArgs e)
+    {
+        _toolSourceAccount = null;
+        RefreshToolDbLabels();
+    }
+
+    private void BtnToolsClearTargetDb_Click(object? sender, EventArgs e)
+    {
+        _toolTargetAccount = null;
+        RefreshToolDbLabels();
+    }
+
+    private void SelectToolAccount(bool isSource)
+    {
+        var accounts = _dataService.LoadAndDecryptAccounts();
+        using var dlg = new AccountSelectForm(accounts);
+        if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
+        {
+            if (isSource) _toolSourceAccount = dlg.SelectedAccount;
+            else _toolTargetAccount = dlg.SelectedAccount;
+            RefreshToolDbLabels();
+        }
+    }
+
+    private void UpdateToolsDescLabel()
+    {
+        if (lblDesc == null) return;
+        var source = _toolSourceAccount;
+        var target = _toolTargetAccount;
+        var sourceText = source == null ? "未选择源库" : $"源库：{source.Code}-{source.Name}";
+        var targetText = target == null ? "未选择目标库" : $"目标库：{target.Code}-{target.Name}";
+        lblDesc.Text = $"{sourceText}    {targetText}";
+    }
+
+    private void UpdateToolsHeaderLayout()
+    {
+        if (descPanel == null || lblPluginStatus == null) return;
+
+        lblPluginStatus.Left = Math.Max(500, descPanel.Width - lblPluginStatus.Width - 20);
+
+        int available = descPanel.Width - 990;
+        int extra = Math.Max(0, available / 2);
+        int labelWidth = Math.Min(420, 290 + extra);
+
+        lblToolsSourceDbName.Width = labelWidth;
+        lblToolsSourceDbName.Left = btnToolsSelectSourceDb.Right + 8;
+        btnToolsClearSourceDb.Left = lblToolsSourceDbName.Right + 8;
+        lblToolsTargetDb.Left = btnToolsClearSourceDb.Right + 20;
+        btnToolsSelectTargetDb.Left = lblToolsTargetDb.Right + 5;
+        lblToolsTargetDbName.Width = labelWidth;
+        lblToolsTargetDbName.Left = btnToolsSelectTargetDb.Right + 8;
+        btnToolsClearTargetDb.Left = lblToolsTargetDbName.Right + 8;
+    }
+
+    /// <summary>
     /// 显示消息提示
     /// </summary>
     public void ShowMessage(string message)
@@ -134,6 +226,7 @@ public partial class MainForm : Form, IToolContext
         WireUpEvents();
         LoadPlugins();
         LoadAccounts();
+        RefreshToolDbLabels();
         LoadAccountStatuses();
         this.scrollPanel?.BringToFront();
         this.Resize += MainForm_Resize;
@@ -312,6 +405,10 @@ public partial class MainForm : Form, IToolContext
         this.btnRefresh.Click += BtnRefresh_Click;
         this.btnConnectDB.Click += BtnConnectDB_Click;
         this.btnRemote.Click += BtnRemote_Click;
+        this.btnToolsSelectSourceDb.Click += BtnToolsSelectSourceDb_Click;
+        this.btnToolsSelectTargetDb.Click += BtnToolsSelectTargetDb_Click;
+        this.btnToolsClearSourceDb.Click += BtnToolsClearSourceDb_Click;
+        this.btnToolsClearTargetDb.Click += BtnToolsClearTargetDb_Click;
         this.tabControl.SelectedIndexChanged += TabControl_SelectedIndexChanged;
         this.dgvAccounts.DoubleClick += DgvAccounts_DoubleClick;
         this.dgvAccounts.KeyDown += DgvAccounts_KeyDown;
@@ -393,6 +490,7 @@ public partial class MainForm : Form, IToolContext
         this.dgvAccounts.DataSource = accounts;
         SetupDataGridViewColumns();
         UpdatePasswordColumns();
+        RefreshToolDbLabels();
         this.dgvAccounts.BringToFront();
         this.dgvAccounts.ClearSelection();
         this.dgvAccounts.PerformLayout();
@@ -456,6 +554,8 @@ public partial class MainForm : Form, IToolContext
         this.dgvAccounts.DataSource = null;
         this.dgvAccounts.DataSource = accounts;
         SetupDataGridViewColumns();
+        UpdatePasswordColumns();
+        RefreshToolDbLabels();
     }
 
     private void BtnAdd_Click(object? sender, EventArgs e)

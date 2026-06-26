@@ -79,7 +79,7 @@ public partial class CrossDbCopyConfigDataForm : Form
         _currentAccount = currentAccount;
         InitializeComponent();
         InitConfigTypeCombo();
-        LoadCurrentAccount();
+        LoadPresetAccounts();
 
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
 
@@ -648,6 +648,38 @@ public partial class CrossDbCopyConfigDataForm : Form
             txtSourceDbName.Text = _currentAccount.DatabaseName ?? "";
             txtSourceUser.Text = _currentAccount.DbUser ?? "";
             txtSourcePassword.Text = _currentAccount.DbPassword ?? "";
+        }
+    }
+
+    /// <summary>
+    /// 根据主窗体工具箱 Tab 中的源/目标预选账套自动带入连接信息。
+    /// 预选为空时，源库回退到原选中账套（保留原行为），目标库保持空。
+    /// 带入后用户仍可在工具内自行修改或重新选择。
+    /// </summary>
+    private void LoadPresetAccounts()
+    {
+        var preset = _context.GetToolDatabasePreset();
+        ApplyAccountToDatabaseFields(preset.SourceAccount ?? _currentAccount, true);
+        ApplyAccountToDatabaseFields(preset.TargetAccount, false);
+    }
+
+    private void ApplyAccountToDatabaseFields(Account? account, bool isSource)
+    {
+        if (account == null) return;
+
+        if (isSource)
+        {
+            txtSourceServer.Text = account.Database ?? "";
+            txtSourceDbName.Text = account.DatabaseName ?? "";
+            txtSourceUser.Text = account.DbUser ?? "";
+            txtSourcePassword.Text = account.DbPassword ?? "";
+        }
+        else
+        {
+            txtTargetServer.Text = account.Database ?? "";
+            txtTargetDbName.Text = account.DatabaseName ?? "";
+            txtTargetUser.Text = account.DbUser ?? "";
+            txtTargetPassword.Text = account.DbPassword ?? "";
         }
     }
 
