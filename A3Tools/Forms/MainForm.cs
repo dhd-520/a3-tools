@@ -424,7 +424,17 @@ public partial class MainForm : Form, IToolContext
 
     private void MainForm_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.KeyCode == System.Windows.Forms.Keys.Oem3)
+        if (this.tabControl.SelectedTab == this.tabTools && e.KeyData == (Keys.S | Keys.Control))
+        {
+            SelectToolAccount(isSource: true);
+            e.SuppressKeyPress = true;
+        }
+        else if (this.tabControl.SelectedTab == this.tabTools && e.KeyData == (Keys.D | Keys.Control))
+        {
+            SelectToolAccount(isSource: false);
+            e.SuppressKeyPress = true;
+        }
+        else if (e.KeyCode == System.Windows.Forms.Keys.Oem3)
         {
             FocusSearchBox();
             e.SuppressKeyPress = true;
