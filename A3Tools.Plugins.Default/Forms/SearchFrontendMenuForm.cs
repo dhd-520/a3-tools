@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using Microsoft.Data.SqlClient;
 using A3Tools.Services;
 using A3Tools.Models;
@@ -317,13 +317,13 @@ public partial class SearchFrontendMenuForm : Form
 
     /// <summary>
     /// 根据主窗体工具箱 Tab 中的源库预选账套自动带入连接信息。
-    /// 预选为空时回退到主窗体当前选中账套。
+    /// 预选为空时保持空白。
     /// 带入后用户仍可在工具内自行修改或重新选择。
     /// </summary>
     private void LoadPresetAccount()
     {
         var preset = _context.GetToolDatabasePreset();
-        ApplyAccountToDatabaseFields(preset.SourceAccount ?? _context.GetSelectedAccount());
+        ApplyAccountToDatabaseFields(preset.SourceAccount);
     }
 
     private void ApplyAccountToDatabaseFields(Account? account)

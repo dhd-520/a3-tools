@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
@@ -89,13 +89,13 @@ public partial class CrossDbCopyFormForm : Form
 
     /// <summary>
     /// 根据主窗体工具箱 Tab 中的源/目标预选账套自动带入连接信息。
-    /// 预选为空时，源库回退到原选中账套（保留原行为），目标库保持空。
+    /// 预选为空时，源库和目标库均保持空白。
     /// 带入后用户仍可在工具内自行修改或重新选择。
     /// </summary>
     private void LoadPresetAccounts()
     {
         var preset = _context.GetToolDatabasePreset();
-        ApplyAccountToDatabaseFields(preset.SourceAccount ?? _currentAccount, true);
+        ApplyAccountToDatabaseFields(preset.SourceAccount, true);
         ApplyAccountToDatabaseFields(preset.TargetAccount, false);
     }
 
