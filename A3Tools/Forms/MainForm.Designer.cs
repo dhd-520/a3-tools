@@ -54,6 +54,10 @@ partial class MainForm
     private Button btnToolsClearTargetDb = null!;
     private Panel scrollPanel = null!;
     private FlowLayoutPanel flpTools = null!;
+    private Label lblDefaultToolsTitle = null!;
+    private Label lblCustomToolsTitle = null!;
+    private FlowLayoutPanel flpCustomTools = null!;
+    private Button btnAddCustomTool = null!;
     private DataGridView dgvStatus = null!;
 
     protected override void Dispose(bool disposing)
@@ -122,7 +126,7 @@ partial class MainForm
         lblVersion.Name = "lblVersion";
         lblVersion.Size = new Size(69, 28);
         lblVersion.TabIndex = 0;
-        lblVersion.Text = "v2.0.5";
+        lblVersion.Text = "v2.1.0";
         // 
         // lblTitle
         // 
@@ -643,27 +647,70 @@ partial class MainForm
         // FlowLayoutPanel 工具卡片（左到右自动排列，换行）
         flpTools = new FlowLayoutPanel();
         flpTools.SuspendLayout();
-        flpTools.Location = new Point(0, 0);
-        flpTools.Size = new Size(tabTools.Width - 20, 500);
+        flpTools.Dock = System.Windows.Forms.DockStyle.Top;
+        flpTools.AutoSize = true;
+        flpTools.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
         flpTools.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
         flpTools.WrapContents = true;
         flpTools.AutoScroll = false;
-        flpTools.Padding = new Padding(20, 60, 20, 20);
+        flpTools.Padding = new Padding(12, 8, 12, 8);
         flpTools.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
         flpTools.Name = "flpTools";
 
-        // Tab页大小变化时调整FlowLayoutPanel宽度
-        tabTools.SizeChanged += (s, e) =>
-        {
-            flpTools.Width = tabTools.Width - 20;
-            UpdateToolsHeaderLayout();
-        };
+        // 默认工具标题
+        lblDefaultToolsTitle = new Label();
+        lblDefaultToolsTitle.Dock = System.Windows.Forms.DockStyle.Top;
+        lblDefaultToolsTitle.Height = 34;
+        lblDefaultToolsTitle.Padding = new Padding(20, 8, 0, 0);
+        lblDefaultToolsTitle.Text = "默认工具";
+        lblDefaultToolsTitle.Font = new Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+        lblDefaultToolsTitle.ForeColor = System.Drawing.Color.FromArgb(64, 64, 64);
+        lblDefaultToolsTitle.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+        lblDefaultToolsTitle.Name = "lblDefaultToolsTitle";
 
+        // 自定义工具标题
+        lblCustomToolsTitle = new Label();
+        lblCustomToolsTitle.Dock = System.Windows.Forms.DockStyle.Top;
+        lblCustomToolsTitle.Height = 34;
+        lblCustomToolsTitle.Padding = new Padding(20, 8, 0, 0);
+        lblCustomToolsTitle.Text = "自定义工具";
+        lblCustomToolsTitle.Font = new Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+        lblCustomToolsTitle.ForeColor = System.Drawing.Color.FromArgb(64, 64, 64);
+        lblCustomToolsTitle.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+        lblCustomToolsTitle.Name = "lblCustomToolsTitle";
+
+        // 自定义工具按钮区（左到右自动排列，换行）
+        flpCustomTools = new FlowLayoutPanel();
+        flpCustomTools.SuspendLayout();
+        flpCustomTools.Dock = System.Windows.Forms.DockStyle.Top;
+        flpCustomTools.AutoSize = true;
+        flpCustomTools.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+        flpCustomTools.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
+        flpCustomTools.WrapContents = true;
+        flpCustomTools.AutoScroll = false;
+        flpCustomTools.Padding = new Padding(12, 8, 12, 8);
+        flpCustomTools.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+        flpCustomTools.Name = "flpCustomTools";
+
+        // 自定义工具入口按钮作为第一张自定义工具卡片，后续配置的自定义工具按钮继续往后平铺
+        btnAddCustomTool = CreateAddCustomToolButton();
+
+        // Dock=Top 的显示顺序：后添加的显示在更上方
+        toolsScrollPanel.Controls.Add(flpCustomTools);
+        toolsScrollPanel.Controls.Add(lblCustomToolsTitle);
         toolsScrollPanel.Controls.Add(flpTools);
+        toolsScrollPanel.Controls.Add(lblDefaultToolsTitle);
         tabTools.Controls.Add(toolsScrollPanel);
         tabTools.Controls.Add(descPanel);
 
+        // Tab页大小变化时调整滚动面板和表头
+        tabTools.SizeChanged += (s, e) =>
+        {
+            UpdateToolsHeaderLayout();
+        };
+
         flpTools.ResumeLayout(false);
+        flpCustomTools.ResumeLayout(false);
         toolsScrollPanel.ResumeLayout(false);
         descPanel.ResumeLayout(false);
     }

@@ -8,6 +8,7 @@ using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Common.Forms;
 using A3Tools.Services;
+using A3Tools.Plugins.Default.Forms;
 
 namespace A3Tools.Forms;
 
@@ -16,6 +17,7 @@ public partial class MainForm : Form, IToolContext
     private readonly DataService _dataService;
     private readonly ToolsConfigService _toolsConfigService;
     private readonly ToolExecutorService _toolExecutorService;
+    private readonly CustomToolStorage _customToolStorage = new();
     private readonly List<IPlugin> _plugins = new();
     private readonly List<int> _processIds = new();
     private readonly Dictionary<int, bool> _processLaunchModes = new(); // PID -> 是否新窗口模式
@@ -230,6 +232,7 @@ public partial class MainForm : Form, IToolContext
         LoadAccounts();
         RefreshToolDbLabels();
         LoadAccountStatuses();
+        LoadCustomTools();
         this.scrollPanel?.BringToFront();
         this.Resize += MainForm_Resize;
         UpdateVersionPosition();
@@ -1896,7 +1899,85 @@ public partial class MainForm : Form, IToolContext
             this.flpTools.Controls.Add(btn);
         }
 
-        this.lblPluginStatus.Text = $"已加载 {_toolExecutorService.Tools.Count} 个工具";
+        this.lblPluginStatus.Text = $"已加载 {_toolExecutorService.Tools.Count} 个默认工具";
+    }
+
+    private void BtnAddCustomTool_Click(object? sender, EventArgs e)
+    {
+        using var dlg = new CustomToolConfigDialog(null);
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+            LoadCustomTools();
+    }
+
+    private Button CreateAddCustomToolButton()
+    {
+        var btn = CreateToolCard("➕", "自定义工具", "新建通用复制工具配置");
+        btn.Name = "btnAddCustomTool";
+        btn.Tag = "custom-tool";
+        btn.Click += BtnAddCustomTool_Click;
+        return btn;
+    }
+
+    private void LoadCustomTools()
+    {
+        if (flpCustomTools == null) return;
+        flpCustomTools.Controls.Clear();
+        flpCustomTools.Controls.Add(btnAddCustomTool);
+
+        var configs = _customToolStorage.LoadAll();
+        foreach (var config in configs)
+        {
+            var btn = CreateToolCard("🧩", config.Name, string.IsNullOrEmpty(config.Description) ? $"{config.MainTable} / {config.PrimaryKey}" : config.Description);
+            btn.Tag = "custom-tool";
+            var loadedConfig = config;
+            var menu = new ContextMenuStrip();
+            var miEdit = new ToolStripMenuItem("编辑");
+            var miDelete = new ToolStripMenuItem("删除");
+            miEdit.Click += (s, e) => EditCustomTool(loadedConfig);
+            miDelete.Click += (s, e) => DeleteCustomTool(loadedConfig);
+            menu.Items.Add(miEdit);
+            menu.Items.Add(miDelete);
+            btn.ContextMenuStrip = menu;
+
+            btn.MouseUp += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Right)
+                    menu.Show(btn, e.Location);
+            };
+            btn.Click += (s, e) =>
+            {
+                if (ModifierKeys == Keys.Control)
+                {
+                    EditCustomTool(loadedConfig);
+                    return;
+                }
+                using var form = new GenericCopyToolForm(this, loadedConfig);
+                form.ShowDialog(this);
+            };
+            flpCustomTools.Controls.Add(btn);
+        }
+
+        lblPluginStatus.Text = $"默认工具 {_toolExecutorService.Tools.Count} 个，自定义工具 {configs.Count} 个";
+    }
+
+    private void EditCustomTool(CustomToolConfig config)
+    {
+        using var dlg = new CustomToolConfigDialog(config);
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+            LoadCustomTools();
+    }
+
+    private void DeleteCustomTool(CustomToolConfig config)
+    {
+        var ok = MessageBox.Show(
+            $"确定删除自定义工具「{config.Name}」？\n删除后工具箱按钮也会消失。",
+            "确认删除",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (ok != DialogResult.Yes) return;
+
+        _customToolStorage.Delete(config.Id);
+        LoadCustomTools();
     }
 
     private Button CreateToolCard(string icon, string name, string description)
