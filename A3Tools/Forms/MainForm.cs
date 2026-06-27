@@ -154,7 +154,9 @@ public partial class MainForm : Form, IToolContext
 
     private void SelectToolAccount(bool isSource)
     {
-        var accounts = _dataService.LoadAndDecryptAccounts();
+        // 取密文账套：工具内 BuildConnString/TestConnectionAsync 等会调 EncryptionService.Decrypt(password) 解密，
+        // 这里如果预先解密成明文就会导致"明文当密文解"返回空串，连不上。保持密文状态代入即可，工具无需任何改动。
+        var accounts = _dataService.LoadAccounts();
         using var dlg = new AccountSelectForm(accounts);
         if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
         {
