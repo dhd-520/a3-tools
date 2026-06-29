@@ -207,6 +207,29 @@ dotnet run --project A3Tools\A3Tools.csproj
 
 ## 版本历史
 
+### v2.1.0 (2026-06-27)
+
+- **新增自定义工具 MVP**：工具箱新增「自定义工具」分组，支持可视化配置工具名称、主表、复制关键字、关联表（`;` 分隔多个）、关联字段
+- **通用复制窗体 `GenericCopyToolForm`**：完全对齐 `CrossDbCopyReportForm` 布局，源/目标账套、搜索主表、添加关键字、确认复制、进度条一应俱全；主表按 `PrimaryKey` 走 `TableCopyService.CopyTableData`，关联表按 `ForeignKey` 走 `TableCopyService.CopyTableDataByParentGuid`
+- **工具箱预选账套**：主页支持快捷键预设源/目标账套，启动工具时自动带入数据库连接信息，免去重复选择
+- **自定义工具管理**：右键自定义工具按钮弹出【编辑】【删除】菜单；配置保存到 `DATA\custom-tools.json`
+- **界面优化**：编辑账套窗体支持调整大小；账套新增与 Root 模式退出流程优化
+
+### v2.0.0 (2026-06-17)
+
+- **三端自动登录**（核心特性）：
+  - **网页版**：Chrome DevTools Protocol（CDP）远程控制浏览器自动填表登录 `h5comerp`，原生 `value` setter 兼容 React / antd-mobile / Vue 双向绑定
+  - **客户端**：`Win32AutoLoginHelper` 通过 `FindWindow` + `EnumChildWindows` + `WM_SETTEXT` + `BM_CLICK` 自动登录君则 A3.exe
+  - **开发工具**：同样走 Win32 API 自动登录君则 A3 集成开发工具.exe（单独加密存储密码）
+  - 账套级开关：可在账套编辑中独立配置是否启用网页 / 客户端 / 开发工具自动登录
+- **跨库复制配置数据**（新工具）：支持 `S_DATASELECT`（标准查询）/ `S_SYSTEMSETTING`（系统参数）/ `S_CUSTOMDATA`（自定义数据）三种数据类型跨库复制，基于 `TableCopyService.GetTableColumns` + `SqlBulkCopy` 实现，目标库有的列才复制
+- **跨库复制 APP 表单增强**：新增编码规则（`S_BILLCODERULE` + `S_BILLCODERULEDETAIL`）+ 标准查询（`S_DATASELECT`）自动复制
+- **AccountDialog 重构**：改为标准所见即所得（VS 设计器可正常打开），新增客户端/开发工具自动登录配置项
+- **浏览器启动优化**：新窗口模式默认最大化；Tab 模式走 ShellExecute 跳板开新 Tab（避免独立 Edge 进程污染配置）
+- **报表复制增强**：复制报表新增 `S_REPORTCOLUMNSETTING` 表（v2.0.3 增量）
+- **A3Tools 自身单实例**：Mutex 守卫防重复启动，重复启动自动切到前台
+- **打包**：三个 csproj 版本号 1.0.0 → 2.0.0；StandaloneSF 单文件模式稳定运行
+
 ### v1.3.0 (2026-06-10)
 
 - **跨库复制工具布局优化**：统一复制报表、复制WEB看板、复制移动看板的布局结构，与其他工具保持一致
