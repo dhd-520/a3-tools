@@ -371,7 +371,7 @@ ORDER BY c.column_id";
                 var isNullable = Convert.ToBoolean(colReader["is_nullable"]);
                 var defaultValue = colReader["default_value"]?.ToString() ?? "";
 
-                var typeDecl = FormatSqlDataType(dataType, maxLen, precision, scale);
+                var typeDecl = SqlDataTypeFormatter.Format(dataType, maxLen, precision, scale);
 
                 cols.Add(new ColumnInfo
                 {
@@ -392,28 +392,6 @@ ORDER BY c.column_id";
             Debug.WriteLine($"GetTableColumns {tableName} 失败: {ex.Message}");
             return null;
         }
-    }
-
-    /// <summary>
-    /// 格式化 SQL 数据类型（含长度/精度）
-    /// 注意：sys.columns.max_length 对 NVARCHAR/NCHAR 返回的是**字节数**（2 字节/字符），
-    ///       对 VARCHAR/CHAR/VARBINARY/BINARY 返回的是字节数（1 字节/字符）。
-    ///       所以 Unicode 类型要除以 2，MAX 类型（-1）单独处理。
-    /// </summary>
-    private string FormatSqlDataType(string dataType, int maxLen, int precision, int scale)
-    {
-        return dataType.ToLower() switch
-        {
-            "varchar" => maxLen == -1 ? "VARCHAR(MAX)" : "VARCHAR(" + maxLen + ")",
-            "nvarchar" => maxLen == -1 ? "NVARCHAR(MAX)" : "NVARCHAR(" + (maxLen / 2) + ")",
-            "char" => "CHAR(" + maxLen + ")",
-            "nchar" => "NCHAR(" + (maxLen / 2) + ")",
-            "varbinary" => maxLen == -1 ? "VARBINARY(MAX)" : "VARBINARY(" + maxLen + ")",
-            "binary" => "BINARY(" + maxLen + ")",
-            "decimal" => "DECIMAL(" + precision + ", " + scale + ")",
-            "numeric" => "NUMERIC(" + precision + ", " + scale + ")",
-            _ => dataType
-        };
     }
 
     /// <summary>

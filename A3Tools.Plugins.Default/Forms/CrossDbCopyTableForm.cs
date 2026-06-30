@@ -1084,7 +1084,7 @@ WHERE o.type = @objType
                 var isPk = Convert.ToInt32(reader["is_primary_key"]) == 1;
                 var defaultValue = reader["default_value"]?.ToString();
 
-                var colDef = "[" + colName + "] " + GetSqlDataType(dataType, maxLen, precision, scale);
+                var colDef = "[" + colName + "] " + SqlDataTypeFormatter.Format(dataType, maxLen, precision, scale);
                 if (!isNullable) colDef += " NOT NULL";
                 else colDef += " NULL";
                 if (!string.IsNullOrEmpty(defaultValue)) colDef += " DEFAULT " + defaultValue;
@@ -1239,20 +1239,6 @@ WHERE o.type = @objType
             Debug.WriteLine("生成存储过程脚本失败: " + ex.Message);
             return null;
         }
-    }
-
-    private string GetSqlDataType(string dataType, int maxLen, int precision, int scale)
-    {
-        return dataType.ToLower() switch
-        {
-            "varchar" => maxLen == -1 ? "VARCHAR(MAX)" : "VARCHAR(" + (maxLen) + ")",
-            "nvarchar" => maxLen == -1 ? "NVARCHAR(MAX)" : "NVARCHAR(" + (maxLen) + ")",
-            "char" => "CHAR(" + maxLen + ")",
-            "nchar" => "NCHAR(" + (maxLen) + ")",
-            "decimal" => "DECIMAL(" + precision + ", " + scale + ")",
-            "numeric" => "NUMERIC(" + precision + ", " + scale + ")",
-            _ => dataType
-        };
     }
 
     private class ObjectTypeItem
