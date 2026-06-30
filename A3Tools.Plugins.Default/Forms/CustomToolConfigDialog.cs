@@ -38,6 +38,9 @@ public partial class CustomToolConfigDialog : Form
             txtPrimaryKey.Text = existing.PrimaryKey;
             txtRelatedTables.Text = existing.RelatedTables;
             txtForeignKey.Text = existing.ForeignKey;
+            txtSearchColumns.Text = existing.SearchColumns;
+            txtColumnDisplayNames.Text = existing.ColumnDisplayNames;
+            txtHiddenColumns.Text = existing.HiddenColumns;
             this.Text = $"编辑自定义工具 — {existing.Name}";
         }
         else
@@ -86,6 +89,40 @@ public partial class CustomToolConfigDialog : Form
             return;
         }
 
+        // 搜索列设置校验
+        var searchCols = txtSearchColumns.Text.Trim();
+        var displayNames = txtColumnDisplayNames.Text.Trim();
+        var hiddenCols = txtHiddenColumns.Text.Trim();
+        if (!string.IsNullOrEmpty(searchCols) || !string.IsNullOrEmpty(displayNames))
+        {
+            if (string.IsNullOrEmpty(searchCols))
+            {
+                MessageBox.Show("请填写搜索列名，或与列显示名称一起留空（保持旧行为）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtSearchColumns.Focus();
+                return;
+            }
+            if (string.IsNullOrEmpty(displayNames))
+            {
+                MessageBox.Show("请填写列显示名称，或与搜索列名一起留空（保持旧行为）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtColumnDisplayNames.Focus();
+                return;
+            }
+            var searchList = searchCols.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var displayList = displayNames.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (searchList.Length != displayList.Length)
+            {
+                MessageBox.Show($"搜索列名与列显示名称数量不一致（{searchList.Length} vs {displayList.Length}）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtColumnDisplayNames.Focus();
+                return;
+            }
+            if (!searchList.Contains(pk, StringComparer.OrdinalIgnoreCase))
+            {
+                MessageBox.Show($"搜索列名必须包含复制关键字【{pk}】（即便在隐藏列中也会强制显示）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtSearchColumns.Focus();
+                return;
+            }
+        }
+
         var config = _isEdit && Result != null
             ? Result
             : new CustomToolConfig();
@@ -96,6 +133,9 @@ public partial class CustomToolConfigDialog : Form
         config.PrimaryKey = pk;
         config.RelatedTables = related;
         config.ForeignKey = fk;
+        config.SearchColumns = searchCols;
+        config.ColumnDisplayNames = displayNames;
+        config.HiddenColumns = hiddenCols;
 
         try
         {

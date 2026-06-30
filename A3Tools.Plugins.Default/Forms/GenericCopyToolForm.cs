@@ -37,7 +37,7 @@ public partial class GenericCopyToolForm : Form
         Text = string.IsNullOrEmpty(config.Name) ? "自定义工具" : $"自定义工具 — {config.Name}";
         lblTitleHint.Text = $"复制关键字（{_config.MainTable}.{_config.PrimaryKey}，多个用英文分号 ; 隔开）：";
         txtKeyValues.PlaceholderText = $"输入{_config.PrimaryKey}，可通过下方搜索添加";
-        lblSearchHint.Text = $"提示：输入{_config.MainTable}表的{_config.PrimaryKey}进行搜索";
+        lblSearchHint.Text = BuildSearchHintText();
         lblConfigInfo.Text = BuildConfigInfoText();
         btnConfirm.Text = "确认复制";
 
@@ -83,7 +83,19 @@ public partial class GenericCopyToolForm : Form
         var related = _config.RelatedTableList;
         var relatedDesc = related.Count == 0 ? "（无）" : string.Join(" / ", related);
         var foreignKey = string.IsNullOrEmpty(_config.ForeignKey) ? "（无）" : _config.ForeignKey;
-        return $"主表：{_config.MainTable}    复制关键字：{_config.PrimaryKey}    关联表：{relatedDesc}    关联字段：{foreignKey}";
+        var searchCols = _config.SearchColumnList;
+        var searchDesc = searchCols.Count == 0 ? "全部列" : string.Join(",", searchCols);
+        var hiddenCols = _config.HiddenColumnSet;
+        var hiddenDesc = hiddenCols.Count == 0 ? string.Empty : $"    隐藏：{string.Join(",", hiddenCols)}";
+        return $"主表：{_config.MainTable}    主键：{_config.PrimaryKey}    关联表：{relatedDesc}    关联字段：{foreignKey}    搜索列：{searchDesc}{hiddenDesc}";
+    }
+
+    private string BuildSearchHintText()
+    {
+        var searchCols = _config.SearchColumnList;
+        if (searchCols.Count == 0)
+            return $"提示：输入{_config.MainTable}表的{_config.PrimaryKey}进行搜索";
+        return $"提示：按以下列模糊搜索 — {string.Join(",", searchCols)}";
     }
 
     private void BtnSelectSource_Click(object? sender, EventArgs e) => SelectAccount(true);
@@ -260,13 +272,38 @@ public partial class GenericCopyToolForm : Form
 
         try
         {
-            bool hasName = false;
+            var validSearchCols = new List<string>();
             _searchResults = await Task.Run(() =>
             {
                 using var conn = new SqlConnection(srcConnStr);
                 conn.Open();
-                hasName = HasColumn(conn, _config.MainTable, "NAME");
-                using var cmd = new SqlCommand(BuildSearchSql(hasName), conn);
+                var dbColumns = GetAllColumns(conn, _config.MainTable);
+                var dbSet = new HashSet<string>(dbColumns, StringComparer.OrdinalIgnoreCase);
+                var pk = _config.PrimaryKey;
+                var configuredCols = _config.SearchColumnList;
+                if (configuredCols.Count > 0)
+                {
+                    // 新行为：用配置的列，过滤出数据库中真实存在的列
+                    foreach (var c in configuredCols)
+                        if (dbSet.Contains(c)) validSearchCols.Add(c);
+                    // 保证 PrimaryKey 总是参与搜索（即使没有写在 SearchColumns 中）
+                    if (!string.IsNullOrEmpty(pk) && !validSearchCols.Any(c => string.Equals(c, pk, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        if (dbSet.Contains(pk)) validSearchCols.Insert(0, pk);
+                    }
+                }
+                else
+                {
+                    // 旧行为：主键 + 可选的 NAME
+                    if (!string.IsNullOrEmpty(pk) && dbSet.Contains(pk)) validSearchCols.Add(pk);
+                    if (dbSet.Contains("NAME")) validSearchCols.Add("NAME");
+                }
+
+                if (validSearchCols.Count == 0)
+                    throw new InvalidOperationException("未能找到任何可用于搜索的列，请检查搜索列配置。");
+
+                var sql = BuildSearchSql(validSearchCols);
+                using var cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
                 using var adapter = new SqlDataAdapter(cmd);
                 var dt = new System.Data.DataTable();
@@ -290,13 +327,25 @@ public partial class GenericCopyToolForm : Form
         }
     }
 
-    private string BuildSearchSql(bool hasNameColumn)
+    /// <summary>
+    /// 根据已经通过数据库校验的搜索列集合拼 SQL。
+    /// 会再按大小写不敏感去重一次，保持参数顺序。
+    /// </summary>
+    private string BuildSearchSql(List<string> validSearchColumns)
     {
         var table = _config.MainTable;
         var pk = _config.PrimaryKey;
-        var where = $"CONVERT(NVARCHAR(4000), [{pk}]) LIKE @keyword";
-        if (hasNameColumn)
-            where += " OR CONVERT(NVARCHAR(4000), [NAME]) LIKE @keyword";
+
+        // 去重（按大小写不敏感）保持顺序
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var uniqueCols = new List<string>();
+        foreach (var c in validSearchColumns)
+            if (!string.IsNullOrWhiteSpace(c) && seen.Add(c)) uniqueCols.Add(c);
+
+        var whereClauses = uniqueCols
+            .Select(c => $"CONVERT(NVARCHAR(4000), [{c}]) LIKE @keyword")
+            .ToList();
+        var where = string.Join(" OR ", whereClauses);
 
         return $@"
 SELECT TOP 5000 *
@@ -305,16 +354,18 @@ WHERE {where}
 ORDER BY [{pk}]";
     }
 
-    private static bool HasColumn(SqlConnection conn, string tableName, string columnName)
+    private List<string> GetAllColumns(SqlConnection conn, string tableName)
     {
         const string sql = @"
-SELECT COUNT(*)
+SELECT COLUMN_NAME
 FROM INFORMATION_SCHEMA.COLUMNS
-WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName AND COLUMN_NAME=@columnName";
+WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName";
         using var cmd = new SqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("@tableName", tableName);
-        cmd.Parameters.AddWithValue("@columnName", columnName);
-        return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+        var list = new List<string>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) list.Add(reader.GetString(0));
+        return list;
     }
 
     private void BindSearchResults(System.Data.DataTable dt)
@@ -323,14 +374,78 @@ WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName AND COLUMN_NAME=@columnName";
             dgvSearchResults.Columns.Remove("chk");
 
         dgvSearchResults.DataSource = dt;
-        var checkCol = new DataGridViewCheckBoxColumn
-        {
-            HeaderText = "选择",
-            Width = 50,
-            Name = "chk"
-        };
-        dgvSearchResults.Columns.Insert(0, checkCol);
+        ApplySearchColumnLayout();
         dgvSearchResults.AutoResizeColumns();
+    }
+
+    /// <summary>
+    /// 根据配置的 SearchColumns / ColumnDisplayNames / HiddenColumns 过滤可见列、设置列标题。
+    /// PrimaryKey 始终可见（即使被 HiddenColumns 标记）。SearchColumns 为空时保留旧行为（所有列都显示）。
+    /// </summary>
+    private void ApplySearchColumnLayout()
+    {
+        var searchCols = _config.SearchColumnList;
+        var displayNames = _config.ColumnDisplayNameList;
+        var hiddenSet = _config.HiddenColumnSet;
+        var pk = _config.PrimaryKey;
+
+        if (searchCols.Count == 0)
+        {
+            // 旧行为：仅主键列重命名为 PrimaryKey，其它保持原名
+            foreach (DataGridViewColumn col in dgvSearchResults.Columns)
+            {
+                if (!string.IsNullOrEmpty(pk) && string.Equals(col.Name, pk, StringComparison.OrdinalIgnoreCase))
+                    col.HeaderText = pk;
+            }
+            return;
+        }
+
+        // 按配置顺序重排、隐藏不在列表中或在 HiddenColumns 中的列。
+        var displayOrdered = searchCols
+            .Select((name, i) => new { Name = name, Display = i < displayNames.Count ? displayNames[i] : name })
+            .ToList();
+
+        // 确保 PrimaryKey 始终显示
+        var visibleNames = new List<string>();
+        var headerByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in displayOrdered)
+        {
+            var exists = dgvSearchResults.Columns.Contains(item.Name);
+            if (!exists) continue;
+            if (hiddenSet.Contains(item.Name) && !string.Equals(item.Name, pk, StringComparison.OrdinalIgnoreCase)) continue;
+            visibleNames.Add(item.Name);
+            headerByName[item.Name] = item.Display;
+        }
+        // PrimaryKey 补位
+        if (!string.IsNullOrEmpty(pk)
+            && dgvSearchResults.Columns.Contains(pk)
+            && !visibleNames.Any(n => string.Equals(n, pk, StringComparison.OrdinalIgnoreCase)))
+        {
+            visibleNames.Insert(0, pk);
+            headerByName[pk] = pk;
+        }
+
+        var ordered = new List<DataGridViewColumn>();
+        foreach (var name in visibleNames)
+            ordered.Add(dgvSearchResults.Columns[name]);
+
+        foreach (DataGridViewColumn col in dgvSearchResults.Columns)
+        {
+            if (col.Name == "chk") continue;
+            if (!ordered.Contains(col))
+                col.Visible = false;
+        }
+
+        // 按 visibleNames 顺序重新设置 DisplayIndex
+        for (int i = 0; i < ordered.Count; i++)
+            ordered[i].DisplayIndex = i + 1;  // 0 位留给 chk
+
+        // 设置 HeaderText
+        foreach (var col in ordered)
+        {
+            if (headerByName.TryGetValue(col.Name, out var display))
+                col.HeaderText = display;
+        }
     }
 
     private void BtnAddSelected_Click(object? sender, EventArgs e)
