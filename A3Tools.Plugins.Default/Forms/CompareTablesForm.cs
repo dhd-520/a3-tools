@@ -82,6 +82,13 @@ public partial class CompareTablesForm : Form
 
         // 启动时自动执行一次对比
         this.Shown += (s, e) => StartCompare();
+
+        // 二次筛选：差异类型多选 + 字段名模糊 + 清空
+        chkMissingTable.CheckedChanged += (s, e) => ApplyFilter();
+        chkMissingCol.CheckedChanged += (s, e) => ApplyFilter();
+        chkTypeDiff.CheckedChanged += (s, e) => ApplyFilter();
+        txtColumnFilter.TextChanged += (s, e) => ApplyFilter();
+        btnClearFilter.Click += (s, e) => ClearFilter();
     }
 
     private void BtnClose_Click(object? sender, EventArgs e) => this.Close();
@@ -192,11 +199,85 @@ public partial class CompareTablesForm : Form
     }
 
     /// <summary>
-    /// 渲染差异到 DataGridView
+    /// <summary>
+    /// 差异全量数据，供筛选使用。
+    /// </summary>
+    private List<DifferenceRow> _allDifferences = new();
+
+    /// <summary>
+    /// 渲染差异入口：保存全量 + 更新摘要/按钮状态，最后调 ApplyFilter 渲染行。
     /// </summary>
     private void RenderDifferences(List<DifferenceRow> differences)
     {
+        _allDifferences = differences ?? new List<DifferenceRow>();
+
+        // 摘要（始终基于全量，筛选不影响统计）
+        var missingTableCount = _allDifferences.Count(d => d.DiffType == "缺表");
+        var missingColCount = _allDifferences.Count(d => d.DiffType == "缺字段");
+        var typeDiffCount = _allDifferences.Count(d => d.DiffType == "类型差异");
+        lblSummary.Text = $"对比完成：共 {_allDifferences.Count} 项差异（缺表 {missingTableCount} / 缺字段 {missingColCount} / 类型差异 {typeDiffCount}）";
+        lblSummary.ForeColor = _allDifferences.Count > 0 ? Color.FromArgb(228, 88, 38) : Color.FromArgb(57, 181, 74);
+        lblProgress.Text = _allDifferences.Count == 0 ? "源库和目标库表结构完全一致，无需同步" : "请勾选要同步的差异项，点击执行/复制脚本";
+        progressBar.Value = 100;
+
+        btnExecute.Enabled = _allDifferences.Count > 0;
+        btnCopyScript.Enabled = _allDifferences.Count > 0;
+
+        ApplyFilter();
+    }
+
+    /// <summary>
+    /// 根据筛选控件状态过滤全量数据，重新渲染 DataGridView 行。
+    /// - 差异类型：多选 CheckBox（任一不勾 = 隐藏该类型）
+    /// - 字段名：文本模糊匹配（ColumnName 为空的行不受该筛选影响）
+    /// </summary>
+    private void ApplyFilter()
+    {
+        if (_allDifferences == null) return;
+
+        var filtered = _allDifferences.AsEnumerable();
+
+        // 差异类型筛选：全不勾 = 不过滤（全部显示）
+        var anyChecked = chkMissingTable.Checked || chkMissingCol.Checked || chkTypeDiff.Checked;
+        if (anyChecked)
+        {
+            filtered = filtered.Where(d =>
+                (d.DiffType == "缺表" && chkMissingTable.Checked) ||
+                (d.DiffType == "缺字段" && chkMissingCol.Checked) ||
+                (d.DiffType == "类型差异" && chkTypeDiff.Checked));
+        }
+
+        // 字段名筛选：忽略大小写子串匹配；ColumnName 为空（缺表行）会被过滤掉，需保留以免意外丢表
+        var colKeyword = txtColumnFilter.Text.Trim();
+        if (!string.IsNullOrEmpty(colKeyword))
+        {
+            filtered = filtered.Where(d =>
+                !string.IsNullOrEmpty(d.ColumnName) &&
+                d.ColumnName.Contains(colKeyword, StringComparison.OrdinalIgnoreCase));
+        }
+
+        RenderRows(filtered.ToList());
+    }
+
+    /// <summary>
+    /// 重置所有筛选控件（全不勾 + 清空输入框），事件会自动触发 ApplyFilter。
+    /// </summary>
+    private void ClearFilter()
+    {
+        chkMissingTable.Checked = false;
+        chkMissingCol.Checked = false;
+        chkTypeDiff.Checked = false;
+        txtColumnFilter.Text = "";
+    }
+
+    /// <summary>
+    /// 实际把行渲染到 DataGridView（每次筛选后重画）。
+    /// </summary>
+    private void RenderRows(List<DifferenceRow> rows)
+    {
         dgvDifferences.DataSource = null;
+        dgvDifferences.Rows.Clear();
+        dgvDifferences.Columns.Clear();
 
         // 复选框列
         var checkCol = new DataGridViewCheckBoxColumn
@@ -215,7 +296,7 @@ public partial class CompareTablesForm : Form
         dgvDifferences.Columns.Add("TgtType", "目标库字段类型");
         dgvDifferences.Columns.Add("Script", "变更脚本");
 
-        foreach (var diff in differences)
+        foreach (var diff in rows)
         {
             var rowIndex = dgvDifferences.Rows.Add(
                 false,
@@ -250,18 +331,6 @@ public partial class CompareTablesForm : Form
                 col.AutoSizeMode = DataGridViewAutoSizeColumnMode.AllCells;
             }
         }
-
-        // 摘要
-        var missingTableCount = differences.Count(d => d.DiffType == "缺表");
-        var missingColCount = differences.Count(d => d.DiffType == "缺字段");
-        var typeDiffCount = differences.Count(d => d.DiffType == "类型差异");
-        lblSummary.Text = $"对比完成：共 {differences.Count} 项差异（缺表 {missingTableCount} / 缺字段 {missingColCount} / 类型差异 {typeDiffCount}）";
-        lblSummary.ForeColor = differences.Count > 0 ? Color.FromArgb(228, 88, 38) : Color.FromArgb(57, 181, 74);
-        lblProgress.Text = differences.Count == 0 ? "源库和目标库表结构完全一致，无需同步" : "请勾选要同步的差异项，点击执行/复制脚本";
-        progressBar.Value = 100;
-
-        btnExecute.Enabled = differences.Count > 0;
-        btnCopyScript.Enabled = differences.Count > 0;
     }
 
     /// <summary>
