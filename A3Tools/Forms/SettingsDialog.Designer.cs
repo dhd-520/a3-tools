@@ -38,6 +38,10 @@ partial class SettingsDialog
         bottom = new Panel();
         btnCancel = new Button();
         btnOK = new Button();
+        lblQueryTool = new Label();
+        rbQueryToolSsms = new RadioButton();
+        rbQueryToolBuiltIn = new RadioButton();
+        hintQueryTool = new Label();
         titleBar.SuspendLayout();
         mainPanel.SuspendLayout();
         bottom.SuspendLayout();
@@ -78,6 +82,14 @@ partial class SettingsDialog
         mainPanel.Controls.Add(btnSsmsBrowse);
         mainPanel.Controls.Add(btnSsmsClear);
         mainPanel.Controls.Add(hintSsms);
+        mainPanel.Controls.Add(lblQueryTool);
+
+        mainPanel.Controls.Add(rbQueryToolSsms);
+
+        mainPanel.Controls.Add(rbQueryToolBuiltIn);
+
+        mainPanel.Controls.Add(hintQueryTool);
+
         mainPanel.Controls.Add(lblLaunchTitle);
         mainPanel.Controls.Add(chkShowLaunchDialog);
         mainPanel.Controls.Add(hintLaunch);
@@ -100,7 +112,7 @@ partial class SettingsDialog
         mainPanel.Dock = DockStyle.Fill;
         mainPanel.Location = new Point(0, 60);
         mainPanel.Name = "mainPanel";
-        mainPanel.Size = new Size(1152, 1200);
+        mainPanel.Size = new Size(1152, 1320);
         mainPanel.TabIndex = 1;
         //
         // lblAppDir
@@ -207,11 +219,57 @@ partial class SettingsDialog
         hintSsms.Size = new Size(958, 30);
         hintSsms.TabIndex = 8;
         hintSsms.Text = "设置SSMS可执行文件路径,为空则自动查找";
+
+        //
+        // lblQueryTool
+        //
+        lblQueryTool.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblQueryTool.Location = new Point(36, 290);
+        lblQueryTool.Name = "lblQueryTool";
+        lblQueryTool.Size = new Size(220, 50);
+        lblQueryTool.TabIndex = 9;
+        lblQueryTool.Text = "数据库查询工具:";
+        lblQueryTool.TextAlign = ContentAlignment.MiddleLeft;
+        //
+        // rbQueryToolSsms
+        //
+        rbQueryToolSsms.AutoSize = true;
+        rbQueryToolSsms.Checked = true;
+        rbQueryToolSsms.Font = new Font("微软雅黑", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
+        rbQueryToolSsms.Location = new Point(260, 300);
+        rbQueryToolSsms.Name = "rbQueryToolSsms";
+        rbQueryToolSsms.Size = new Size(180, 30);
+        rbQueryToolSsms.TabIndex = 10;
+        rbQueryToolSsms.TabStop = true;
+        rbQueryToolSsms.Text = "SSMS（默认）";
+        rbQueryToolSsms.UseVisualStyleBackColor = true;
+        //
+        // rbQueryToolBuiltIn
+        //
+        rbQueryToolBuiltIn.AutoSize = true;
+        rbQueryToolBuiltIn.Font = new Font("微软雅黑", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
+        rbQueryToolBuiltIn.Location = new Point(450, 300);
+        rbQueryToolBuiltIn.Name = "rbQueryToolBuiltIn";
+        rbQueryToolBuiltIn.Size = new Size(280, 30);
+        rbQueryToolBuiltIn.TabIndex = 11;
+        rbQueryToolBuiltIn.Text = "A3Tools 内置查询工具";
+        rbQueryToolBuiltIn.UseVisualStyleBackColor = true;
+        //
+        // hintQueryTool
+        //
+        hintQueryTool.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        hintQueryTool.ForeColor = Color.FromArgb(150, 150, 150);
+        hintQueryTool.Location = new Point(36, 334);
+        hintQueryTool.Name = "hintQueryTool";
+        hintQueryTool.Size = new Size(958, 30);
+        hintQueryTool.TabIndex = 12;
+        hintQueryTool.Text = "点击「链接数据库」按钮时启动的工具（重启后生效）";
+
         //
         // lblLaunchTitle
         //
         lblLaunchTitle.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        lblLaunchTitle.Location = new Point(36, 290);
+        lblLaunchTitle.Location = new Point(36, 410);
         lblLaunchTitle.Name = "lblLaunchTitle";
         lblLaunchTitle.Size = new Size(220, 50);
         lblLaunchTitle.TabIndex = 9;
@@ -223,7 +281,7 @@ partial class SettingsDialog
         chkShowLaunchDialog.Checked = true;
         chkShowLaunchDialog.CheckState = CheckState.Checked;
         chkShowLaunchDialog.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        chkShowLaunchDialog.Location = new Point(36, 340);
+        chkShowLaunchDialog.Location = new Point(36, 460);
         chkShowLaunchDialog.Name = "chkShowLaunchDialog";
         chkShowLaunchDialog.Size = new Size(400, 36);
         chkShowLaunchDialog.TabIndex = 10;
@@ -233,7 +291,7 @@ partial class SettingsDialog
         //
         hintLaunch.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintLaunch.ForeColor = Color.FromArgb(150, 150, 150);
-        hintLaunch.Location = new Point(36, 376);
+        hintLaunch.Location = new Point(36, 496);
         hintLaunch.Name = "hintLaunch";
         hintLaunch.Size = new Size(958, 30);
         hintLaunch.TabIndex = 11;
@@ -242,7 +300,7 @@ partial class SettingsDialog
         // lblBrowserLaunch
         //
         lblBrowserLaunch.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        lblBrowserLaunch.Location = new Point(36, 420);
+        lblBrowserLaunch.Location = new Point(36, 540);
         lblBrowserLaunch.Name = "lblBrowserLaunch";
         lblBrowserLaunch.Size = new Size(341, 50);
         lblBrowserLaunch.TabIndex = 12;
@@ -254,7 +312,7 @@ partial class SettingsDialog
         chkBrowserNewWindow.Checked = true;
         chkBrowserNewWindow.CheckState = CheckState.Checked;
         chkBrowserNewWindow.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        chkBrowserNewWindow.Location = new Point(36, 470);
+        chkBrowserNewWindow.Location = new Point(36, 590);
         chkBrowserNewWindow.Name = "chkBrowserNewWindow";
         chkBrowserNewWindow.Size = new Size(500, 36);
         chkBrowserNewWindow.TabIndex = 13;
@@ -264,7 +322,7 @@ partial class SettingsDialog
         //
         lblWebSelectors.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         lblWebSelectors.ForeColor = Color.FromArgb(24, 145, 176);
-        lblWebSelectors.Location = new Point(36, 510);
+        lblWebSelectors.Location = new Point(36, 630);
         lblWebSelectors.Name = "lblWebSelectors";
         lblWebSelectors.Size = new Size(341, 30);
         lblWebSelectors.TabIndex = 14;
@@ -274,7 +332,7 @@ partial class SettingsDialog
         // lblUsernameSel
         //
         lblUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        lblUsernameSel.Location = new Point(36, 550);
+        lblUsernameSel.Location = new Point(36, 670);
         lblUsernameSel.Name = "lblUsernameSel";
         lblUsernameSel.Size = new Size(180, 30);
         lblUsernameSel.TabIndex = 15;
@@ -285,7 +343,7 @@ partial class SettingsDialog
         //
         txtUsernameSel.BackColor = Color.FromArgb(248, 248, 248);
         txtUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtUsernameSel.Location = new Point(220, 548);
+        txtUsernameSel.Location = new Point(220, 668);
         txtUsernameSel.Name = "txtUsernameSel";
         txtUsernameSel.Size = new Size(500, 34);
         txtUsernameSel.TabIndex = 16;
@@ -294,7 +352,7 @@ partial class SettingsDialog
         // lblPasswordSel
         //
         lblPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        lblPasswordSel.Location = new Point(36, 590);
+        lblPasswordSel.Location = new Point(36, 710);
         lblPasswordSel.Name = "lblPasswordSel";
         lblPasswordSel.Size = new Size(180, 30);
         lblPasswordSel.TabIndex = 17;
@@ -305,7 +363,7 @@ partial class SettingsDialog
         //
         txtPasswordSel.BackColor = Color.FromArgb(248, 248, 248);
         txtPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtPasswordSel.Location = new Point(220, 588);
+        txtPasswordSel.Location = new Point(220, 708);
         txtPasswordSel.Name = "txtPasswordSel";
         txtPasswordSel.Size = new Size(500, 34);
         txtPasswordSel.TabIndex = 18;
@@ -314,7 +372,7 @@ partial class SettingsDialog
         // lblSubmitSel
         //
         lblSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        lblSubmitSel.Location = new Point(36, 630);
+        lblSubmitSel.Location = new Point(36, 750);
         lblSubmitSel.Name = "lblSubmitSel";
         lblSubmitSel.Size = new Size(180, 30);
         lblSubmitSel.TabIndex = 19;
@@ -325,7 +383,7 @@ partial class SettingsDialog
         //
         txtSubmitSel.BackColor = Color.FromArgb(248, 248, 248);
         txtSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtSubmitSel.Location = new Point(220, 628);
+        txtSubmitSel.Location = new Point(220, 748);
         txtSubmitSel.Name = "txtSubmitSel";
         txtSubmitSel.Size = new Size(500, 34);
         txtSubmitSel.TabIndex = 20;
@@ -335,7 +393,7 @@ partial class SettingsDialog
         //
         hintWebSel.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintWebSel.ForeColor = Color.FromArgb(150, 150, 150);
-        hintWebSel.Location = new Point(220, 665);
+        hintWebSel.Location = new Point(220, 795);
         hintWebSel.Name = "hintWebSel";
         hintWebSel.Size = new Size(600, 30);
         hintWebSel.TabIndex = 21;
@@ -345,7 +403,7 @@ partial class SettingsDialog
         // 
         lblDevToolsPassword.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         lblDevToolsPassword.ForeColor = Color.FromArgb(24, 145, 176);
-        lblDevToolsPassword.Location = new Point(36, 810);
+        lblDevToolsPassword.Location = new Point(36, 940);
         lblDevToolsPassword.Name = "lblDevToolsPassword";
         lblDevToolsPassword.Size = new Size(341, 30);
         lblDevToolsPassword.TabIndex = 22;
@@ -356,7 +414,7 @@ partial class SettingsDialog
         // 
         txtDevToolsPassword.BackColor = Color.FromArgb(248, 248, 248);
         txtDevToolsPassword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtDevToolsPassword.Location = new Point(36, 850);
+        txtDevToolsPassword.Location = new Point(36, 980);
         txtDevToolsPassword.Name = "txtDevToolsPassword";
         txtDevToolsPassword.Size = new Size(500, 34);
         txtDevToolsPassword.TabIndex = 23;
@@ -367,7 +425,7 @@ partial class SettingsDialog
         // 
         hintDevTools.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintDevTools.ForeColor = Color.FromArgb(150, 150, 150);
-        hintDevTools.Location = new Point(36, 890);
+        hintDevTools.Location = new Point(36, 1020);
         hintDevTools.Name = "hintDevTools";
         hintDevTools.Size = new Size(900, 60);
         hintDevTools.TabIndex = 24;
@@ -376,7 +434,7 @@ partial class SettingsDialog
         // bottom
         //
         sepAutoLogin.BackColor = Color.FromArgb(220, 220, 220);
-        sepAutoLogin.Location = new Point(36, 700);
+        sepAutoLogin.Location = new Point(36, 830);
         sepAutoLogin.Name = "sepAutoLogin";
         sepAutoLogin.Size = new Size(1080, 1);
         sepAutoLogin.TabIndex = 25;
@@ -387,7 +445,7 @@ partial class SettingsDialog
         chkClientAutoLogin.CheckState = CheckState.Checked;
         chkClientAutoLogin.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         chkClientAutoLogin.ForeColor = Color.FromArgb(24, 145, 176);
-        chkClientAutoLogin.Location = new Point(36, 715);
+        chkClientAutoLogin.Location = new Point(36, 845);
         chkClientAutoLogin.Name = "chkClientAutoLogin";
         chkClientAutoLogin.Size = new Size(500, 36);
         chkClientAutoLogin.TabIndex = 26;
@@ -400,7 +458,7 @@ partial class SettingsDialog
         chkDevToolsAutoLogin.CheckState = CheckState.Checked;
         chkDevToolsAutoLogin.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         chkDevToolsAutoLogin.ForeColor = Color.FromArgb(24, 145, 176);
-        chkDevToolsAutoLogin.Location = new Point(36, 755);
+        chkDevToolsAutoLogin.Location = new Point(36, 885);
         chkDevToolsAutoLogin.Name = "chkDevToolsAutoLogin";
         chkDevToolsAutoLogin.Size = new Size(500, 36);
         chkDevToolsAutoLogin.TabIndex = 27;
@@ -413,7 +471,7 @@ partial class SettingsDialog
         bottom.Controls.Add(btnCancel);
         bottom.Controls.Add(btnOK);
         bottom.Dock = DockStyle.Bottom;
-        bottom.Location = new Point(0, 1182);
+        bottom.Location = new Point(0, 1302);
         bottom.Name = "bottom";
         bottom.Size = new Size(1152, 78);
         bottom.TabIndex = 0;
@@ -459,7 +517,7 @@ partial class SettingsDialog
         AcceptButton = btnOK;
         BackColor = Color.White;
         CancelButton = btnCancel;
-        ClientSize = new Size(1152, 1260);
+        ClientSize = new Size(1152, 1380);
         Controls.Add(bottom);
         Controls.Add(mainPanel);
         Controls.Add(titleBar);
@@ -499,4 +557,8 @@ partial class SettingsDialog
     private TextBox txtSubmitSel;
     private Label hintWebSel;
     private Panel bottom;
+    private Label lblQueryTool;
+    private RadioButton rbQueryToolSsms;
+    private RadioButton rbQueryToolBuiltIn;
+    private Label hintQueryTool;
 }

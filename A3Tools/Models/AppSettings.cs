@@ -1,6 +1,17 @@
 namespace A3Tools.Models;
 
 /// <summary>
+/// 点击「链接数据库」按钮时启动哪个查询工具
+/// </summary>
+public enum QueryToolMode
+{
+    /// <summary>启动 SQL Server Management Studio（默认）</summary>
+    Ssms = 0,
+    /// <summary>启动 A3Tools 内置 SQL 查询工具（SqlQueryTool）</summary>
+    BuiltIn = 1
+}
+
+/// <summary>
 /// 应用程序设置
 /// </summary>
 public class AppSettings
@@ -49,6 +60,11 @@ public class AppSettings
     /// SSMS可执行文件路径（为空则自动查找）
     /// </summary>
     public string SsmsPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 「链接数据库」按钮启动的查询工具：SSMS（默认） / A3Tools 内置查询工具
+    /// </summary>
+    public QueryToolMode QueryToolMode { get; set; } = QueryToolMode.Ssms;
 
     /// <summary>
     /// 从托盘恢复显示的快捷键（如 "Ctrl+Shift+Z"，为空表示不启用）

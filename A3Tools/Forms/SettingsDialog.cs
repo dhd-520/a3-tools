@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Windows.Forms;
+using A3Tools.Models;
 using A3Tools.Services;
 
 namespace A3Tools.Forms;
@@ -49,6 +50,10 @@ public partial class SettingsDialog : Form
         chkClientAutoLogin.Checked = settings.ClientAutoLogin;
         chkDevToolsAutoLogin.Checked = settings.DevToolsAutoLogin;
         txtDevToolsPassword.Text = settings.DevToolsPassword;  // LoadSettings 已自动解密
+        if (settings.QueryToolMode == QueryToolMode.BuiltIn)
+            rbQueryToolBuiltIn.Checked = true;
+        else
+            rbQueryToolSsms.Checked = true;
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -89,6 +94,7 @@ public partial class SettingsDialog : Form
         settings.ClientAutoLogin = chkClientAutoLogin.Checked;
         settings.DevToolsAutoLogin = chkDevToolsAutoLogin.Checked;
         settings.DevToolsPassword = txtDevToolsPassword.Text;  // 明文，SaveSettings 自动加密
+        settings.QueryToolMode = rbQueryToolBuiltIn.Checked ? QueryToolMode.BuiltIn : QueryToolMode.Ssms;
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();

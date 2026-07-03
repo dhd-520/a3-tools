@@ -247,3 +247,58 @@ public class CrossDbCopyAppChartTool
         form.Show();
     }
 }
+
+/// <summary>
+/// SQL 查询工具（轻量级 SQL 编辑器，替代 SSMS 常用功能）。
+/// 按账套单实例：每个账套最多一个 SqlQueryForm 窗体，跨账套用 OS 任务栏切换。
+/// 后期会被「复制数据库对象」等工具双击穿透：右键 ALTER 脚本 / 函数编辑。
+/// </summary>
+public class SqlQueryTool
+{
+    // 按账套+服务器+库名隔离
+    private static readonly Dictionary<string, A3Tools.Plugins.Default.Forms.SqlQueryForm> _instances = new();
+    private static readonly object _lock = new();
+
+    public string Name => "SQL查询";
+    public string Description => "SQL 查询编辑器（替代 SSMS 常用功能，支持多 Tab、切换数据库、对象脚本穿透）";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        // 代入账套优先级：
+        //   1. 外部传入的 account（如「链接数据库」按钮传入选中账套）
+        //   2. 工具箱上方的「源账套」预选器（账套列表选中行不适用）
+        // 工具箱按钮调用时不传 account（传入 null），走 fallback 走源账套
+        var preset = context.GetToolDatabasePreset();
+        var source = account ?? preset.SourceAccount;
+
+        if (source == null)
+        {
+            context.ShowError("请先在工具箱上方【选择源账套】，或选择账套后点击「链接数据库」！");
+            return;
+        }
+        if (string.IsNullOrEmpty(source.Database) || string.IsNullOrEmpty(source.DatabaseName) || string.IsNullOrEmpty(source.DbUser))
+        {
+            context.ShowError("账套数据库信息不完整（需要 Database/DatabaseName/DbUser）！");
+            return;
+        }
+
+        var key = $"{source.Code}|{source.Database}|{source.DatabaseName}";
+        A3Tools.Plugins.Default.Forms.SqlQueryForm? form;
+        lock (_lock)
+        {
+            if (!_instances.TryGetValue(key, out form) || form.IsDisposed)
+            {
+                form = new A3Tools.Plugins.Default.Forms.SqlQueryForm(source);
+                form.FormClosed += (s, e) =>
+                {
+                    lock (_lock) { _instances.Remove(key); }
+                };
+                _instances[key] = form;
+            }
+        }
+        if (form.WindowState == FormWindowState.Minimized) form.WindowState = FormWindowState.Normal;
+        form.Show();
+        form.BringToFront();
+        form.Activate();
+    }
+}

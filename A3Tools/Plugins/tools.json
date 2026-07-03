@@ -1,6 +1,16 @@
 {
   "tools": [
     {
+      "name": "SQL查询",
+      "description": "轻量级 SQL 查询编辑器，替代 SSMS 常用功能（多 Tab、切换数据库、对象脚本穿透）",
+      "library": "A3Tools.Plugins.Default.dll",
+      "className": "A3Tools.Plugins.Default.SqlQueryTool",
+      "methodName": "Execute",
+      "enabled": true,
+      "icon": "",
+      "category": "查询"
+    },
+    {
       "name": "复制数据库对象",
       "description": "跨库复制数据库对象（表结构/视图/函数/存储过程）",
       "library": "A3Tools.Plugins.Default.dll",

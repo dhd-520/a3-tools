@@ -1721,6 +1721,22 @@ public partial class MainForm : Form, IToolContext
 
         // 优先使用设置中的SSMS路径
         var settings = new DataService().LoadSettings();
+
+        // 根据设置选择启动 SSMS 还是内置查询工具
+        if (settings.QueryToolMode == QueryToolMode.BuiltIn)
+        {
+            // 启动内置 SQL 查询工具（走账套列表选中账套）
+            var sqlQueryTool = _toolExecutorService.Tools
+                .FirstOrDefault(t => t.Config.ClassName == "A3Tools.Plugins.Default.SqlQueryTool");
+            if (sqlQueryTool == null)
+            {
+                this.ShowError("未找到内置查询工具（SqlQueryTool），请检查 tools.json 是否启用。");
+                return;
+            }
+            _toolExecutorService.ExecuteTool(sqlQueryTool, account, this);
+            return;
+        }
+
         string ssmsPath;
 
         if (!string.IsNullOrWhiteSpace(settings.SsmsPath) && File.Exists(settings.SsmsPath))
@@ -1893,7 +1909,11 @@ public partial class MainForm : Form, IToolContext
             var loadedTool = tool;
             btn.Click += (s, e) =>
             {
-                var account = GetSelectedAccount();
+                // SqlQueryTool 走工具箱上方「源账套」（不传 account，让 SqlQueryTool 内部 fallback）
+                // 其他工具走账套列表选中账套
+                Account? account = (loadedTool.Config.ClassName == "A3Tools.Plugins.Default.SqlQueryTool")
+                    ? null
+                    : GetSelectedAccount();
                 _toolExecutorService.ExecuteTool(loadedTool, account, this);
             };
             this.flpTools.Controls.Add(btn);

@@ -65,4 +65,34 @@ public static class EncryptionService
             return string.Empty;
         }
     }
+
+    /// <summary>
+    /// 判断字符串是否已是本程序加密过的 AES 密文。
+    /// 判定逻辑：AES-CBC + PKCS7 密文必须是 16 字节倍数且能用当前机器密钥成功解密。
+    /// </summary>
+    public static bool IsEncrypted(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        try
+        {
+            byte[] cipherBytes = Convert.FromBase64String(text);
+            if (cipherBytes.Length < 16 || cipherBytes.Length % 16 != 0) return false;
+            var plain = Decrypt(text);
+            return !string.IsNullOrEmpty(plain);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 仅当确认为加密密文时才解密；明文则原样返回。
+    /// 用于账号账套密码在 "密文状态" 跟 "明文状态" 之间透明传递的场景。
+    /// </summary>
+    public static string TryDecrypt(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        return IsEncrypted(text) ? Decrypt(text) : text;
+    }
 }
