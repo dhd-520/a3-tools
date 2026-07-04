@@ -257,69 +257,49 @@ public partial class ObjectExplorerForm : Form
     // 筛选（只改 BackColor，不动树结构）
     // ============================================
 
-    /// <summary>单树筛选（按 Filter 输入框文本模糊匹配叶子列 + 父对象 + schema 节点）</summary>
+    /// <summary>单树筛选：任意节点（schema/对象/列）只要 Text 含 filter 子串 → 涂黄 + 展开</summary>
     private static void ApplyFilterToOneTree(TreeView tree, string filter)
     {
         var f = (filter ?? "").Trim();
-        ClearBackColors(tree.Nodes);
+        // 先 reset 所有背色 + 折叠状态 — 保证清空 filter 后看到的是默认初始
+        ClearBackColorsAndCollapse(tree.Nodes);
         if (string.IsNullOrEmpty(f)) return;
 
-        var root = tree.Nodes.Count > 0 ? tree.Nodes[0] : null;
-        if (root == null) return;
-
-        // 命中：列子节点；父对象/schema 节点的命中 = 其下任一叶子命中
-        HighlightMatching(tree.Nodes, f, StringComparison.OrdinalIgnoreCase);
-
-        // 命中后把祖先全部展开（用户友好体验）—— 用迭代不开递归
-        ExpandMatching(tree.Nodes, f, StringComparison.OrdinalIgnoreCase);
+        // 递归命中标记 + 展开
+        MarkAndExpand(tree.Nodes, f, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void ClearBackColors(TreeNodeCollection nodes)
+    /// <summary>递归刷所有节点：清背色、折叠（但不重置用户已经展开过的状态）</summary>
+    private static void ClearBackColorsAndCollapse(TreeNodeCollection nodes)
     {
         foreach (TreeNode n in nodes)
         {
             n.BackColor = Color.Empty;
-            if (n.Nodes.Count > 0) ClearBackColors(n.Nodes);
+            if (n.Nodes.Count > 0) ClearBackColorsAndCollapse(n.Nodes);
         }
     }
 
-    private static bool HighlightMatching(TreeNodeCollection nodes, string filter, StringComparison cmp)
+    /// <summary>
+    /// 递归遍历：为命中节点涂黄+展开，为命中节点的所有祖先（向下）也展开（保证命中可见）。
+    /// 返回 true 表示本子树中有任意命中节点。
+    /// </summary>
+    private static bool MarkAndExpand(TreeNodeCollection nodes, string filter, StringComparison cmp)
     {
         bool anyHit = false;
         foreach (TreeNode n in nodes)
         {
             bool selfHit = !string.IsNullOrEmpty(n.Text) && n.Text.IndexOf(filter, cmp) >= 0;
-            bool childHit = HighlightMatching(n.Nodes, filter, cmp);
+            bool childHit = MarkAndExpand(n.Nodes, filter, cmp);
+
+            if (selfHit)
+                n.BackColor = Color.LightYellow;
             if (selfHit || childHit)
             {
-                if (n.Nodes.Count == 0) // 只有叶子（列）涂黄，避免一树全黄
-                    n.BackColor = Color.LightYellow;
+                n.Expand();         // 命中节点 + 命中子树的祖先 → 都展开
                 anyHit = true;
             }
         }
         return anyHit;
-    }
-
-    private static void ExpandMatching(TreeNodeCollection nodes, string filter, StringComparison cmp)
-    {
-        foreach (TreeNode n in nodes)
-        {
-            if (n.BackColor == Color.LightYellow || HasHighlightedDescendant(n))
-            {
-                n.Expand();
-                ExpandMatching(n.Nodes, filter, cmp);
-            }
-        }
-    }
-
-    private static bool HasHighlightedDescendant(TreeNode node)
-    {
-        foreach (TreeNode c in node.Nodes)
-        {
-            if (c.BackColor == Color.LightYellow) return true;
-            if (HasHighlightedDescendant(c)) return true;
-        }
-        return false;
     }
 
     // ============================================
