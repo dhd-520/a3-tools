@@ -238,6 +238,15 @@ public partial class ObjectExplorerForm : Form
                 .GroupBy(o => o.SchemaName, StringComparer.OrdinalIgnoreCase)
                 .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
 
+            // 表/视图只展示对象名（不需要列子节点）
+            // TVF / 标量函数 / 存储过程 / 触发器 仍保留列子节点（参数 / 列）
+            bool showColumns = kind switch
+            {
+                SqlObjectSchemaCache.ObjectKind.Table => false,
+                SqlObjectSchemaCache.ObjectKind.View  => false,
+                _ => true
+            };
+
             foreach (var schemaGroup in bySchema)
             {
                 TreeNode? schemaNode = null;
@@ -250,10 +259,12 @@ public partial class ObjectExplorerForm : Form
 
                     List<string>? colsToShow = null;
                     List<string>? allCols = null;
-                    if (!string.IsNullOrEmpty(obj.Columns))
+
+                    // 表/视图不参与列匹配（没有列子节点）
+                    if (showColumns && !string.IsNullOrEmpty(obj.Columns))
                         allCols = obj.Columns.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
 
-                    if (isFiltering && !objMatch && allCols != null)
+                    if (showColumns && isFiltering && !objMatch && allCols != null)
                     {
                         var matched = allCols.Where(c => c.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
                         if (matched.Count > 0) colsToShow = matched;
@@ -286,11 +297,12 @@ public partial class ObjectExplorerForm : Form
                     schemaNode.Nodes.Add(objNode);
 
                     // 列：
+                    // - 表/视图：不挂列子节点（陛下要求）—— showColumns=false 时跳过
                     // - 硬过滤 + 命中对象名 → 显示全部列（用户想看命中对象细节）
                     // - 硬过滤 + 只命中列 → 只显示命中的列
                     // - 高亮模式 + 命中对象名 → 显示全部列（涂黄的只在对象层）
                     // - 高亮模式 + 命中列 → 只显示命中的列（涂黄在列层）
-                    if (allCols != null)
+                    if (showColumns && allCols != null)
                     {
                         IEnumerable<string> cols = (colsToShow != null)
                             ? colsToShow
