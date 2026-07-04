@@ -24,6 +24,7 @@ partial class ObjectExplorerForm
         this.pnlTop = new Panel();
         this.btnRefreshRoot = new Button();
         this.lblStatus = new Label();
+        this.btnMode = new Button();
 
         this.tabExplorer = new TabControl();
         this.tabPageTable = new TabPage();
@@ -49,6 +50,7 @@ partial class ObjectExplorerForm
         // ───── pnlTop
         //
         this.pnlTop.Controls.Add(this.btnRefreshRoot);
+        this.pnlTop.Controls.Add(this.btnMode);
         this.pnlTop.Controls.Add(this.lblStatus);
         this.pnlTop.Dock = DockStyle.Top;
         this.pnlTop.Location = new System.Drawing.Point(0, 0);
@@ -58,13 +60,20 @@ partial class ObjectExplorerForm
 
         this.btnRefreshRoot.Location = new System.Drawing.Point(6, 6);
         this.btnRefreshRoot.Name = "btnRefreshRoot";
-        this.btnRefreshRoot.Size = new System.Drawing.Size(64, 24);
+        this.btnRefreshRoot.Size = new System.Drawing.Size(56, 24);
         this.btnRefreshRoot.Text = "🔄 刷新";
         this.btnRefreshRoot.UseVisualStyleBackColor = true;
 
+        this.btnMode.Location = new System.Drawing.Point(66, 6);
+        this.btnMode.Name = "btnMode";
+        this.btnMode.Size = new System.Drawing.Size(86, 24);
+        this.btnMode.Text = "✂ 严格筛选";
+        this.btnMode.UseVisualStyleBackColor = true;
+        this.btnMode.FlatStyle = System.Windows.Forms.FlatStyle.System;
+
         this.lblStatus.AutoSize = true;
         this.lblStatus.ForeColor = System.Drawing.Color.Gray;
-        this.lblStatus.Location = new System.Drawing.Point(78, 10);
+        this.lblStatus.Location = new System.Drawing.Point(158, 10);
         this.lblStatus.Name = "lblStatus";
         this.lblStatus.Size = new System.Drawing.Size(100, 18);
         this.lblStatus.Text = "(未加载)";
@@ -173,6 +182,7 @@ partial class ObjectExplorerForm
     // —— 字段
     private Panel pnlTop;
     private Button btnRefreshRoot;
+    private Button btnMode;
     private Label lblStatus;
 
     private TabControl tabExplorer;
