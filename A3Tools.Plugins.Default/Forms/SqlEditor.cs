@@ -37,7 +37,7 @@ public class SqlEditor : RichTextBox
             Highlight();
         };
 
-        _intelliSenseTimer = new System.Windows.Forms.Timer { Interval = 150 };
+        _intelliSenseTimer = new System.Windows.Forms.Timer { Interval = 50 };
         _intelliSenseTimer.Tick += (_, _) =>
         {
             _intelliSenseTimer.Stop();
@@ -104,12 +104,22 @@ public class SqlEditor : RichTextBox
     {
         base.OnTextChanged(e);
         ViewChanged?.Invoke(this, EventArgs.Empty);
-        if (_suppressHighlight) return;
-        _highlightTimer.Stop();
-        _highlightTimer.Start();
-        // 触发 IntelliSense 节流
-        _intelliSenseTimer.Stop();
-        _intelliSenseTimer.Start();
+
+        // 高亮节流（与 IntelliSense 独立 —— 之前共用 _suppressHighlight，
+        // 导致外部 ReplaceCurrentWord 时整个 OnTextChanged 直接 return，IntelliSense 也不再触发）
+        if (!_suppressHighlight)
+        {
+            _highlightTimer.Stop();
+            _highlightTimer.Start();
+        }
+
+        // IntelliSense 节流（独立判断 _suppressIntelliSense）
+        // 50ms 是经过权衡：太快会卡，太慢让用户感到"按了不弹"
+        if (!_suppressIntelliSense)
+        {
+            _intelliSenseTimer.Stop();
+            _intelliSenseTimer.Start();
+        }
     }
 
     protected override void OnLostFocus(EventArgs e)
@@ -309,9 +319,25 @@ public class SqlEditor : RichTextBox
             return;
         }
 
-        // 计算光标屏幕位置（用字符位置 → 控件坐标 → 屏幕坐标）
-        Point charPos = GetPositionFromCharIndex(caret);
-        Point screenPos = PointToScreen(new Point(charPos.X, charPos.Y + (int)Font.Size + 4));
+        // 计算 popup 屏幕位置：在光标所在行的"下一行"顶部（不要用 Font.Size 凑数，
+        // 那是字号不是行高，会让 popup 顶部落在文字中间。按下一行首字符的位置才是准的）
+        // ────────────────────────────────────────────────────────────────
+        Point screenPos;
+        int lineIdx = GetLineFromCharIndex(caret);
+        int nextLineCharIdx = GetFirstCharIndexFromLine(lineIdx + 1);
+        if (nextLineCharIdx >= 0)
+        {
+            // 有下一行：用下一行首字符位置作为 popup 锚点
+            Point nextLinePos = GetPositionFromCharIndex(nextLineCharIdx);
+            screenPos = PointToScreen(nextLinePos);
+        }
+        else
+        {
+            // 已经在最后一行：用当前字符位置 + 该行行高（Font.Height 是真正的行高，含行间距）
+            Point charPos = GetPositionFromCharIndex(caret);
+            int lineHeight = Font.Height; // 真行高（1.2x Font.Size），比 Font.Size 准
+            screenPos = PointToScreen(new Point(charPos.X, charPos.Y + lineHeight + 2));
+        }
 
         _intelliSense.ShowNearCaret(this, screenPos, 280, 240, matches);
     }
