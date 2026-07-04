@@ -185,23 +185,14 @@ public partial class SqlQueryForm : Form
         }
 
         // 创建新的 Explorer
-        // ★ 不设 Owner！WinForms Owner Form 会自动限制子窗体位置（X 超出屏幕 → 夹回）
-        //   取消 Owner 后我们完全控制 Explorer 位置（不依赖 WinForms 内部逻辑）
+        // ★ 不设 Owner！WinForms Owner Form 会自动限制子窗体位置
         //   关闭跟随靠主窗体 OnFormClosed 实现
-        const int explorerWidth2 = 360;
         var newLoc2 = ComputeExplorerLocation();
         var newH2 = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
         _explorer = new ObjectExplorerForm(this)
         {
-            // Owner = this,  // 故意不设
             StartPosition = FormStartPosition.Manual,
-            Size = new Size(explorerWidth2, newH2),    // ★ 必须设 Size，默认是 100x100
         };
-        // ★ 用 Win32 SetWindowPos 强制窗口位置（绕过 WinForms WM_WINDOWPOSCHANGING 纠正逻辑）
-        //   WinForms SetBounds 会被 WinForms 内部截获并改回去 → 必须用 SetWindowPos API
-        //   HWND_TOP = 0; HWND_NOTOPMOST = -2; SWP_SHOWWINDOW = 0x0040; SWP_NOSIZE = 0x0001;
-        // ★ 用 _explorer.Show() 代替 SetWindowPos 的 SWP_SHOWWINDOW
-        _explorer.SetBounds(newLoc2.X, newLoc2.Y, explorerWidth2, newH2);
         _explorer.FormClosed += (_, args) =>
         {
             _explorerVisible = false;
@@ -213,9 +204,10 @@ public partial class SqlQueryForm : Form
             _explorer = null;
         };
         _explorer.Show();
-        // ★ Show 后再 SetWindowPos 强制设位置（防止 WinForms 改位置）
-        var hwnd2 = _explorer.Handle;
-        SetWindowPos(hwnd2, new IntPtr(-2), newLoc2.X, newLoc2.Y, explorerWidth2, newH2, 0x0004);  // SWP_NOMOVE 错位校正 + SWP_NOZORDER 错位校正
+        // ★ Show 后用 Win32 SetWindowPos 强制设精确位置+大小（绕过 WinForms 自动布局）
+        //   0x0010 = SWP_NOZORDER, 0x0004 = SWP_NOACTIVATE, 0x0020 = SWP_FRAMECHANGED
+        var hwnd = _explorer.Handle;
+        SetWindowPos(hwnd, IntPtr.Zero, newLoc2.X, newLoc2.Y, 320, newH2, 0x0010 | 0x0004 | 0x0020);
         _ = _explorer.RefreshAsync();
         _explorerVisible = true;
         if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
@@ -266,23 +258,19 @@ public partial class SqlQueryForm : Form
     /// <summary>
     /// Explorer 位置 — 与主窗体右边对齐（【陛下决定】）。
     ///
-    /// 公式：x = this.Right - 360
+    /// 公式：x = this.Right - 336（含边框的窗体实际宽）
     ///      y = this.Top（贴顶）夹到 wa 内
     /// </summary>
     private Point ComputeExplorerLocation()
     {
         var wa = GetScreenWorkArea();
 
-        // ★ Explorer 实际窗体宽度 = 360（含边框 16，ClientSize = 344）
-        // 不依赖 _explorer.Width（创建时可能是默认值）
-        const int explorerWidth = 360;
+        // ★ Explorer 窗体总宽 = ClientSize(320) + 边框(16) = 336
+        const int explorerWidth = 336;
 
-        // Explorer 右边 = 主窗体右边
         int x = this.Right - explorerWidth;
-        // 不能超出该屏 WorkArea 右
         if (x + explorerWidth > wa.Right)
             x = wa.Right - explorerWidth;
-        // 不能小于 wa.Left
         if (x < wa.Left)
             x = wa.Left;
 
