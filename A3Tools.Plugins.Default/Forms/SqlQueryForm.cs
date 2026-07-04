@@ -183,12 +183,19 @@ public partial class SqlQueryForm : Form
         }
 
         // 创建新的 Explorer
+        // ★ 不设 Owner！WinForms Owner Form 会自动限制子窗体位置（X 超出屏幕 → 夹回）
+        //   取消 Owner 后我们完全控制 Explorer 位置（不依赖 WinForms 内部逻辑）
+        //   关闭跟随靠主窗体 OnFormClosed 实现
+        var loc = ComputeExplorerLocation();
+        var h = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
         _explorer = new ObjectExplorerForm(this)
         {
-            Owner = this,
-            Location = ComputeExplorerLocation(),
-            Height = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8)
+            // Owner = this,  // 故意不设
+            StartPosition = FormStartPosition.Manual,
         };
+        // ★ 用 SetBounds + BoundsSpecified.Location 强制定位 —— 避免 WinForms Owner Form
+        //   位置纠正逻辑（会夹回屏幕）。即使取消 Owner，加这一行更保险。
+        _explorer.SetBounds(loc.X, loc.Y, 360, h, BoundsSpecified.All);
         _explorer.FormClosed += (_, args) =>
         {
             _explorerVisible = false;
@@ -197,8 +204,6 @@ public partial class SqlQueryForm : Form
                 _explorerUserClosed = true;
             else
                 _explorerUserClosed = false;
-            // ★ 关键：Close 之后置 null，下次点按钮会走"创建新"分支重新计算 Location。
-            // 否则下次 Show 会重用创建时的位置（可能在屏幕外）。
             _explorer = null;
         };
         _explorer.Show();
@@ -240,7 +245,6 @@ public partial class SqlQueryForm : Form
         }
         base.OnFormClosed(e);
     }
-
     /// <summary>获取主窗体所在的屏幕 WorkArea（多屏支持）</summary>
     private Rectangle GetScreenWorkArea()
         => Screen.FromControl(this).WorkingArea;
