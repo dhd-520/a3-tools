@@ -259,9 +259,9 @@ public partial class SqlQueryForm : Form
         }
         base.OnFormClosed(e);
     }
-    /// <summary>获取主屏的 WorkArea（不考虑主窗体位置，固定是 PrimaryScreen）</summary>
+    /// <summary>获取主窗体所在的屏幕 WorkArea（多屏支持）</summary>
     private Rectangle GetScreenWorkArea()
-        => Screen.PrimaryScreen.WorkingArea;
+        => Screen.FromControl(this).WorkingArea;
 
     /// <summary>
     /// Explorer 位置 — 与主窗体右边对齐（【陛下决定】）。
