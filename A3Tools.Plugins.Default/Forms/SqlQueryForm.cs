@@ -254,7 +254,7 @@ public partial class SqlQueryForm : Form
     {
         if (_explorer != null && !_explorer.IsDisposed)
         {
-            try { _explorer.Close(); _explorer.Dispose(); } catch { /* may already closed */ }       
+            try { _explorer.Dispose();_explorer.Close();  } catch { /* may already closed */ }       
             _explorer = null;
         }
         base.OnFormClosed(e);
@@ -271,18 +271,21 @@ public partial class SqlQueryForm : Form
     /// - 主窗体右超出某屏 → Explorer 夹到该屏 WorkArea 右，× 按钮还在屏内
     /// - 不依赖 WindowState，不依赖多屏拼接，不依赖 WinForms 内部逻辑
     ///
-    /// 公式：x = min(this.Right - 360, wa.Right - 360)
+    /// 公式：x = min(this.Right - _explorerWidth, wa.Right - _explorerWidth)
     ///      y = this.Top（贴顶）夹到 wa 内
     /// </summary>
     private Point ComputeExplorerLocation()
     {
-        const int explorerWidth = 360;
-
         var wa = GetScreenWorkArea();
 
-        // Explorer 右边 = 主窗体右边（这是陛下的决定）
+        // Explorer 宽度 = 360（如果已创建则用实际宽度，避免边框计算错误）
+        int explorerWidth = (_explorer != null && !_explorer.IsDisposed)
+            ? _explorer.Width
+            : 360;
+
+        // Explorer 右边 = 主窗体右边
         int x = this.Right - explorerWidth;
-        // 但不能超出该屏 WorkArea 右（否则 × 按钮出屏）
+        // 不能超出该屏 WorkArea 右（否则 × 按钮出屏）
         if (x + explorerWidth > wa.Right)
             x = wa.Right - explorerWidth;
         // 也不能小于 wa.Left
