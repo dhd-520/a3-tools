@@ -128,8 +128,21 @@ public partial class SqlQueryTabPage : UserControl
 
     public void SetEditorText(string text)
     {
-        rtbEditor.Text = text;
-        rtbEditor.HighlightNow();
+        // 临时屏蔽 IntelliSense（防止加载脚本后末行 "GO" 触发 [GOTO/...] 的莫名提示）
+        rtbEditor.SuppressIntelliSense();
+        try
+        {
+            rtbEditor.Text = text;
+            rtbEditor.HighlightNow();
+        }
+        finally
+        {
+            // 短暂延迟后再开放，避免用户键入第一个字符仍保留抑制
+            // （如果定时器已起不会被取消；之前未起也不会新起）
+            var t = new System.Windows.Forms.Timer { Interval = 250 };
+            t.Tick += (_, _) => { t.Stop(); t.Dispose(); rtbEditor.ResumeIntelliSense(); };
+            t.Start();
+        }
     }
 
     public void AppendMessage(string msg)

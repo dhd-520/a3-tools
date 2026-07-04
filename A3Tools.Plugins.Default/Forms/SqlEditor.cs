@@ -49,6 +49,20 @@ public class SqlEditor : RichTextBox
 
     public void SuspendHighlight(bool suspend) => _suppressHighlight = suspend;
 
+    /// <summary>公开 API：暂时屏蔽 IntelliSense（脚本加载防“加载完自动弹候选”之场景）</summary>
+    public void SuspendIntelliSense(bool suspend) => _suppressIntelliSense = suspend;
+
+    /// <summary>便捷：隐藏并立刻屏蔽</summary>
+    public void SuppressIntelliSense()
+    {
+        _intelliSenseTimer.Stop();
+        _suppressIntelliSense = true;
+        _intelliSense.Hide();
+    }
+
+    /// <summary>便捷：恢复 IntelliSense</summary>
+    public void ResumeIntelliSense() => _suppressIntelliSense = false;
+
     public void HighlightNow()
     {
         _highlightTimer.Stop();
