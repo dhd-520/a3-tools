@@ -227,7 +227,7 @@ public partial class SqlQueryTabPage : UserControl
     private async Task ExecuteAsync(string sql)
     {
         btnExecute.Enabled = false;
-        btnExecuteSelected.Enabled = false;
+        btnExecuteSelected.Enabled = true;
         btnStop.Enabled = true;
         dgvResult.DataSource = null;
         _cts = new CancellationTokenSource();
@@ -239,40 +239,70 @@ public partial class SqlQueryTabPage : UserControl
             await conn.OpenAsync(_cts.Token);
             AppendMessage($"[{DateTime.Now:HH:mm:ss}] 已连接到 [{conn.Database}]\n");
 
-            using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 0 };
+            // ★ 重要：按 GO 切分为多个批（GO 是 SSMS/sqlcmd 的批处理分隔符，不是 T-SQL 关键字）。
+            // - USE [db] GO 是第一个批
+            // - ALTER PROCEDURE 必须是批中的第一句（SQL Server 要求）
+            // - SSMS 能运行多 GO 脚本是它自己在做切分，.NET SqlClient 不原生支持
+            var batches = SplitSqlByGo(sql);
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] 拆分为 {batches.Count} 个批次（GO 边界）\n");
+
             int affectedRows = 0;
             bool hasResult = false;
+            bool anyBatchError = false;
 
-            using var reader = await cmd.ExecuteReaderAsync(_cts.Token);
-            try
+            for (int i = 0; i < batches.Count; i++)
             {
-                do
+                _cts.Token.ThrowIfCancellationRequested();
+                var batch = batches[i].Trim();
+                if (string.IsNullOrWhiteSpace(batch)) continue;
+
+                AppendMessage($"[{DateTime.Now:HH:mm:ss}] 批次 {i + 1}/{batches.Count}：{batch.Length} 字符\n");
+
+                // 每个批次一个 SqlCommand + Use 独立连接（重置 SET 选项/USE）
+                using var batchCmd = new SqlCommand(batch, conn) { CommandTimeout = 0 };
+                try
                 {
-                    var dt = new DataTable();
-                    dt.Load(reader);
-                    if (!hasResult)
+                    using var reader = await batchCmd.ExecuteReaderAsync(_cts.Token);
+                    try
                     {
-                        dgvResult.DataSource = dt;
-                        hasResult = true;
+                        do
+                        {
+                            var dt = new DataTable();
+                            dt.Load(reader);
+                            if (!hasResult)
+                            {
+                                dgvResult.DataSource = dt;
+                                hasResult = true;
+                            }
+                            else
+                            {
+                                AppendMessage($"--- 后续结果集（{dt.Rows.Count} 行 x {dt.Columns.Count} 列）---\n");
+                                AppendMessage(DataTableToText(dt));
+                            }
+                            affectedRows += dt.Rows.Count;
+                        }
+                        while (await reader.NextResultAsync(_cts.Token));
                     }
-                    else
+                    catch (InvalidOperationException) when (reader.IsClosed)
                     {
-                        AppendMessage($"--- 后续结果集（{dt.Rows.Count} 行 x {dt.Columns.Count} 列）---\n");
-                        AppendMessage(DataTableToText(dt));
+                        // 单结果集：reader 内部已关闭，无更多结果集，正常
                     }
-                    affectedRows += dt.Rows.Count;
                 }
-                while (await reader.NextResultAsync(_cts.Token));
-            }
-            catch (InvalidOperationException) when (reader.IsClosed)
-            {
-                // SqlDataReader 已被关闭（单结果集查询在 dt.Load 后 reader 内部自动关闭）
-                // 这表示没有更多结果集，是正常情况，忽略。
+                catch (Exception batchEx)
+                {
+                    anyBatchError = true;
+                    AppendMessage($"[{DateTime.Now:HH:mm:ss}] [错误] 批次 {i + 1} 失败：{batchEx.Message}\n");
+                    // 继续下一个批次，不中断（类似 SSMS 行为）
+                }
             }
 
             sw.Stop();
-            AppendMessage($"[{DateTime.Now:HH:mm:ss}] 执行完成\n");
-            _statusReporter?.Invoke($"执行成功，影响 {affectedRows} 行", sw.ElapsedMilliseconds, affectedRows);
+            if (anyBatchError)
+                _statusReporter?.Invoke("部分批次执行失败", sw.ElapsedMilliseconds, affectedRows);
+            else
+                _statusReporter?.Invoke($"执行成功，影响 {affectedRows} 行", sw.ElapsedMilliseconds, affectedRows);
+            if (!hasResult && tabResultSwitcher.SelectedTab != tabMessages)
+                tabResultSwitcher.SelectedTab = tabMessages;
         }
         catch (OperationCanceledException)
         {
@@ -296,6 +326,42 @@ public partial class SqlQueryTabPage : UserControl
             _cts?.Dispose();
             _cts = null;
         }
+    }
+
+    /// <summary>
+    /// 按 GO 边界切分 SQL 脚本。GO 是 SSMS / sqlcmd 的批处理分隔符，不是 T-SQL 关键字。
+    /// — 行首/独立行 GO（前后可为空白）才切。字符串/注释中的 GO 不切。
+    /// — GO 后可跟正整数（重复执行次数），这里合并为单次批。
+    /// </summary>
+    private static List<string> SplitSqlByGo(string sql)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(sql)) return result;
+
+        var lines = sql.Replace("\r\n", "\n").Split('\n');
+        var current = new StringBuilder();
+
+        foreach (var rawLine in lines)
+        {
+            var trimmed = rawLine.Trim();
+            // 匹配独立行 GO（允许 :on/off 等修饰词，为了简单这里只接受裸 GO）
+            // GO 后面可能有数字（重复执行）一并忽略
+            bool isGo =
+                string.Equals(trimmed, "GO", StringComparison.OrdinalIgnoreCase) ||
+                System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^GO\s+\d+\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (isGo)
+            {
+                result.Add(current.ToString());
+                current.Clear();
+            }
+            else
+            {
+                current.AppendLine(rawLine);
+            }
+        }
+        if (current.Length > 0) result.Add(current.ToString());
+        return result;
     }
 
     private static string DataTableToText(DataTable dt)
