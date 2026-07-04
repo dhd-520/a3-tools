@@ -33,6 +33,8 @@ public partial class ObjectExplorerForm : Form
     private readonly SqlQueryForm _owner;
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private CancellationTokenSource? _rebuildCts;
+    private Task? _currentRefreshTask;          // 跟踪主后台任务
+    private bool _isClosing = false;             // OnFormClosing 重入闸门
 
     // 6 棵树的 (kind, filter, tree) — 一处管理，便于循环
     private readonly List<(SqlObjectSchemaCache.ObjectKind Kind, TextBox Filter, TreeView Tree, System.Windows.Forms.Timer Throttle)>
@@ -57,14 +59,47 @@ public partial class ObjectExplorerForm : Form
         btnMode.Click += (_, _) => ToggleMode();
         UpdateModeButtonText();
 
-        // 关窗时静默释放
-        FormClosing += (_, _) =>
+        // 关窗安全处理：依赖 OnFormClosing 重写（完整同步等 + 安全 dispose）
+    }
+
+    /// <summary>
+    /// 关窗同步事件。顺序：
+    ///   1. Cancel 令牌 → 老 task 取消后续路径
+    ///   2. 等当前后台 task 完成（最多 2s，多余超时也包吞掉，防卡死）
+    ///   3. Dispose 锁 / cts / Timer（此时任务已完，不会再有使用者）
+    ///   4. 调用 base 走默认关窗逻辑
+    /// 这样避免了「老 task Release 已 Dispose 锁」「BeginInvoke 派发到已 Dispose 控件」两个主消息队列死锁场景。
+    /// </summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (_isClosing) { base.OnFormClosing(e); return; }
+        _isClosing = true;
+
+        // 1. 发 Cancel
+        try { _rebuildCts?.Cancel(); } catch { }
+
+        // 2. 等正在跑的 task 结束（最多 2 秒；超时不等）
+        try
         {
-            _rebuildCts?.Cancel();
-            _rebuildCts?.Dispose();
-            _rebuildLock.Dispose();
-            foreach (var (_, _, _, t) in _tabs) t.Dispose();
-        };
+            var t = _currentRefreshTask;
+            if (t != null && !t.IsCompleted)
+            {
+                Task.WhenAny(t, Task.Delay(2000)).Wait(TimeSpan.FromSeconds(2));
+            }
+        }
+        catch { /* ignore — 防 cancel / dispose 异常 */ }
+
+        // 3. Dispose Timer
+        foreach (var (_, _, _, t) in _tabs)
+        {
+            try { t.Stop(); t.Dispose(); } catch { }
+        }
+
+        // 4. Dispose 锁 / cts（已无人使用）
+        try { _rebuildLock.Dispose(); } catch { }
+        try { _rebuildCts?.Dispose(); } catch { }
+
+        base.OnFormClosing(e);
     }
 
     /// <summary>绑定 6 个 Tab 与各自 Filter/Tree</summary>
@@ -125,10 +160,11 @@ public partial class ObjectExplorerForm : Form
     /// 唯一入口（外部：主窗体切库 / 关窗后重建 / Refresh 按钮都进这里）
     /// - 节流 SemaphoreSlim：上一轮没完不接新任务
     /// - CancellationTokenSource：取消老的、用新的
+    /// - _currentRefreshTask：OnFormClosing 同步等这个结束
     /// </summary>
     public async Task RefreshAsync(bool forceReload = false)
     {
-        if (_owner == null || DesignMode || IsDisposed) return;
+        if (_owner == null || DesignMode || IsDisposed || _isClosing) return;
         var connStr = _owner.CurrentConnectionString;
         if (string.IsNullOrEmpty(connStr))
         {
@@ -144,26 +180,50 @@ public partial class ObjectExplorerForm : Form
         if (!await _rebuildLock.WaitAsync(0, ct))
             return;
 
+        var task = RunRefreshCoreAsync(connStr, forceReload, ct);
+        _currentRefreshTask = task;
         try
         {
-            await SqlObjectSchemaCache.WarmupAsync(connStr, forceReload);
-
-            if (ct.IsCancellationRequested || IsDisposed) return;
-
-            if (InvokeRequired)
-                BeginInvoke(new Action(() => RebuildAllTrees(connStr, ct)));
-            else
-                RebuildAllTrees(connStr, ct);
+            await task;
         }
         catch (OperationCanceledException) { /* ok */ }
         catch (Exception ex)
         {
-            ClearAll($"刷新失败: {ex.Message}", Color.Red);
+            // 关窗过程中发生的异常都吞掉（不要冲 UI 消息队列）
+            if (!IsDisposed && !_isClosing)
+            {
+                if (InvokeRequired)
+                    BeginInvoke(new Action(() => ClearAll($"刷新失败: {ex.Message}", Color.Red)));
+                else
+                    ClearAll($"刷新失败: {ex.Message}", Color.Red);
+            }
         }
         finally
         {
-            _rebuildLock.Release();
+            _currentRefreshTask = null;
+            try { _rebuildLock.Release(); } catch { /* closed during shutdown */ }
         }
+    }
+
+    private async Task RunRefreshCoreAsync(string connStr, bool forceReload, CancellationToken ct)
+    {
+        await SqlObjectSchemaCache.WarmupAsync(connStr, forceReload);
+
+        if (ct.IsCancellationRequested || IsDisposed || _isClosing) return;
+
+        // BeginInvoke lambda 用 try-catch 包住，吞 ObjectDisposedException
+        Action paint = () =>
+        {
+            if (IsDisposed || _isClosing || Disposing) return;
+            try { RebuildAllTrees(connStr, ct); }
+            catch (ObjectDisposedException) { /* race 出现，吞 */ }
+            catch (InvalidOperationException) { /* 已 Dispose 控件 */ }
+        };
+
+        if (InvokeRequired)
+            BeginInvoke(paint);
+        else
+            paint();
     }
 
     /// <summary>单棵树的 rebuild（被 RefreshAsync 批跑 + 被 filter 节流触发）</summary>
@@ -191,13 +251,13 @@ public partial class ObjectExplorerForm : Form
     /// <summary>6 棵树分别重建（每树 BeginUpdate 独立）</summary>
     private void RebuildAllTrees(string connStr, CancellationToken ct)
     {
-        if (IsDisposed) return;
+        if (IsDisposed || _isClosing) return;
         foreach (var (kind, filter, tree, _) in _tabs)
         {
-            if (ct.IsCancellationRequested || IsDisposed) return;
+            if (ct.IsCancellationRequested || IsDisposed || _isClosing) return;
             RebuildOneTree(connStr, kind, tree, filter.Text);
         }
-        UpdateStatusText();
+        if (!IsDisposed) UpdateStatusText();
     }
 
     private void UpdateStatusText()
