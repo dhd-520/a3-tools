@@ -387,12 +387,13 @@ public partial class SqlQueryForm : Form
     /// <summary>
     /// 打开对象脚本（类似 SSMS 的 ALTER 脚本）。
     /// 1. 切换库（如果指定且不在当前下拉）
-    /// 2. 异步加载 CREATE/ALTER 脚本
-    /// 3. 新建 Tab，标题 "{objType}.{objName}"，内容 = 脚本
+    /// 2. 立即同步建占位 Tab + 切到 SelectedTab + Focus Editor + Activate 主窗体
+    /// 3. 异步加载 CREATE/ALTER 脚本，加载完成后填充 Tab
+    /// 这样做让 ObjectExplorer 双击后用户**立即看到反馈**（Tab 切换+占位文本），而不是像陛下面临的“看起来卡”其实是 await 期间看不到任何变化。
     /// </summary>
     public void OpenScript(string database, string objType, string objName)
     {
-        // 切换数据库（如果需要）
+        // 1. 切换数据库（如果需要）
         if (!string.IsNullOrEmpty(database))
         {
             var idx = cmbDatabase.Items.IndexOf(database);
@@ -405,19 +406,42 @@ public partial class SqlQueryForm : Form
                 lblConnInfo.Text = $"{_account.Database} / {database}";
             }
         }
-        _ = LoadAndOpenScriptAsync(objType, objName);
+
+        // 2. 立即同步建占位 Tab（不依赖 SqlConnection IO）。这是修复“看起来卡”的关键。
+        var loadingTitle = $"{objType}.{objName} (加载中…)";
+        var loadingContent = $"-- 加载 {objType}.{objName} 中…\r\n-- （SQL Server 连接 + sys.sql_modules 查询可能在 1-3 秒）";
+        var tab = NewTab(loadingTitle, loadingContent);
+
+        // 3. 主动拉主窗体到 Z-order 顶 + Focus 到编辑器（防止 Explorer 抢焦）
+        Activate();
+        tab.Editor.Focus();
+
+        // 4. 异步加载脚本，填充 Tab
+        _ = LoadAndFillScriptAsync(tab, objType, objName);
     }
 
-    private async Task LoadAndOpenScriptAsync(string objType, string objName)
+    /// <summary>
+    /// 异步加载脚本，加载完成后填充到已创建的占位 Tab。
+    /// - 不再 OpenScript 里起 NewTab（避免“切 Tab 看起来卡”）
+    /// - 在这里仅做填充（Tab 文本 / Editor 内容 / 光标位置 / Status）
+    /// </summary>
+    private async Task LoadAndFillScriptAsync(SqlQueryTabPage tab, string objType, string objName)
     {
         try
         {
             lblStatus.Text = $"加载 {objType}.{objName} ...";
             var script = await SqlScriptLoader.LoadCreateScriptAsync(_currentConnStr, objType, objName);
+
+            // 在 UI 线程上动 Tab
             BeginInvoke(() =>
             {
-                var tab = NewTab($"{objType}.{objName}", script ?? $"-- 加载 {objType}.{objName} 失败");
-                tabControl.SelectedTab = tab.Page;
+                if (IsDisposed || tab.Page.IsDisposed) return;
+                // 改 Tab 文本（去掉 "(加载中…)"）
+                tab.Page.Text = $"{objType}.{objName}";
+                // 填充实际脚本
+                tab.SetEditorText(script ?? $"-- 加载 {objType}.{objName} 失败：脚本为空");
+                // 光标到末尾、Focus Editor
+                tab.Editor.Select(script?.Length ?? 0, 0);
                 tab.Editor.Focus();
                 lblStatus.Text = $"已加载 {objType}.{objName}";
             });
@@ -426,8 +450,10 @@ public partial class SqlQueryForm : Form
         {
             BeginInvoke(() =>
             {
-                lblStatus.Text = $"加载 {objType}.{objName} 失败";
+                if (IsDisposed || tab.Page.IsDisposed) return;
+                tab.Page.Text = $"{objType}.{objName} (失败)";
                 GetActiveTab()?.AppendMessage($"[错误] 加载脚本失败: {ex.Message}\n");
+                lblStatus.Text = $"加载 {objType}.{objName} 失败";
             });
         }
     }
