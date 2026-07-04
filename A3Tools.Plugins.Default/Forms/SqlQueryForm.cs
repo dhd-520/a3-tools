@@ -172,8 +172,10 @@ public partial class SqlQueryForm : Form
             else
             {
                 // ★ 关键：Show 之前重新算位置 —— 解决"创建时位置对、最大化后又错"
-                _explorer.Location = ComputeExplorerLocation();
-                _explorer.Height = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
+                var newLoc = ComputeExplorerLocation();
+                var newH = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
+                // 用 Win32 SetWindowPos 强制设位置
+                SetWindowPos(_explorer.Handle, new IntPtr(-2), newLoc.X, newLoc.Y, 360, newH, 0x0040);
                 _explorer.Show();
                 _ = _explorer.RefreshAsync();
                 _explorerVisible = true;
@@ -193,9 +195,11 @@ public partial class SqlQueryForm : Form
             // Owner = this,  // 故意不设
             StartPosition = FormStartPosition.Manual,
         };
-        // ★ 用 SetBounds + BoundsSpecified.Location 强制定位 —— 避免 WinForms Owner Form
-        //   位置纠正逻辑（会夹回屏幕）。即使取消 Owner，加这一行更保险。
-        _explorer.SetBounds(loc.X, loc.Y, 360, h, BoundsSpecified.All);
+        // ★ 用 Win32 SetWindowPos 强制窗口位置（绕过 WinForms WM_WINDOWPOSCHANGING 纠正逻辑）
+        //   WinForms SetBounds 会被 WinForms 内部截获并改回去 → 必须用 SetWindowPos API
+        //   HWND_TOP = 0; HWND_NOTOPMOST = -2; SWP_SHOWWINDOW = 0x0040; SWP_NOSIZE = 0x0001;
+        var hwnd = _explorer.Handle;   // 创建句柄（还未 Show）
+        SetWindowPos(hwnd, new IntPtr(-2), loc.X, loc.Y, 0, 0, 0x0040 | 0x0001);
         _explorer.FormClosed += (_, args) =>
         {
             _explorerVisible = false;
@@ -212,6 +216,10 @@ public partial class SqlQueryForm : Form
         if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
         _explorerUserClosed = false;
     }
+
+    // Win32 P/Invoke
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
     /// <summary>主窗体尺寸/位置变化 → Explorer 跟随调整位置（防"位置错"）</summary>
     protected override void OnResize(EventArgs e)
@@ -230,8 +238,10 @@ public partial class SqlQueryForm : Form
     {
         if (_explorer == null || _explorer.IsDisposed || !_explorerVisible) return;
         if (WindowState == FormWindowState.Minimized) return;
-        _explorer.Location = ComputeExplorerLocation();
-        _explorer.Height = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
+        var loc = ComputeExplorerLocation();
+        var h = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
+        // ★ 用 Win32 SetWindowPos 强制窗口位置（绕过 WinForms WM_WINDOWPOSCHANGING 纠正）
+        SetWindowPos(_explorer.Handle, new IntPtr(-2), loc.X, loc.Y, 360, h, 0x0040);
     }
 
     /// <summary>父窗体关闭 → Explorer 一起关（避免孤儿窗口）</summary>
@@ -245,9 +255,14 @@ public partial class SqlQueryForm : Form
         }
         base.OnFormClosed(e);
     }
-    /// <summary>获取主窗体所在的屏幕 WorkArea（多屏支持）</summary>
+    /// <summary>获取所有虚拟屏的总 WorkArea（多屏合并）</summary>
     private Rectangle GetScreenWorkArea()
-        => Screen.FromControl(this).WorkingArea;
+    {
+        // VirtualScreen = 所有屏的总和（左上 0,0 + 总宽高）
+        var vs = SystemInformation.VirtualScreen;
+        // 去掉任务栏高度（多屏上任务栏可能不在底部）—— 简化用各屏 WorkArea 合并
+        return vs;
+    }
 
     /// <summary>
     /// Explorer 位置计算 — 严格限制在屏幕 WorkArea 内，永不出屏。
@@ -267,6 +282,16 @@ public partial class SqlQueryForm : Form
         // 默认位置：主窗体右侧 4 px
         int x = this.Right + gap;
         int y = this.Top;
+
+        // ★ 调试：打印实际位置/尺寸数值
+        System.Diagnostics.Debug.WriteLine($"[ComputeExplorerLocation] this.Bounds={this.Bounds} this.Right={this.Right} this.Top={this.Top} WindowState={this.WindowState} | wa={wa} | initial x={x} y={y}");
+
+        // ★★ 霸道 1：x + 360 > wa.Right（主窗体 Right 贴/超出 WorkArea 右） → 强制贴 WorkArea 右
+        if (this.Right >= wa.Right - 8)
+        {
+            x = wa.Right - 360;
+            System.Diagnostics.Debug.WriteLine($"[ComputeExplorerLocation] 霸道 1 触发（this.Right={this.Right} 贴/超 wa.Right={wa.Right}） → x={x}");
+        }
 
         // 严格边界检查：x 和 x + explorerWidth 必须在 [wa.Left, wa.Right] 内
         // 1. 右侧溢出
@@ -295,6 +320,8 @@ public partial class SqlQueryForm : Form
         if (y < wa.Top) y = wa.Top;
         // 底部溢出 → 上移到贴底但保留 200px
         if (y + 200 > wa.Bottom) y = Math.Max(wa.Top, wa.Bottom - 600);
+
+        System.Diagnostics.Debug.WriteLine($"[ComputeExplorerLocation] FINAL: x={x} y={y}");
 
         return new Point(x, y);
     }
