@@ -228,24 +228,34 @@ public partial class SqlQueryForm : Form
 
         var wa = GetScreenWorkArea();
 
-        // 期望：主窗体右侧 4 px
-        int x = this.Right + gap;
-        int y = this.Top;
+        int x, y;
 
-        // 右侧溢出 → 贴屏幕 WorkArea 右
-        if (x + explorerWidth > wa.Right)
+        // 主窗体最大化时：Explorer 没位置在右侧了（主窗体已经填满 WorkArea）。
+        // 改为“叠加在主窗体内部右侧”—— Explorer 覆盖部分编辑器但完全可见。
+        if (this.WindowState == FormWindowState.Maximized)
         {
-            // 优先试 主窗体左侧（如果左侧够宽）
-            if (this.Left - explorerWidth - gap >= wa.Left)
-                x = this.Left - explorerWidth - gap;
-            else
-                x = Math.Max(wa.Left, wa.Right - explorerWidth);
+            x = this.Right - explorerWidth;     // 主窗体内部右侧（Owned 叠加）
+            y = this.Top;
+        }
+        else
+        {
+            // 非最大化：首选主窗体右侧
+            x = this.Right + gap;
+            y = this.Top;
+
+            // 右侧溢出 → 左贴或贴屏幕右
+            if (x + explorerWidth > wa.Right)
+            {
+                if (this.Left - explorerWidth - gap >= wa.Left)
+                    x = this.Left - explorerWidth - gap;
+                else
+                    x = Math.Max(wa.Left, wa.Right - explorerWidth);
+            }
         }
 
-        // 顶部溢出（极少，但主屏顶可能为负）→ 贴 WorkArea 顶
+        // 顶部溢出 → 贴 WorkArea 顶
         if (y < wa.Top) y = wa.Top;
-
-        // 底部溢出 → 调整高度（位置保持顶部仍走 wa.Top）
+        // 底部溢出 → 上移
         if (y > wa.Bottom - 200) y = Math.Max(wa.Top, wa.Bottom - 600);
 
         return new Point(x, y);

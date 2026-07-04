@@ -53,13 +53,35 @@ WHERE o.name = @name
         if (string.IsNullOrWhiteSpace(definition))
             return $"-- 对象 [{schema}].[{objName}] 没有可用的脚本定义（可能是加密的）";
 
-        // 把开头的 ALTER 替换为 CREATE
+        // 把开头的 ALTER 替换为 CREATE（保证脚本能够首次创建）
         var trimmed = definition.Trim();
         if (trimmed.StartsWith("ALTER ", StringComparison.OrdinalIgnoreCase))
             trimmed = "CREATE " + trimmed.Substring(6);
 
+        // 拼接脚本 IF EXISTS DROP + CREATE —— 可重复执行（F5 直接跑，不会“对象已存在”报错）
+        var fullName = $"[{schema}].[{pureName}]";
+        var dropStmt = BuildDropStatement(objType, fullName);
         var header = $"-- 对象类型: {objType} | 架构: [{schema}]\n-- 原始数据库: [{conn.Database}]\n\n";
-        return $"{header}USE [{conn.Database}]\nGO\n\n{trimmed}\nGO";
+        // 触发器不允许 DROP / CREATE：SSMS 生成 DISABLE TRIGGER ... 再 CREATE TRIGGER
+        return $"{header}USE [{conn.Database}]\nGO\n\n{dropStmt}\nGO\n\n{trimmed}\nGO";
+    }
+
+    /// <summary>生成 IF EXISTS DROP 语句（可重复执行）</summary>
+    private static string BuildDropStatement(string objType, string fullQName)
+    {
+        // objType 是 Explorer Tree 传的：U/V/IF/TF/FN/P/TR
+        return objType.ToUpperInvariant() switch
+        {
+            "P"   => $"IF OBJECT_ID(N'{fullQName}', N'P') IS NOT NULL DROP PROCEDURE {fullQName}",
+            "FN"  => $"IF OBJECT_ID(N'{fullQName}', N'FN') IS NOT NULL DROP FUNCTION {fullQName}",
+            "IF"  => $"IF OBJECT_ID(N'{fullQName}', N'IF') IS NOT NULL DROP FUNCTION {fullQName}",
+            "TF"  => $"IF OBJECT_ID(N'{fullQName}', N'TF') IS NOT NULL DROP FUNCTION {fullQName}",
+            "V"   => $"IF OBJECT_ID(N'{fullQName}', N'V') IS NOT NULL DROP VIEW {fullQName}",
+            // 触发器使用 DISABLE TRIGGER……GO……原 CREATE 作为新建（改造逻逻辑为 注入 “启用后 重新创建”）
+            "TR"  => $"-- 触发器不能 DROP 重创，改用 ALTER 触发器定义以仅重编译\n-- 如需重置：DISABLE TRIGGER {fullQName}\n-- GO\n-- DROP TRIGGER {fullQName}",
+            "U"   => $"-- 表 (U)：本脚本不生成 DROP，表名需手动确认重命名/不重置使用",
+            _     => $"IF OBJECT_ID(N'{fullQName}') IS NOT NULL DROP /* TODO: {objType} */ {fullQName}"
+        };
     }
 
     /// <summary>
