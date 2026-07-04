@@ -53,6 +53,9 @@ public partial class SqlQueryForm : Form
         // 异步加载数据库列表
         _ = LoadDatabasesAsync();
 
+        // 后台预热当前库的 IntelliSense 缓存（不阻塞 UI；切库时也会再拉）
+        _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
+
         // 顶栏快捷键：Ctrl+N 新建查询，Ctrl+W 关闭当前，F5 执行，Ctrl+F5 执行选中
         KeyPreview = true;
         KeyDown += (s, e) =>
@@ -90,6 +93,17 @@ public partial class SqlQueryForm : Form
 
     public string CurrentConnectionString => _currentConnStr;
 
+    /// <summary>
+    /// 把当前账套的 ConnectionString 同步给所有 Tab 编辑器 → IntelliSense 自动切到当前库。
+    /// NewTab / LoadDatabasesAsync / CmbDatabase_SelectedIndexChanged 都要调。
+    /// </summary>
+    private void SyncEditorConnectionStrings()
+    {
+        foreach (TabPage page in tabControl.TabPages)
+            if (page.Tag is SqlQueryTabPage tab)
+                tab.Editor.ConnectionString = _currentConnStr;
+    }
+
     private async Task LoadDatabasesAsync()
     {
         _loadingDbs = true;
@@ -123,6 +137,10 @@ public partial class SqlQueryForm : Form
         finally
         {
             _loadingDbs = false;
+            // 数据库列表刚加载完，可能已 auto 选定了具体库；
+            // 此时把 ConnectionString 同步到所有编辑器 + 启动一次 IntelliSense 缓存预热
+            SyncEditorConnectionStrings();
+            _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
         }
     }
 
@@ -135,6 +153,12 @@ public partial class SqlQueryForm : Form
         _currentConnStr = b.ConnectionString;
         lblStatus.Text = $"已切换到 [{db}]（下次执行生效）";
         lblConnInfo.Text = $"{_account.Database} / {db}";
+
+        // 切库后立刻把所有 Tab 编辑器的 ConnectionString 同步过去 → IntelliSense 自动切到新库
+        SyncEditorConnectionStrings();
+
+        // 后台预热新库的缓存（同 (server, db) 第二次只等结果；切了再切回来也只拉一次）
+        _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
     }
 
     private void BtnRefreshDb_Click(object? sender, EventArgs e) => _ = LoadDatabasesAsync();
@@ -168,6 +192,7 @@ public partial class SqlQueryForm : Form
         {
             Dock = DockStyle.Fill
         };
+        tab.Editor.ConnectionString = _currentConnStr;  // 让 IntelliSense 知道当前库
         tab.SetStatusReporter(UpdateStatus);
         page.Controls.Add(tab);
         page.Tag = tab;

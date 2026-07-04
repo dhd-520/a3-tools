@@ -234,7 +234,22 @@ public class SqlEditor : RichTextBox
     // IntelliSense
     // ============================================
 
-    /// <summary>获取当前光标位置之前的"单词"（连续字母/数字/下划线）</summary>
+    /// <summary>
+    /// 当前连接串（由 SqlQueryForm 在初始化 / 切库时同步设置）。
+    /// 用来让 IntelliSense 能拉当前库对象。
+    /// </summary>
+    public string? ConnectionString { get; set; }
+
+    /// <summary>
+    /// 获取当前光标位置之前的"候选 token"。
+    /// 比 GetCurrentWord 更宽：
+    ///   "Sel" -> "Sel"
+    ///   "dbo.Sel" -> "dbo.Sel"        （含 schema. 限定，一起拉）
+    ///   "Sales." -> "Sales."          （schema 限定，名字前缀为空 -> 弹该 schema 全对象）
+    ///   "[Sel" -> "[Sel"               （SSMS 风格的方括号转义，先不展开）
+    ///   "[dbo].[Sel" -> "[dbo].[Sel"
+    /// "." 视为单词一部分；其他标点（空格、`,`、`(`、`;`）视为分隔符。
+    /// </summary>
     private string GetCurrentWord()
     {
         int caret = SelectionStart;
@@ -243,14 +258,25 @@ public class SqlEditor : RichTextBox
         while (start > 0)
         {
             char c = Text[start - 1];
-            if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#') start--;
-            else break;
+            // 标识符 / . / [] 内的内容 视为单词一部分
+            if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#' || c == '.')
+                start--;
+            else if (c == ']' && start >= 2 && Text[start - 2] == '[')
+            {
+                // 跳过 `]` 后的内容直到 `[`
+                start--;
+                while (start > 0 && Text[start - 1] != '[')
+                    start--;
+                if (start > 0) start--; // 跳过 `[`
+            }
+            else
+                break;
         }
         if (start == caret) return "";
         return Text.Substring(start, caret - start);
     }
 
-    /// <summary>获取当前光标位置之前的完整单词（含界限）</summary>
+    /// <summary>获取当前光标位置之前的完整 token（含 schema. / [] 转义），与 GetCurrentWord 一致</summary>
     private int GetCurrentWordStart()
     {
         int caret = SelectionStart;
@@ -258,8 +284,17 @@ public class SqlEditor : RichTextBox
         while (start > 0)
         {
             char c = Text[start - 1];
-            if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#') start--;
-            else break;
+            if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#' || c == '.')
+                start--;
+            else if (c == ']' && start >= 2 && Text[start - 2] == '[')
+            {
+                start--;
+                while (start > 0 && Text[start - 1] != '[')
+                    start--;
+                if (start > 0) start--;
+            }
+            else
+                break;
         }
         return start;
     }
@@ -304,15 +339,10 @@ public class SqlEditor : RichTextBox
             return;
         }
 
-        // 检查上一个字符是否是标识符字符以外的（比如空格、`;` `,` `(` `)`）→ 才弹
+        // 光标位置：用于 1) popup 锚点 2) 给 SqlAliasResolver 留扩展点
         int caret = SelectionStart;
-        if (caret > 0)
-        {
-            char prev = Text[caret - 1];
-            // 若上一次输入是字母/数字，继续更新过滤；若是空格等非标识符，说明单词刚开始 → 显示列表
-        }
 
-        var matches = SqlIntelliSenseProvider.Filter(word, 60).ToList();
+        var matches = SqlIntelliSenseProvider.GetSuggestions(word, ConnectionString, Text, caret, 80).ToList();
         if (matches.Count == 0)
         {
             _intelliSense.Hide();
@@ -339,7 +369,7 @@ public class SqlEditor : RichTextBox
             screenPos = PointToScreen(new Point(charPos.X, charPos.Y + lineHeight + 2));
         }
 
-        _intelliSense.ShowNearCaret(this, screenPos, 280, 240, matches);
+        _intelliSense.ShowNearCaret(this, screenPos, 320, 280, matches);
     }
 
     // ============================================
