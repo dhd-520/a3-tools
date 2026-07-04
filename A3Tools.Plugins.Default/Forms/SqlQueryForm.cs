@@ -266,29 +266,23 @@ public partial class SqlQueryForm : Form
     /// <summary>
     /// Explorer 位置 — 与主窗体右边对齐（【陛下决定】）。
     ///
-    /// 思路：不管主窗体跨几个屏、多大、多偏，Explorer 右边 = 主窗体右边。
-    /// - 主窗体右在某屏内 → Explorer 贴主窗体右，完全可见
-    /// - 主窗体右超出某屏 → Explorer 夹到该屏 WorkArea 右，× 按钮还在屏内
-    /// - 不依赖 WindowState，不依赖多屏拼接，不依赖 WinForms 内部逻辑
-    ///
-    /// 公式：x = min(this.Right - _explorerWidth, wa.Right - _explorerWidth)
+    /// 公式：x = this.Right - 360
     ///      y = this.Top（贴顶）夹到 wa 内
     /// </summary>
     private Point ComputeExplorerLocation()
     {
         var wa = GetScreenWorkArea();
 
-        // Explorer 宽度 = 360（如果已创建则用实际宽度，避免边框计算错误）
-        int explorerWidth = (_explorer != null && !_explorer.IsDisposed)
-            ? _explorer.Width
-            : 360;
+        // ★ Explorer 实际窗体宽度 = 360（含边框 16，ClientSize = 344）
+        // 不依赖 _explorer.Width（创建时可能是默认值）
+        const int explorerWidth = 360;
 
         // Explorer 右边 = 主窗体右边
         int x = this.Right - explorerWidth;
-        // 不能超出该屏 WorkArea 右（否则 × 按钮出屏）
+        // 不能超出该屏 WorkArea 右
         if (x + explorerWidth > wa.Right)
             x = wa.Right - explorerWidth;
-        // 也不能小于 wa.Left
+        // 不能小于 wa.Left
         if (x < wa.Left)
             x = wa.Left;
 
