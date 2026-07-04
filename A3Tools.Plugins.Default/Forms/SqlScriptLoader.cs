@@ -21,6 +21,16 @@ public static class SqlScriptLoader
         if (string.IsNullOrWhiteSpace(connStr)) throw new ArgumentException("connStr 不能为空", nameof(connStr));
         if (string.IsNullOrWhiteSpace(objName)) throw new ArgumentException("objName 不能为空", nameof(objName));
 
+        // 拆分 schema.name（如果传入带点）。SqlScriptLoader 总是按 schema, name 精确查，避免重名
+        string? schemaName = null;
+        string pureName = objName;
+        var dotIdx = objName.LastIndexOf('.');
+        if (dotIdx > 0)
+        {
+            schemaName = objName.Substring(0, dotIdx);
+            pureName = objName.Substring(dotIdx + 1);
+        }
+
         using var conn = new SqlConnection(connStr);
         await conn.OpenAsync();
 
@@ -28,10 +38,12 @@ public static class SqlScriptLoader
 SELECT m.definition, o.type, o.type_desc, SCHEMA_NAME(o.schema_id) AS [schema]
 FROM sys.sql_modules m
 JOIN sys.objects o ON m.object_id = o.object_id
-WHERE o.name = @name";
+WHERE o.name = @name
+  AND (@schema IS NULL OR SCHEMA_NAME(o.schema_id) = @schema)";
 
         using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@name", objName);
+        cmd.Parameters.AddWithValue("@name", pureName);
+        cmd.Parameters.AddWithValue("@schema", (object?)schemaName ?? DBNull.Value);
 
         using var r = await cmd.ExecuteReaderAsync();
         if (!await r.ReadAsync()) return null;

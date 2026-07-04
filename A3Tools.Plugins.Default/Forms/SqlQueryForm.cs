@@ -16,6 +16,9 @@ public partial class SqlQueryForm : Form
     private string _currentConnStr = "";   // 含当前选择的 InitialCatalog
 
     private int _untitledIndex = 0;
+    private ObjectExplorerForm? _explorer;   // 单例：与主窗体绑定：打开一次 → 关闭窗口 → 隐藏
+    private bool _explorerUserClosed = false; // 用户点击 × 后不再默认打开，需点工具栏重开
+    private bool _explorerVisible = false;    // 工具栏 toggle 状态
 
     /// <summary>LoadDatabasesAsync 运行中（初始化 / 刷新期间），避免 SelectedIndexChanged 覆盖用户手动选择</summary>
     private bool _loadingDbs = false;
@@ -141,7 +144,74 @@ public partial class SqlQueryForm : Form
             // 此时把 ConnectionString 同步到所有编辑器 + 启动一次 IntelliSense 缓存预热
             SyncEditorConnectionStrings();
             _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
+
+            // Explorer 已打开 → 自动刷新
+            if (_explorer != null && !_explorer.IsDisposed && _explorer.Visible)
+                _ = _explorer.RefreshAsync();
         }
+    }
+
+    // ============================================
+    // 对象资源管理器
+    // ============================================
+
+    /// <summary>
+    /// 切换 Explorer 显示状态（带 CheckOnClick=true 的按钮）。
+    /// 首次打开：从 Owner 右侧弹出；后续 Show/Hide 切换；用户关掉 × 后需按钮重启。
+    /// </summary>
+    private void BtnToggleExplorer_Click(object? sender, EventArgs e)
+    {
+        if (_explorer != null && !_explorer.IsDisposed)
+        {
+            if (_explorerVisible)
+            {
+                _explorer.Hide();
+                _explorerVisible = false;
+                if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 对象资源管理器";
+            }
+            else
+            {
+                _explorer.Show();
+                _ = _explorer.RefreshAsync();
+                _explorerVisible = true;
+                if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
+            }
+            return;
+        }
+
+        // 创建新的 Explorer
+        _explorer = new ObjectExplorerForm(this)
+        {
+            Owner = this,
+            Location = new Point(this.Right + 4, this.Top),
+            Height = this.Height
+        };
+        _explorer.FormClosed += (_, args) =>
+        {
+            _explorerVisible = false;
+            if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 对象资源管理器";
+            if (args.CloseReason == CloseReason.UserClosing)
+                _explorerUserClosed = true;
+            else
+                _explorerUserClosed = false;
+        };
+        _explorer.Show();
+        _ = _explorer.RefreshAsync();
+        _explorerVisible = true;
+        if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
+        _explorerUserClosed = false;
+    }
+
+    /// <summary>父窗体关闭 → Explorer 一起关（避免孤儿窗口）</summary>
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        if (_explorer != null && !_explorer.IsDisposed)
+        {
+            try { _explorer.Close(); } catch { /* may already closed */ }
+            _explorer.Dispose();
+            _explorer = null;
+        }
+        base.OnFormClosed(e);
     }
 
     private void CmbDatabase_SelectedIndexChanged(object? sender, EventArgs e)
@@ -159,6 +229,10 @@ public partial class SqlQueryForm : Form
 
         // 后台预热新库的缓存（同 (server, db) 第二次只等结果；切了再切回来也只拉一次）
         _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
+
+        // Explorer 已打开 → 刷新
+        if (_explorer != null && !_explorer.IsDisposed && _explorer.Visible)
+            _ = _explorer.RefreshAsync();
     }
 
     private void BtnRefreshDb_Click(object? sender, EventArgs e) => _ = LoadDatabasesAsync();

@@ -20,7 +20,27 @@ namespace A3Tools.Plugins.Default.Forms;
 /// </summary>
 public static class SqlObjectSchemaCache
 {
-    public enum ObjectKind { Table, View, TableValuedFunction, ScalarFunction }
+    public enum ObjectKind
+    {
+        Table,                       // U
+        View,                        // V
+        TableValuedFunction,         // IF / TF
+        ScalarFunction,              // FN
+        StoredProcedure,             // P
+        Trigger                      // TR
+    }
+
+    /// <summary>将 ObjectKind 拼成 SQL Server sys.objects.type 列表</summary>
+    public static string KindToTypeChar(ObjectKind kind) => kind switch
+    {
+        ObjectKind.Table => "U",
+        ObjectKind.View => "V",
+        ObjectKind.TableValuedFunction => "IF,TF",
+        ObjectKind.ScalarFunction => "FN",
+        ObjectKind.StoredProcedure => "P",
+        ObjectKind.Trigger => "TR",
+        _ => "U"
+    };
 
     public record DbObject(string SchemaName, string Name, ObjectKind Kind, string? Columns = null);
 
@@ -128,6 +148,30 @@ public static class SqlObjectSchemaCache
         return matches;
     }
 
+    /// <summary>
+    /// 从缓存取按 kind 过滤的所有对象（用于对象资源管理器）。
+    /// 注意：返回时直接给出 DbObject 列表，方便 explorer 拿到 Schema+Name+Columns。
+    /// </summary>
+    /// <param name="connectionString">当前连接的 connectionString</param>
+    /// <param name="kinds">返回哪些类型的对象；同时包含 Column 数据。</param>
+    public static List<DbObject> GetObjectsByKind(string connectionString, IEnumerable<ObjectKind> kinds)
+    {
+        var result = new List<DbObject>();
+        if (string.IsNullOrEmpty(connectionString)) return result;
+
+        ServerDb? sd;
+        try { (_, sd) = ParseKey(connectionString); }
+        catch { return result; }
+        if (sd == null || string.IsNullOrEmpty(sd.Database)) return result;
+
+        var key = $"{sd.Server}|{sd.Database}";
+        if (!_cache.TryGetValue(key, out var entry)) return result;
+
+        var kindSet = new HashSet<ObjectKind>(kinds);
+        result = entry.Objects.Where(o => kindSet.Contains(o.Kind)).ToList();
+        return result;
+    }
+
     /// <summary>取某个对象的列名（暂未用到，先留接口）</summary>
     public static List<string> GetColumnSuggestions(string connectionString, string? schema, string objectName, string columnPrefix)
     {
@@ -187,7 +231,7 @@ public static class SqlObjectSchemaCache
     /// <summary>缓存条目 1 小时有效（一般切换是用户主动，1h 太长；2 分钟更友好）</summary>
     private static bool IsStale(CacheEntry e) => (DateTime.UtcNow - e.LoadedAt) > TimeSpan.FromMinutes(2);
 
-    /// <summary>从数据库拉"用户可见的所有 schema-bounded 对象"</summary>
+    /// <summary>从数据库拉"用户可见的所有 schema-bounded 对象"（含存储过程/触发器）</summary>
     private static async Task<List<DbObject>> LoadFromDbAsync(string connStr)
     {
         var list = new List<DbObject>();
@@ -196,24 +240,26 @@ public static class SqlObjectSchemaCache
             using var conn = new SqlConnection(connStr);
             await conn.OpenAsync();
 
-            // 一条查询拉 4 类对象 + 列（sys.columns 拼出 "col1,col2,..."）
-            // sys.objects.type 列对照：U=Table, V=View, IF=Inline TVF, TF=Multi-stmt TVF, FN=Scalar Function
+            // sys.objects.type 列对照：U=Table, V=View, IF=Inline TVF, TF=Multi-stmt TVF, FN=Scalar Function, P=Procedure, TR=Trigger
+            // 存储过程/触发器没有列，跳过 ColumnsCsv
             const string sql = @"
 SELECT
     s.name           AS SchemaName,
     o.name           AS ObjectName,
     o.type           AS ObjectType,
     OBJECT_SCHEMA_NAME(o.object_id) AS SchemaName2,
-    (
-        SELECT STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY c.column_id)
-        FROM sys.columns c
-        WHERE c.object_id = o.object_id
-    ) AS ColumnsCsv
+    CASE WHEN o.type IN ('U','V','IF','TF','FN') THEN
+        (
+            SELECT STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY c.column_id)
+            FROM sys.columns c
+            WHERE c.object_id = o.object_id
+        )
+    END AS ColumnsCsv
 FROM sys.objects o
 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
-WHERE o.type IN ('U','V','IF','TF','FN')  -- Table / View / Inline TVF / Multi-stmt TVF / Scalar Function
-  AND o.is_ms_shipped = 0                  -- 排除系统对象
-  AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest')  -- 排除系统 schema
+WHERE o.type IN ('U','V','IF','TF','FN','P','TR')  -- 7 种
+  AND o.is_ms_shipped = 0                           -- 排除系统对象
+  AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest')
 ORDER BY s.name, o.name";
 
             using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 5 };
@@ -231,6 +277,8 @@ ORDER BY s.name, o.name";
                     "V" => ObjectKind.View,
                     "IF" or "TF" => ObjectKind.TableValuedFunction,
                     "FN" => ObjectKind.ScalarFunction,
+                    "P" => ObjectKind.StoredProcedure,
+                    "TR" => ObjectKind.Trigger,
                     _ => ObjectKind.Table
                 };
                 list.Add(new DbObject(schema, name, kind, cols));

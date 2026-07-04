@@ -19,6 +19,7 @@ partial class SqlQueryForm
     private Button btnNewTab;
     private Button btnCloseCurrent;
     private Button btnCloseOthers;
+    private Button btnToggleExplorer;
 
     private TabControl tabControl;
     private ContextMenuStrip ctxTab;
@@ -53,6 +54,7 @@ partial class SqlQueryForm
         btnNewTab = new Button();
         btnCloseCurrent = new Button();
         btnCloseOthers = new Button();
+        btnToggleExplorer = new Button();
         tabControl = new TabControl();
         statusStrip = new StatusStrip();
         lblConnInfo = new ToolStripStatusLabel();
@@ -172,6 +174,7 @@ partial class SqlQueryForm
         pnlToolBar.Controls.Add(btnNewTab);
         pnlToolBar.Controls.Add(btnCloseCurrent);
         pnlToolBar.Controls.Add(btnCloseOthers);
+        pnlToolBar.Controls.Add(btnToggleExplorer);
         pnlToolBar.Dock = DockStyle.Top;
         pnlToolBar.Location = new Point(0, 40);
         pnlToolBar.Name = "pnlToolBar";
@@ -198,13 +201,23 @@ partial class SqlQueryForm
         btnCloseCurrent.Click += BtnCloseCurrent_Click;
         // 
         // btnCloseOthers
-        // 
+        //
         btnCloseOthers.Location = new Point(249, 4);
         btnCloseOthers.Name = "btnCloseOthers";
         btnCloseOthers.Size = new Size(174, 32);
         btnCloseOthers.TabIndex = 2;
         btnCloseOthers.Text = "× 关闭其他";
         btnCloseOthers.Click += BtnCloseOthers_Click;
+
+        //
+        // btnToggleExplorer
+        //
+        btnToggleExplorer.Location = new Point(450, 4);
+        btnToggleExplorer.Name = "btnToggleExplorer";
+        btnToggleExplorer.Size = new Size(180, 32);
+        btnToggleExplorer.TabIndex = 3;
+        btnToggleExplorer.Text = "📂 对象资源管理器";
+        btnToggleExplorer.Click += BtnToggleExplorer_Click;
         // 
         // tabControl
         // 
