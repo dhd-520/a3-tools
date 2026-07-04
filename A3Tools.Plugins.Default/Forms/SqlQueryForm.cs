@@ -254,15 +254,14 @@ public partial class SqlQueryForm : Form
     {
         if (_explorer != null && !_explorer.IsDisposed)
         {
-            try { _explorer.Close(); } catch { /* may already closed */ }
-            _explorer.Dispose();
+            try { _explorer.Close(); _explorer.Dispose(); } catch { /* may already closed */ }       
             _explorer = null;
         }
         base.OnFormClosed(e);
     }
-    /// <summary>获取主窗体所在的屏幕 WorkArea（多屏支持）</summary>
+    /// <summary>获取主屏的 WorkArea（不考虑主窗体位置，固定是 PrimaryScreen）</summary>
     private Rectangle GetScreenWorkArea()
-        => Screen.FromControl(this).WorkingArea;
+        => Screen.PrimaryScreen.WorkingArea;
 
     /// <summary>
     /// Explorer 位置计算 — 严格限制在屏幕 WorkArea 内，永不出屏。
