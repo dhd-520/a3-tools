@@ -264,7 +264,8 @@ public partial class SqlQueryForm : Form
         };
         var tab = new SqlQueryTabPage(this)
         {
-            Dock = DockStyle.Fill
+            Dock = DockStyle.Fill,
+            Page = page   // ★ 重要：让 tab.Page 指向 TabPage，Supply 脚本加载完成后能更新 Tab.Text
         };
         tab.Editor.ConnectionString = _currentConnStr;  // 让 IntelliSense 知道当前库
         tab.SetStatusReporter(UpdateStatus);
@@ -432,12 +433,14 @@ public partial class SqlQueryForm : Form
             lblStatus.Text = $"加载 {objType}.{objName} ...";
             var script = await SqlScriptLoader.LoadCreateScriptAsync(_currentConnStr, objType, objName);
 
-            // 在 UI 线程上动 Tab
+            // 在 UI 线程上动 Tab（使用 IsDisposed 判断而不是 tab.Page.IsDisposed，避免 Page 在 close 路径下被非法访问）
             BeginInvoke(() =>
             {
-                if (IsDisposed || tab.Page.IsDisposed) return;
+                if (IsDisposed || tab.IsDisposed) return;        // tab 本身是最可靠的检查点
+                var page = tab.Page;                            // 此处 Page 必定 != null（NewTab 已设）
+                if (page == null || page.IsDisposed) return;    // 防 TabPage 被外部关窗后丢引用
                 // 改 Tab 文本（去掉 "(加载中…)"）
-                tab.Page.Text = $"{objType}.{objName}";
+                page.Text = $"{objType}.{objName}";
                 // 填充实际脚本
                 tab.SetEditorText(script ?? $"-- 加载 {objType}.{objName} 失败：脚本为空");
                 // 光标到末尾、Focus Editor
@@ -450,8 +453,9 @@ public partial class SqlQueryForm : Form
         {
             BeginInvoke(() =>
             {
-                if (IsDisposed || tab.Page.IsDisposed) return;
-                tab.Page.Text = $"{objType}.{objName} (失败)";
+                if (IsDisposed || tab.IsDisposed) return;
+                var page = tab.Page;
+                if (page != null && !page.IsDisposed) page.Text = $"{objType}.{objName} (失败)";
                 GetActiveTab()?.AppendMessage($"[错误] 加载脚本失败: {ex.Message}\n");
                 lblStatus.Text = $"加载 {objType}.{objName} 失败";
             });
