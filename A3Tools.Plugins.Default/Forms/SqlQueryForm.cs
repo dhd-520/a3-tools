@@ -171,6 +171,9 @@ public partial class SqlQueryForm : Form
             }
             else
             {
+                // ★ 关键：Show 之前重新算位置 —— 解决"创建时位置对、最大化后又错"
+                _explorer.Location = ComputeExplorerLocation();
+                _explorer.Height = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
                 _explorer.Show();
                 _ = _explorer.RefreshAsync();
                 _explorerVisible = true;
@@ -183,8 +186,6 @@ public partial class SqlQueryForm : Form
         _explorer = new ObjectExplorerForm(this)
         {
             Owner = this,
-            // ★ 边界检测：主窗体最大化时 this.Right 可在屏幕外，避免 Explorer 看不到。
-            // 计算期望位置 = 主窗体右侧 + 4 px。若溢出 → 贴主屏 WorkArea 右/上/下。
             Location = ComputeExplorerLocation(),
             Height = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8)
         };
@@ -196,12 +197,36 @@ public partial class SqlQueryForm : Form
                 _explorerUserClosed = true;
             else
                 _explorerUserClosed = false;
+            // ★ 关键：Close 之后置 null，下次点按钮会走"创建新"分支重新计算 Location。
+            // 否则下次 Show 会重用创建时的位置（可能在屏幕外）。
+            _explorer = null;
         };
         _explorer.Show();
         _ = _explorer.RefreshAsync();
         _explorerVisible = true;
         if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
         _explorerUserClosed = false;
+    }
+
+    /// <summary>主窗体尺寸/位置变化 → Explorer 跟随调整位置（防"位置错"）</summary>
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        UpdateExplorerBounds();
+    }
+
+    protected override void OnMove(EventArgs e)
+    {
+        base.OnMove(e);
+        UpdateExplorerBounds();
+    }
+
+    private void UpdateExplorerBounds()
+    {
+        if (_explorer == null || _explorer.IsDisposed || !_explorerVisible) return;
+        if (WindowState == FormWindowState.Minimized) return;
+        _explorer.Location = ComputeExplorerLocation();
+        _explorer.Height = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
     }
 
     /// <summary>父窗体关闭 → Explorer 一起关（避免孤儿窗口）</summary>
