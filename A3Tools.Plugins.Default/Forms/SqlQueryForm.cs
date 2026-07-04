@@ -188,18 +188,20 @@ public partial class SqlQueryForm : Form
         // ★ 不设 Owner！WinForms Owner Form 会自动限制子窗体位置（X 超出屏幕 → 夹回）
         //   取消 Owner 后我们完全控制 Explorer 位置（不依赖 WinForms 内部逻辑）
         //   关闭跟随靠主窗体 OnFormClosed 实现
-        var loc = ComputeExplorerLocation();
-        var h = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
+        const int explorerWidth2 = 360;
+        var newLoc2 = ComputeExplorerLocation();
+        var newH2 = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
         _explorer = new ObjectExplorerForm(this)
         {
             // Owner = this,  // 故意不设
             StartPosition = FormStartPosition.Manual,
+            Size = new Size(explorerWidth2, newH2),    // ★ 必须设 Size，默认是 100x100
         };
         // ★ 用 Win32 SetWindowPos 强制窗口位置（绕过 WinForms WM_WINDOWPOSCHANGING 纠正逻辑）
         //   WinForms SetBounds 会被 WinForms 内部截获并改回去 → 必须用 SetWindowPos API
         //   HWND_TOP = 0; HWND_NOTOPMOST = -2; SWP_SHOWWINDOW = 0x0040; SWP_NOSIZE = 0x0001;
-        var hwnd = _explorer.Handle;   // 创建句柄（还未 Show）
-        SetWindowPos(hwnd, new IntPtr(-2), loc.X, loc.Y, 0, 0, 0x0040 | 0x0001);
+        // ★ 用 _explorer.Show() 代替 SetWindowPos 的 SWP_SHOWWINDOW
+        _explorer.SetBounds(newLoc2.X, newLoc2.Y, explorerWidth2, newH2);
         _explorer.FormClosed += (_, args) =>
         {
             _explorerVisible = false;
@@ -211,6 +213,9 @@ public partial class SqlQueryForm : Form
             _explorer = null;
         };
         _explorer.Show();
+        // ★ Show 后再 SetWindowPos 强制设位置（防止 WinForms 改位置）
+        var hwnd2 = _explorer.Handle;
+        SetWindowPos(hwnd2, new IntPtr(-2), newLoc2.X, newLoc2.Y, explorerWidth2, newH2, 0x0004);  // SWP_NOMOVE 错位校正 + SWP_NOZORDER 错位校正
         _ = _explorer.RefreshAsync();
         _explorerVisible = true;
         if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
@@ -255,14 +260,9 @@ public partial class SqlQueryForm : Form
         }
         base.OnFormClosed(e);
     }
-    /// <summary>获取所有虚拟屏的总 WorkArea（多屏合并）</summary>
+    /// <summary>获取主窗体所在的屏幕 WorkArea（多屏支持）</summary>
     private Rectangle GetScreenWorkArea()
-    {
-        // VirtualScreen = 所有屏的总和（左上 0,0 + 总宽高）
-        var vs = SystemInformation.VirtualScreen;
-        // 去掉任务栏高度（多屏上任务栏可能不在底部）—— 简化用各屏 WorkArea 合并
-        return vs;
-    }
+        => Screen.FromControl(this).WorkingArea;
 
     /// <summary>
     /// Explorer 位置计算 — 严格限制在屏幕 WorkArea 内，永不出屏。
