@@ -16,6 +16,17 @@ public static class SqlScriptLoader
     /// <param name="objType">对象类型描述（P=存储过程 FN=标量函数 TF=表函数 IF=内联表函数 V=视图 TR=触发器 U=表）— 仅用于日志</param>
     /// <param name="objName">对象名</param>
     /// <returns>CREATE 脚本；找不到返回 null</returns>
+    /// <summary>
+    /// 加载对象脚本（默认 "ALTER 到" 模式，与 SSMS 双击行为一致）。
+    ///
+    /// 为什么不生成 "IF EXISTS DROP + CREATE"：
+    ///   - DROP 会破坏对象的权限 (GRANT EXECUTE)、依赖（引用这个 proc 的 view/func 会被标记 recompile）、
+    ///     扩展属性 (MS_Description)、SEED 等
+    ///   - SSMS 双击存储过程默认就是 ALTER PROCEDURE，不删重建
+    ///
+    /// 所以默认输出是 "ALTER PROC/FN/View/Trigger"。用户修改 SQL 后 F5 直接生效。
+    /// 如果对象不存在（双击了一个不存在的对象） — ALTER 会报错，符合预期。
+    /// </summary>
     public static async Task<string?> LoadCreateScriptAsync(string connStr, string objType, string objName)
     {
         if (string.IsNullOrWhiteSpace(connStr)) throw new ArgumentException("connStr 不能为空", nameof(connStr));
@@ -53,35 +64,17 @@ WHERE o.name = @name
         if (string.IsNullOrWhiteSpace(definition))
             return $"-- 对象 [{schema}].[{objName}] 没有可用的脚本定义（可能是加密的）";
 
-        // 把开头的 ALTER 替换为 CREATE（保证脚本能够首次创建）
+        // 把 CREATE/ALTER 统一改成 ALTER（SSMS "Alter To" 行为）
+        // - 不删对象 → 保留权限 / 依赖 / 扩展属性 / SEED 等
+        // - SQL Server 支持 ALTER PROCEDURE / ALTER FUNCTION / ALTER VIEW / ALTER TRIGGER
         var trimmed = definition.Trim();
-        if (trimmed.StartsWith("ALTER ", StringComparison.OrdinalIgnoreCase))
-            trimmed = "CREATE " + trimmed.Substring(6);
+        if (trimmed.StartsWith("CREATE ", StringComparison.OrdinalIgnoreCase))
+            trimmed = "ALTER " + trimmed.Substring(7);
+        // 如果原本来就是 ALTER，保持不变
 
-        // 拼接脚本 IF EXISTS DROP + CREATE —— 可重复执行（F5 直接跑，不会“对象已存在”报错）
-        var fullName = $"[{schema}].[{pureName}]";
-        var dropStmt = BuildDropStatement(objType, fullName);
-        var header = $"-- 对象类型: {objType} | 架构: [{schema}]\n-- 原始数据库: [{conn.Database}]\n\n";
-        // 触发器不允许 DROP / CREATE：SSMS 生成 DISABLE TRIGGER ... 再 CREATE TRIGGER
-        return $"{header}USE [{conn.Database}]\nGO\n\n{dropStmt}\nGO\n\n{trimmed}\nGO";
-    }
-
-    /// <summary>生成 IF EXISTS DROP 语句（可重复执行）</summary>
-    private static string BuildDropStatement(string objType, string fullQName)
-    {
-        // objType 是 Explorer Tree 传的：U/V/IF/TF/FN/P/TR
-        return objType.ToUpperInvariant() switch
-        {
-            "P"   => $"IF OBJECT_ID(N'{fullQName}', N'P') IS NOT NULL DROP PROCEDURE {fullQName}",
-            "FN"  => $"IF OBJECT_ID(N'{fullQName}', N'FN') IS NOT NULL DROP FUNCTION {fullQName}",
-            "IF"  => $"IF OBJECT_ID(N'{fullQName}', N'IF') IS NOT NULL DROP FUNCTION {fullQName}",
-            "TF"  => $"IF OBJECT_ID(N'{fullQName}', N'TF') IS NOT NULL DROP FUNCTION {fullQName}",
-            "V"   => $"IF OBJECT_ID(N'{fullQName}', N'V') IS NOT NULL DROP VIEW {fullQName}",
-            // 触发器使用 DISABLE TRIGGER……GO……原 CREATE 作为新建（改造逻逻辑为 注入 “启用后 重新创建”）
-            "TR"  => $"-- 触发器不能 DROP 重创，改用 ALTER 触发器定义以仅重编译\n-- 如需重置：DISABLE TRIGGER {fullQName}\n-- GO\n-- DROP TRIGGER {fullQName}",
-            "U"   => $"-- 表 (U)：本脚本不生成 DROP，表名需手动确认重命名/不重置使用",
-            _     => $"IF OBJECT_ID(N'{fullQName}') IS NOT NULL DROP /* TODO: {objType} */ {fullQName}"
-        };
+        // 顶部 USE 切到原始库；如果用户在编辑器换库不会冲突
+        var header = $"-- 对象类型: {objType} | 架构: [{schema}]\n-- 原始数据库: [{conn.Database}]\n-- 双击加载（默认 ALTER 模式）：修改 SQL 后 F5 生效\n\n";
+        return $"{header}USE [{conn.Database}]\nGO\n\n{trimmed}\nGO";
     }
 
     /// <summary>
