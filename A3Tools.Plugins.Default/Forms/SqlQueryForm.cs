@@ -185,8 +185,6 @@ public partial class SqlQueryForm : Form
         }
 
         // 创建新的 Explorer
-        // ★ 不设 Owner！WinForms Owner Form 会自动限制子窗体位置
-        //   关闭跟随靠主窗体 OnFormClosed 实现
         var newLoc2 = ComputeExplorerLocation();
         var newH2 = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
         _explorer = new ObjectExplorerForm(this)
@@ -204,10 +202,12 @@ public partial class SqlQueryForm : Form
             _explorer = null;
         };
         _explorer.Show();
-        // ★ Show 后用 Win32 SetWindowPos 强制设精确位置+大小（绕过 WinForms 自动布局）
-        //   0x0010 = SWP_NOZORDER, 0x0004 = SWP_NOACTIVATE, 0x0020 = SWP_FRAMECHANGED
+        // ★ 先 Show 拿到实际 Width（含边框）
+        var actualWidth = _explorer.Width;     // 实际含边框的宽
+        // ★ 再根据实际宽重新计算位置
+        newLoc2 = new Point(this.Right - actualWidth, newLoc2.Y);
         var hwnd = _explorer.Handle;
-        SetWindowPos(hwnd, IntPtr.Zero, newLoc2.X, newLoc2.Y, 320, newH2, 0x0010 | 0x0004 | 0x0020);
+        SetWindowPos(hwnd, IntPtr.Zero, newLoc2.X, newLoc2.Y, actualWidth, newH2, 0x0010 | 0x0004 | 0x0020);
         _ = _explorer.RefreshAsync();
         _explorerVisible = true;
         if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
