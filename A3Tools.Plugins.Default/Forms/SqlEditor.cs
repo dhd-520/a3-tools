@@ -18,6 +18,13 @@ public class SqlEditor : RichTextBox
     private const int WM_HSCROLL = 0x114;
     private const int EM_LINESCROLL = 0xB6;
 
+    // 冻结重绘：设置重绘抑制标志 + 解除后强制刷新。避免高亮过程中多次
+    // Select + SelectionColor 引起的 RichTextBox 闪烁（richEdit 重绘不双缓冲，
+    // 每设色都刷一次 → 闪）。
+    private const int WM_SETREDRAW = 0x000B;
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
     private readonly System.Windows.Forms.Timer _highlightTimer;
     private bool _suppressHighlight;
 
@@ -428,6 +435,8 @@ public class SqlEditor : RichTextBox
         int selLen = SelectionLength;
 
         _suppressHighlight = true;
+        // 冻结重绘 → 防 RichTextBox 闪烁（仅窗口被冻结，不影响其他控件）
+        SendMessage(Handle, WM_SETREDRAW, (IntPtr)0, IntPtr.Zero);
         try
         {
             SuspendLayout();
@@ -482,6 +491,9 @@ public class SqlEditor : RichTextBox
         {
             ResumeLayout();
             _suppressHighlight = false;
+            // 解冻重绘 + 主动 Invalidate：让富文本一次性画出，跳过中间状态
+            SendMessage(Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+            Invalidate();
         }
     }
 }

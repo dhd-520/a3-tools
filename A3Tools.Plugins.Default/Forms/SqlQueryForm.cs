@@ -183,8 +183,10 @@ public partial class SqlQueryForm : Form
         _explorer = new ObjectExplorerForm(this)
         {
             Owner = this,
-            Location = new Point(this.Right + 4, this.Top),
-            Height = this.Height
+            // ★ 边界检测：主窗体最大化时 this.Right 可在屏幕外，避免 Explorer 看不到。
+            // 计算期望位置 = 主窗体右侧 + 4 px。若溢出 → 贴主屏 WorkArea 右/上/下。
+            Location = ComputeExplorerLocation(),
+            Height = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8)
         };
         _explorer.FormClosed += (_, args) =>
         {
@@ -212,6 +214,41 @@ public partial class SqlQueryForm : Form
             _explorer = null;
         }
         base.OnFormClosed(e);
+    }
+
+    /// <summary>获取主窗体所在的屏幕 WorkArea（多屏支持）</summary>
+    private Rectangle GetScreenWorkArea()
+        => Screen.FromControl(this).WorkingArea;
+
+    /// <summary>Explorer 首选位置 = 主窗体右侧；溢出 → 贴屏幕右/左/上/下，务必可见</summary>
+    private Point ComputeExplorerLocation()
+    {
+        const int explorerWidth = 360;
+        const int gap = 4;
+
+        var wa = GetScreenWorkArea();
+
+        // 期望：主窗体右侧 4 px
+        int x = this.Right + gap;
+        int y = this.Top;
+
+        // 右侧溢出 → 贴屏幕 WorkArea 右
+        if (x + explorerWidth > wa.Right)
+        {
+            // 优先试 主窗体左侧（如果左侧够宽）
+            if (this.Left - explorerWidth - gap >= wa.Left)
+                x = this.Left - explorerWidth - gap;
+            else
+                x = Math.Max(wa.Left, wa.Right - explorerWidth);
+        }
+
+        // 顶部溢出（极少，但主屏顶可能为负）→ 贴 WorkArea 顶
+        if (y < wa.Top) y = wa.Top;
+
+        // 底部溢出 → 调整高度（位置保持顶部仍走 wa.Top）
+        if (y > wa.Bottom - 200) y = Math.Max(wa.Top, wa.Bottom - 600);
+
+        return new Point(x, y);
     }
 
     private void CmbDatabase_SelectedIndexChanged(object? sender, EventArgs e)
