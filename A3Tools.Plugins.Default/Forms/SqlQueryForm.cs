@@ -264,63 +264,34 @@ public partial class SqlQueryForm : Form
         => Screen.PrimaryScreen.WorkingArea;
 
     /// <summary>
-    /// Explorer 位置计算 — 严格限制在屏幕 WorkArea 内，永不出屏。
+    /// Explorer 位置 — 与主窗体右边对齐（【陛下决定】）。
     ///
-    /// 为什么不用 "WindowState == Maximized" 判定全屏：
-    ///   - 陛下会启用 "真正全屏"（无边框全屏 Bounds）— 这时 WindowState = Normal
-    ///   - 也有可能主窗体位置/尺寸占满 WorkArea 但不叫 Maximized
-    ///   — 所以一律按 "this.Right 贴 WorkArea 右" 判定，按 WorkArea 边界限制 Explorer
+    /// 思路：不管主窗体跨几个屏、多大、多偏，Explorer 右边 = 主窗体右边。
+    /// - 主窗体右在某屏内 → Explorer 贴主窗体右，完全可见
+    /// - 主窗体右超出某屏 → Explorer 夹到该屏 WorkArea 右，× 按钮还在屏内
+    /// - 不依赖 WindowState，不依赖多屏拼接，不依赖 WinForms 内部逻辑
+    ///
+    /// 公式：x = min(this.Right - 360, wa.Right - 360)
+    ///      y = this.Top（贴顶）夹到 wa 内
     /// </summary>
     private Point ComputeExplorerLocation()
     {
         const int explorerWidth = 360;
-        const int gap = 4;
 
         var wa = GetScreenWorkArea();
 
-        // 默认位置：主窗体右侧 4 px
-        int x = this.Right + gap;
-        int y = this.Top;
-
-        // ★ 调试：打印实际位置/尺寸数值
-        System.Diagnostics.Debug.WriteLine($"[ComputeExplorerLocation] this.Bounds={this.Bounds} this.Right={this.Right} this.Top={this.Top} WindowState={this.WindowState} | wa={wa} | initial x={x} y={y}");
-
-        // ★★ 霸道 1：x + 360 > wa.Right（主窗体 Right 贴/超出 WorkArea 右） → 强制贴 WorkArea 右
-        if (this.Right >= wa.Right - 8)
-        {
-            x = wa.Right - 360;
-            System.Diagnostics.Debug.WriteLine($"[ComputeExplorerLocation] 霸道 1 触发（this.Right={this.Right} 贴/超 wa.Right={wa.Right}） → x={x}");
-        }
-
-        // 严格边界检查：x 和 x + explorerWidth 必须在 [wa.Left, wa.Right] 内
-        // 1. 右侧溢出
+        // Explorer 右边 = 主窗体右边（这是陛下的决定）
+        int x = this.Right - explorerWidth;
+        // 但不能超出该屏 WorkArea 右（否则 × 按钮出屏）
         if (x + explorerWidth > wa.Right)
-        {
-            // 优先贴主窗体左侧
-            if (this.Left - explorerWidth - gap >= wa.Left)
-                x = this.Left - explorerWidth - gap;
-            else
-                x = Math.Max(wa.Left, wa.Right - explorerWidth);    // 贴 WorkArea 右
-        }
-
-        // 2. 左侧溢出（主窗体在屏幕左外或主窗体已贴 WorkArea 左）
+            x = wa.Right - explorerWidth;
+        // 也不能小于 wa.Left
         if (x < wa.Left)
-        {
             x = wa.Left;
-        }
 
-        // 3. 右侧再次溢出（如 workArea 宽度 < explorerWidth）
-        if (x + explorerWidth > wa.Right)
-        {
-            x = Math.Max(wa.Left, wa.Right - explorerWidth);
-        }
-
-        // y 轴：贴顶
+        int y = this.Top;
         if (y < wa.Top) y = wa.Top;
-        // 底部溢出 → 上移到贴底但保留 200px
         if (y + 200 > wa.Bottom) y = Math.Max(wa.Top, wa.Bottom - 600);
-
-        System.Diagnostics.Debug.WriteLine($"[ComputeExplorerLocation] FINAL: x={x} y={y}");
 
         return new Point(x, y);
     }
