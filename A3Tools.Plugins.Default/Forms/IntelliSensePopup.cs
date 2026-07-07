@@ -70,6 +70,9 @@ public class IntelliSensePopup : Form
     /// <summary>popup 是否可见（editor 用此判断是否拦截 ↑↓EnterTabEsc）</summary>
     public bool IsVisible => !IsDisposed && _listBox != null && Visible;
 
+    /// <summary>popup 是否有可选项（避免 IsVisible=true 但无内容时把 Enter 吞掉）</summary>
+    public bool HasItems => !IsDisposed && _listBox != null && _listBox.Items.Count > 0;
+
     /// <summary>
     /// 在屏幕坐标处显示（不抢焦点）。
     /// owner = 编辑器控件（用于 Show 时归还焦点 + 关闭时跟随 owner 卸载）。

@@ -272,11 +272,27 @@ public class SqlEditor : RichTextBox
             }
             if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Tab)
             {
-                var sel = _intelliSense.GetSelectedText();
-                if (!string.IsNullOrEmpty(sel))
+                // 只有在 popup 真有可选项时才拦截 Enter/Tab
+                if (_intelliSense.HasItems)
                 {
-                    ReplaceCurrentWord(sel);
-                    _intelliSense.Hide();
+                    var sel = _intelliSense.GetSelectedText();
+                    if (!string.IsNullOrEmpty(sel))
+                    {
+                        ReplaceCurrentWord(sel);
+                        _intelliSense.Hide();
+                        e.SuppressKeyPress = true;
+                        return;
+                    }
+                }
+                // popup 不可见 / 无项 / 无选中：Enter 交给默认处理（换行）
+                if (e.KeyCode == Keys.Enter)
+                {
+                    if (_intelliSense.IsVisible) _intelliSense.Hide();
+                    // 继续走到下面 HandleEnterWithIndent 处理
+                }
+                else // Tab
+                {
+                    if (_intelliSense.IsVisible) _intelliSense.Hide();
                     e.SuppressKeyPress = true;
                     return;
                 }
