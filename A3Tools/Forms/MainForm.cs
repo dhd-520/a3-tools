@@ -249,11 +249,49 @@ public partial class MainForm : Form, IToolContext
         // 监听窗体大小变化，处理最小化
         this.Resize += MainForm_ResizeForMinimize;
 
+        // 后台检查更新（不阻塞 UI）
+        _ = CheckUpdateOnStartupAsync();
+
         // 初始化快捷键管理器（延迟到窗体显示后注册，确保Handle已创建）
         this.Shown += (s, e) => InitHotkey();
 
         // 启用键盘预览，使F键能聚焦到搜索框
         this.KeyPreview = true;
+    }
+
+    /// <summary>启动后 2 秒后台检查更新。有新版本→静默弹 UpdateForm</summary>
+    private async Task CheckUpdateOnStartupAsync()
+    {
+        try
+        {
+            // 延迟 2 秒再查，避免启动慢时被检查堵塞
+            await Task.Delay(2000);
+            if (IsDisposed) return;
+
+            var info = await UpdateService.CheckForUpdateAsync();
+            if (info == null || !info.HasUpdate) return;
+
+            // 切到 UI 线程弹窗
+            if (InvokeRequired)
+                BeginInvoke(new Action(() => ShowUpdateForm(info)));
+            else
+                ShowUpdateForm(info);
+        }
+        catch
+        {
+            // 静默失败，不打扰用户
+        }
+    }
+
+    private void ShowUpdateForm(UpdateInfo info)
+    {
+        if (IsDisposed) return;
+        // 窗体最小化时还原
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+        Activate();
+        using var dlg = new UpdateForm(info);
+        dlg.ShowDialog(this);
     }
 
     private void InitHotkey()
@@ -422,6 +460,7 @@ public partial class MainForm : Form, IToolContext
         this.menuCopyAccount.Click += MenuCopyAccount_Click;
         this.menuHotkeySettings.Click += MenuHotkeySettings_Click;
         this.menuAbout.Click += MenuAbout_Click;
+        this.menuCheckUpdate.Click += MenuCheckUpdate_Click;
         this.lblTitle.Click += LblTitle_Click;
 
         this.KeyDown += MainForm_KeyDown;
@@ -2270,7 +2309,38 @@ public partial class MainForm : Form, IToolContext
 
     private void MenuAbout_Click(object? sender, EventArgs e)
     {
-        MessageBox.Show("A3工具箱 v1.2.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问等功能。", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show("A3工具箱 v2.2.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问、内置 SQL 查询工具等功能。\n\n仓库：https://github.com/dhd-520/a3-tools", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private async void MenuCheckUpdate_Click(object? sender, EventArgs e)
+    {
+        // 手动检查更新（不静默）
+        menuCheckUpdate.Enabled = false;
+        var prevText = menuCheckUpdate.Text;
+        menuCheckUpdate.Text = "检查中...";
+        try
+        {
+            var info = await UpdateService.CheckForUpdateAsync();
+            if (info == null)
+            {
+                MessageBox.Show("检查更新失败，请检查网络后重试。", "检查更新",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!info.HasUpdate)
+            {
+                MessageBox.Show($"当前已是最新版本 v{UpdateService.CurrentVersion}。", "检查更新",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            using var dlg = new UpdateForm(info);
+            dlg.ShowDialog(this);
+        }
+        finally
+        {
+            menuCheckUpdate.Enabled = true;
+            menuCheckUpdate.Text = prevText;
+        }
     }
 
     private void MenuHotkeySettings_Click(object? sender, EventArgs e)

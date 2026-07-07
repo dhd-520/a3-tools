@@ -19,6 +19,7 @@ partial class MainForm
     private ToolStripMenuItem menuHotkeySettings = null!;
     private ToolStripMenuItem menuExit = null!;
     private ToolStripMenuItem menuAbout = null!;
+    private ToolStripMenuItem menuCheckUpdate = null!;
     private ToolStripMenuItem menuCopyAccount = null!;
     private ContextMenuStrip addMenu = null!;
     private ToolStripMenuItem miManualAdd = null!;
@@ -86,6 +87,7 @@ partial class MainForm
         menuExit = new ToolStripMenuItem();
         menuHelp = new ToolStripMenuItem();
         menuAbout = new ToolStripMenuItem();
+        menuCheckUpdate = new ToolStripMenuItem();
         tabControl = new TabControl();
         tabLaunch = new TabPage();
         tabTools = new TabPage();
@@ -177,7 +179,7 @@ partial class MainForm
         // 
         // menuHelp
         // 
-        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuAbout });
+        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuCheckUpdate, menuAbout });
         menuHelp.Name = "menuHelp";
         menuHelp.Size = new Size(111, 32);
         menuHelp.Text = "帮助(_H)";
@@ -187,6 +189,12 @@ partial class MainForm
         menuAbout.Name = "menuAbout";
         menuAbout.Size = new Size(171, 40);
         menuAbout.Text = "关于";
+        //
+        // menuCheckUpdate
+        //
+        menuCheckUpdate.Name = "menuCheckUpdate";
+        menuCheckUpdate.Size = new Size(171, 40);
+        menuCheckUpdate.Text = "检查更新(_U)";
         // 
         // tabControl
         // 
