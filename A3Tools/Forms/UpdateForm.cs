@@ -100,14 +100,17 @@ public partial class UpdateForm : Form
 
             // 弹个确认
             var dr = MessageBox.Show(
-                $"新版本 v{_update.Version} 已下载完成。\n点击【确定】将关闭当前程序并启动新版本。",
+                $"新版本 v{_update.Version} 已下载完成。\n点击【确定】将关闭当前程序并启动新版本。\n\n更新类型：{(_update.IsZipPackage ? "完整包（含 Plugins/）" : "仅主程序")}",
                 "更新就绪",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Information);
             if (dr != DialogResult.OK) return;
 
             // 关闭 + 启动更新器
-            UpdateService.PerformUpdate(tempExe);
+            if (_update.IsZipPackage)
+                UpdateService.PerformZipUpdate(tempExe);
+            else
+                UpdateService.PerformUpdate(tempExe);
         }
         catch (Exception ex)
         {

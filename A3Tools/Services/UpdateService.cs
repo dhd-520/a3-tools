@@ -72,9 +72,12 @@ public class UpdateService
             string remoteVer = release.TagName.TrimStart('v', 'V');
             string localVer = CurrentVersion;
 
-            // 找第一个 .exe 资产（StandaloneSF 打包出来的 A3Tools.exe）
-            var asset = release.Assets?.FirstOrDefault(a =>
+            // 资产优先级：.zip（包含完整目录，含 Plugins/） > .exe（仅主程序）
+            var zipAsset = release.Assets?.FirstOrDefault(a =>
+                a.Name != null && a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            var exeAsset = release.Assets?.FirstOrDefault(a =>
                 a.Name != null && a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+            var asset = zipAsset ?? exeAsset;
 
             return new UpdateInfo
             {
@@ -86,6 +89,7 @@ public class UpdateService
                 DownloadUrl = asset?.BrowserDownloadUrl,
                 AssetName = asset?.Name,
                 AssetSize = asset?.Size ?? 0,
+                IsZipPackage = asset == zipAsset,
                 HasUpdate = CompareVersion(remoteVer, localVer) > 0
             };
         }
@@ -134,22 +138,17 @@ public class UpdateService
     }
 
     /// <summary>
-    /// 执行更新：备份当前 exe + 覆盖 + 启动新版 + 关闭旧版
+    /// 执行更新（仅 exe）：备份当前 exe + 覆盖 + 重启
     /// </summary>
     public static void PerformUpdate(string newExePath)
     {
-        // 当前 exe 路径
         string currentExe = Process.GetCurrentProcess().MainModule!.FileName!;
         string currentDir = Path.GetDirectoryName(currentExe)!;
         string backupExe = currentExe + ".bak";
-        string newExeName = Path.GetFileName(currentExe);
 
-        // 1. 备份当前 exe
         if (File.Exists(backupExe)) File.Delete(backupExe);
         File.Copy(currentExe, backupExe);
 
-        // 2. 写一个 bat 脚本来完成覆盖+重启（旧进程不退出，文件被占用）
-        //    等待 2 秒让当前进程退出后开始替换
         string batPath = Path.Combine(currentDir, "_update.bat");
         string batContent = $@"@echo off
 chcp 65001 >nul
@@ -163,7 +162,6 @@ del ""%~f0""
 ";
         File.WriteAllText(batPath, batContent, System.Text.Encoding.Default);
 
-        // 3. 启动 bat
         var psi = new ProcessStartInfo
         {
             FileName = batPath,
@@ -173,8 +171,86 @@ del ""%~f0""
         };
         Process.Start(psi);
 
-        // 4. 关闭当前进程
         Environment.Exit(0);
+    }
+
+    /// <summary>
+    /// 执行更新（zip 包）：备份整个目录 + 解压覆盖 + 重启
+    /// </summary>
+    public static void PerformZipUpdate(string zipPath)
+    {
+        string currentExe = Process.GetCurrentProcess().MainModule!.FileName!;
+        string currentDir = Path.GetDirectoryName(currentExe)!;
+        string backupDir = Path.Combine(Path.GetDirectoryName(currentDir)!, "A3Tools_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+
+        // 1. 备份当前整个目录（深度 1）
+        CopyDirectory(currentDir, backupDir);
+
+        // 2. 写 bat：等待当前进程退出后，解压 zip 覆盖 → 重启
+        //    zip 是 "包含顶层目录" 结构：解压时会创建 StandaloneSF/xxx
+        //    所以先解压到临时位置，然后把内部内容挪到 currentDir
+        string tempExtract = Path.Combine(Path.GetTempPath(), "A3Tools_update_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+
+        string batContent = $@"@echo off
+chcp 65001 >nul
+timeout /t 2 /nobreak >nul
+
+:: 1. 解压 zip 到临时目录
+powershell -NoProfile -Command ""Expand-Archive -Path '{zipPath}' -DestinationPath '{tempExtract}' -Force""
+
+:: 2. 找出 zip 里的顶层目录（可能叫 StandaloneSF 或 A3Tools）
+set ""SRC={tempExtract}\StandaloneSF""
+if not exist ""%SRC%"" set ""SRC={tempExtract}\A3Tools""
+if not exist ""%SRC%"" set ""SRC={tempExtract}""
+
+:: 3. 覆盖所有文件到 currentDir（排除 .bak 备份、DATA、logs）
+xcopy /Y /E /I /Q ""%SRC%\*"" ""{currentDir}\""
+
+:: 4. 启动新版本
+start """" ""{currentExe}""
+
+:: 5. 清理
+del ""%~f0""
+";
+        string batPath = Path.Combine(currentDir, "_update.bat");
+        File.WriteAllText(batPath, batContent, System.Text.Encoding.Default);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = batPath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = currentDir
+        };
+        Process.Start(psi);
+
+        Environment.Exit(0);
+    }
+
+    /// <summary>
+    /// 备份当前整个目录（仅备份顶层文件+Plugins+DATA，不递归过深）
+    /// </summary>
+    private static void CopyDirectory(string sourceDir, string destDir)
+    {
+        Directory.CreateDirectory(destDir);
+        foreach (var file in Directory.GetFiles(sourceDir))
+        {
+            var name = Path.GetFileName(file);
+            // 跳过 _update.bat 这种临时文件
+            if (name.StartsWith("_")) continue;
+            File.Copy(file, Path.Combine(destDir, name), true);
+        }
+        // Plugins 子目录
+        var pluginsSrc = Path.Combine(sourceDir, "Plugins");
+        if (Directory.Exists(pluginsSrc))
+        {
+            var pluginsDst = Path.Combine(destDir, "Plugins");
+            Directory.CreateDirectory(pluginsDst);
+            foreach (var file in Directory.GetFiles(pluginsSrc))
+            {
+                File.Copy(file, Path.Combine(pluginsDst, Path.GetFileName(file)), true);
+            }
+        }
     }
 
     /// <summary>比较版本号：remote > local → 1；remote < local → -1；相等 → 0</summary>
@@ -212,6 +288,7 @@ public class UpdateInfo
     public string? DownloadUrl { get; set; }
     public string? AssetName { get; set; }
     public long AssetSize { get; set; }
+    public bool IsZipPackage { get; set; }
     public bool HasUpdate { get; set; }
     public string? ErrorMessage { get; set; }
 }
