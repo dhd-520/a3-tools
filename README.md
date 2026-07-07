@@ -207,6 +207,23 @@ dotnet run --project A3Tools\A3Tools.csproj
 
 ## 版本历史
 
+### v2.3.0 (2026-07-07)
+
+**重点：自动更新**
+
+- **启动时后台检查更新** —— 有新版本自动弹窗，不打扰
+- **帮助 → 检查更新** —— 手动触发检查
+- **一键下载+覆盖+重启** —— 点【立即更新】即全套完成
+- **GitHub Releases 作为更新源** —— 公开仓库 + 免认证 API
+- **不强制更新** —— 用户可选择【稍后】
+
+**实现**
+- `UpdateService`（检查/下载/备份/替换/重启）
+- `UpdateForm`（更新提示窗 + 进度条 + 速度显示）
+- 发布流程：`git tag v2.x.0 && git push github v2.x.0` → 页面拖拽 exe 到 Release
+
+**配置位置**：`A3Tools/Services/UpdateService.cs` 顶部的 `GitHubOwner` / `GitHubRepo` 常量
+
 ### v2.2.0 (2026-07-07)
 
 **重点：内置 SQL 查询工具**（替代 SSMS 日常使用）
