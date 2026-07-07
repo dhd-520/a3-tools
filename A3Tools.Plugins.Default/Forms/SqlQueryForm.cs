@@ -1,5 +1,6 @@
-using A3Tools.Models;
+﻿using A3Tools.Models;
 using A3Tools.Services;
+using A3Tools.Common.Services;
 using Microsoft.Data.SqlClient;
 
 namespace A3Tools.Plugins.Default.Forms;
@@ -19,6 +20,7 @@ public partial class SqlQueryForm : Form
     private ObjectExplorerForm? _explorer;   // 单例：与主窗体绑定：打开一次 → 关闭窗口 → 隐藏
     private bool _explorerUserClosed = false; // 用户点击 × 后不再默认打开，需点工具栏重开
     private bool _explorerVisible = false;    // 工具栏 toggle 状态
+    private int _explorerWidth = 360;         // Explorer 实际宽度（Show 后从 _explorer.Width 更新）
 
     /// <summary>LoadDatabasesAsync 运行中（初始化 / 刷新期间），避免 SelectedIndexChanged 覆盖用户手动选择</summary>
     private bool _loadingDbs = false;
@@ -37,6 +39,67 @@ public partial class SqlQueryForm : Form
 
         // 设计器模式下只呈现 UI，不跑业务逻辑
         if (DesignMode) return;
+
+        // 陛下反馈：默认最大化打开；后续用户手动调过 → 按用户上次状态。
+        // 优先级：SQL 启动都最大化（默认） → 读 settings 有上次状态 → 用上次的。
+        // - settings.SqlQueryFormMaximized=true → 最大化（默认）
+        // - false 且 width/height > 0 → 用上次大小（手动还原过的）
+        // - false 且 width=0 → 未手动调过（第一次走默认 Maximized）
+        if (SettingsStore.ReadBool("SqlQueryFormMaximized", true))
+        {
+            WindowState = FormWindowState.Maximized;
+            // 最大化也需记住在哪个屏的 WorkArea 上大（2026-07-07）
+            int screenHashMaximized = SettingsStore.ReadInt("SqlQueryFormScreenHash", 0);
+            if (screenHashMaximized != 0)
+            {
+                var targetScreen = FindScreenByHash(screenHashMaximized);
+                if (targetScreen != null)
+                {
+                    StartPosition = FormStartPosition.Manual;
+                    Location = new Point(targetScreen.WorkingArea.X, targetScreen.WorkingArea.Y);
+                }
+            }
+        }
+        else
+        {
+            int w = SettingsStore.ReadInt("SqlQueryFormWidth", 0);
+            int h = SettingsStore.ReadInt("SqlQueryFormHeight", 0);
+            int left = SettingsStore.ReadInt("SqlQueryFormLeft", -1);
+            int top = SettingsStore.ReadInt("SqlQueryFormTop", -1);
+            int screenHash = SettingsStore.ReadInt("SqlQueryFormScreenHash", 0);
+            if (w > 0 && h > 0)
+            {
+                ClientSize = new Size(w, h);
+                if (left >= 0 && top >= 0)
+                {
+                    // 陛下需求：上次在副屏最大化 → 下次还到副屏最大化。
+                    // 先按 screenHash 找上次那块屏幕，验证 [left, top, w, h] 是否在那块屏的 WorkArea 里。
+                    // 【边界情况】如果上次的屏拔走了（FindScreenByHash 返回 null），
+                    // 就算 saved bounds 刚好落在主屏区域也不能用 ——那是错位重事后的点，不是用户主动选的。
+                    var targetScreen = screenHash != 0 ? FindScreenByHash(screenHash) : null;
+                    if (targetScreen != null && targetScreen.WorkingArea.Contains(new Rectangle(left, top, w, h)))
+                    {
+                        StartPosition = FormStartPosition.Manual;
+                        Location = new Point(left, top);
+                    }
+                    else
+                    {
+                        // 上次屏拔走 或 saved bounds 已不在任何屏 → 退回到主屏中心
+                        StartPosition = FormStartPosition.CenterScreen;
+                    }
+                }
+                else
+                {
+                    StartPosition = FormStartPosition.CenterScreen;
+                }
+                WindowState = FormWindowState.Normal;
+            }
+            else
+            {
+                // 第一次启动且未指定 Maximized → 保持默认（最大化为宜）
+                WindowState = FormWindowState.Maximized;
+            }
+        }
 
         BuildConnString();
 
@@ -57,6 +120,7 @@ public partial class SqlQueryForm : Form
         _ = LoadDatabasesAsync();
 
         // 后台预热当前库的 IntelliSense 缓存（不阻塞 UI；切库时也会再拉）
+        // GetSuggestions 入口会同步 EnsureLoadedSync 保证后续读到了可用
         _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
 
         // 顶栏快捷键：Ctrl+N 新建查询，Ctrl+W 关闭当前，F5 执行，Ctrl+F5 执行选中
@@ -174,9 +238,11 @@ public partial class SqlQueryForm : Form
                 // ★ 关键：Show 之前重新算位置 —— 解决"创建时位置对、最大化后又错"
                 var newLoc = ComputeExplorerLocation();
                 var newH = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
-                // 用 Win32 SetWindowPos 强制设位置
-                SetWindowPos(_explorer.Handle, new IntPtr(-2), newLoc.X, newLoc.Y, 360, newH, 0x0040);
                 _explorer.Show();
+                _explorerWidth = _explorer.Width;  // 用实际宽度（含边框）
+                _explorer.Size = new Size(_explorerWidth, newH);
+                // ★ FixLocation 锁定位置（绕过 WinForms Owner 内部纠正），Z-order 由 Owner 关系自动保证
+                _explorer.FixLocation(new Point(this.Right - _explorerWidth, newLoc.Y));
                 _ = _explorer.RefreshAsync();
                 _explorerVisible = true;
                 if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
@@ -190,6 +256,7 @@ public partial class SqlQueryForm : Form
         _explorer = new ObjectExplorerForm(this)
         {
             StartPosition = FormStartPosition.Manual,
+            // Owner 已在 ObjectExplorerForm 构造里设了 = this（保证 Z-order 在主窗体之前）
         };
         _explorer.FormClosed += (_, args) =>
         {
@@ -203,11 +270,11 @@ public partial class SqlQueryForm : Form
         };
         _explorer.Show();
         // ★ 先 Show 拿到实际 Width（含边框）
-        var actualWidth = _explorer.Width;     // 实际含边框的宽
-        // ★ 再根据实际宽重新计算位置
-        newLoc2 = new Point(this.Right - actualWidth, newLoc2.Y);
-        var hwnd = _explorer.Handle;
-        SetWindowPos(hwnd, IntPtr.Zero, newLoc2.X, newLoc2.Y, actualWidth, newH2, 0x0010 | 0x0004 | 0x0020);
+        _explorerWidth = _explorer.Width;     // 实际含边框的宽
+        _explorer.Size = new Size(_explorerWidth, newH2);
+        // ★ 再根据实际宽重新计算位置 + FixLocation 锁定
+        newLoc2 = new Point(this.Right - _explorerWidth, newLoc2.Y);
+        _explorer.FixLocation(newLoc2);
         _ = _explorer.RefreshAsync();
         _explorerVisible = true;
         if (btnToggleExplorer != null) btnToggleExplorer.Text = "📂 关闭资源管理器";
@@ -231,14 +298,65 @@ public partial class SqlQueryForm : Form
         UpdateExplorerBounds();
     }
 
+    /// <summary>
+    /// 主窗体激活（点击主窗体编辑 / Alt+Tab 回来 / 切回应用）时强制把 Explorer 放到主窗体之前。
+    /// Form.Owner 关系已经保证 Z-order 在前（Windows 自动维护），这里只是 FixLocation 兜底位置。
+    /// </summary>
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        BringExplorerAboveMe();
+    }
+
+    private void BringExplorerAboveMe()
+    {
+        if (_explorer == null || _explorer.IsDisposed || !_explorerVisible) return;
+        if (WindowState == FormWindowState.Minimized) return;
+        // Z-order 由 Form.Owner 关系保证；这里只 FixLocation 兜底位置（万一 WinForms 把 Explorer 动走了）
+        _explorer.FixLocation(ComputeExplorerLocation());
+    }
+
     private void UpdateExplorerBounds()
     {
         if (_explorer == null || _explorer.IsDisposed || !_explorerVisible) return;
         if (WindowState == FormWindowState.Minimized) return;
         var loc = ComputeExplorerLocation();
         var h = Math.Min(this.Height, GetScreenWorkArea().Bottom - Math.Max(this.Top, GetScreenWorkArea().Top) - 8);
-        // ★ 用 Win32 SetWindowPos 强制窗口位置（绕过 WinForms WM_WINDOWPOSCHANGING 纠正）
-        SetWindowPos(_explorer.Handle, new IntPtr(-2), loc.X, loc.Y, 360, h, 0x0040);
+        _explorerWidth = _explorer.Width;
+        _explorer.Size = new Size(_explorerWidth, h);
+        _explorer.FixLocation(new Point(this.Right - _explorerWidth, loc.Y));
+    }
+
+    /// <summary>窗体关闭中：记住当前大小/位置/最大化状态，下次启动按这个开（2026-07-06）
+    /// 陛下反馈：主副屏位置也要记住！需要存 Screen.DeviceName（设备名）</summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        try
+        {
+            // WindowState=Minimized → RestoreBounds 才是正常大小；否则 Bounds 才是。
+            // 但用户主动最大化 → 存 Maximized=true，下次启动还是最大化。
+            // 用户主动还原成普通窗体 → 存 Normal + 当前 Bounds。
+            bool isMaximized = WindowState == FormWindowState.Maximized;
+            // 当前所在屏幕的设备名 hash code（多屏环境下区分主副屏；SettingsStore 只有 int/bool 用 int 存 hash）
+            string screenDevice = Screen.FromControl(this).DeviceName ?? "";
+            int screenHash = string.IsNullOrEmpty(screenDevice) ? 0 : screenDevice.GetHashCode();
+            SettingsStore.Update(d =>
+            {
+                d["SqlQueryFormMaximized"] = isMaximized;
+                // RestoreBounds 在 Normal 下等于 Bounds；在 Maximized 下等于还原后的大小
+                var bounds = isMaximized ? RestoreBounds : Bounds;
+                if (bounds.Width > 0 && bounds.Height > 0)
+                {
+                    d["SqlQueryFormWidth"] = bounds.Width;
+                    d["SqlQueryFormHeight"] = bounds.Height;
+                    d["SqlQueryFormLeft"] = bounds.Left;
+                    d["SqlQueryFormTop"] = bounds.Top;
+                }
+                d["SqlQueryFormScreenHash"] = screenHash;
+            });
+        }
+        catch { /* 保存失败不影响关闭 */ }
+        base.OnFormClosing(e);
     }
 
     /// <summary>父窗体关闭 → Explorer 一起关（避免孤儿窗口）</summary>
@@ -255,6 +373,19 @@ public partial class SqlQueryForm : Form
     private Rectangle GetScreenWorkArea()
         => Screen.FromControl(this).WorkingArea;
 
+    /// <summary>按 DeviceName 的 hash code 查找屏（存为 int）；找不到返回 null（2026-07-07）</summary>
+    private static Screen? FindScreenByHash(int hash)
+    {
+        if (hash == 0) return null;
+        foreach (var s in Screen.AllScreens)
+        {
+            var name = s.DeviceName ?? "";
+            if (!string.IsNullOrEmpty(name) && name.GetHashCode() == hash)
+                return s;
+        }
+        return null;
+    }
+
     /// <summary>
     /// Explorer 位置 — 与主窗体右边对齐（【陛下决定】）。
     ///
@@ -265,8 +396,8 @@ public partial class SqlQueryForm : Form
     {
         var wa = GetScreenWorkArea();
 
-        // ★ Explorer 窗体总宽 = ClientSize(320) + 边框(16) = 336
-        const int explorerWidth = 336;
+        // ★ 用 Explorer 实际宽度（不是 const 336）—— 以防用户调整过 Explorer 大小
+        int explorerWidth = _explorer?.Width ?? _explorerWidth;
 
         int x = this.Right - explorerWidth;
         if (x + explorerWidth > wa.Right)
@@ -340,9 +471,22 @@ public partial class SqlQueryForm : Form
         page.Tag = tab;
         tabControl.TabPages.Add(page);
         tabControl.SelectedTab = page;
+        // 订阅字号改变 → 状态栏刷新（2026-07-07）
+        tab.FontSizeChanged += (s, e) => UpdateFontSizeLabel(tab);
+        // 新 Tab 也要立刻同步当前字号
+        UpdateFontSizeLabel(tab);
         if (!string.IsNullOrEmpty(content)) tab.SetEditorText(content);
         tab.Editor.Focus();
         return tab;
+    }
+
+    /// <summary>显示当前 Tab 编辑器的字号到状态栏（2026-07-07）</summary>
+    private void UpdateFontSizeLabel(SqlQueryTabPage tab)
+    {
+        var editor = tab?.Editor;
+        if (editor == null || IsDisposed) return;
+        var size = editor.CurrentFontSize;
+        if (lblFontSize != null) lblFontSize.Text = $"字号: {size:0.#}pt";
     }
 
     private void BtnNewTab_Click(object? sender, EventArgs e) => NewTab();
@@ -413,16 +557,26 @@ public partial class SqlQueryForm : Form
         using var bg = new SolidBrush(isSelected ? Color.White : Color.FromArgb(240, 242, 245));
         e.Graphics.FillRectangle(bg, bounds);
 
-        // 标题
+        // 标题：单行 + 超出显示 "..."（避免长名换行使页签变高）
         var titleRect = new Rectangle(bounds.Left + 6, bounds.Top + 4, bounds.Width - 24, bounds.Height - 8);
-        using var sf = new StringFormat { LineAlignment = StringAlignment.Center };
+        using var sf = new StringFormat
+        {
+            LineAlignment = StringAlignment.Center,
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.NoWrap,
+        };
         using var titleBrush = new SolidBrush(isSelected ? Color.Black : Color.FromArgb(80, 80, 80));
         e.Graphics.DrawString(tab.Text, Font, titleBrush, titleRect, sf);
 
-        // × 按钮
-        var closeRect = new Rectangle(bounds.Right - 18, bounds.Top + (bounds.Height - 14) / 2, 14, 14);
+        // × 按钮：水平+垂直居中（在 closeRect 内）
+        var closeRect = new Rectangle(bounds.Right - 18, bounds.Top, 14, bounds.Height);
+        using var cf = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center,
+        };
         using var closeBrush = new SolidBrush(Color.FromArgb(160, 160, 160));
-        e.Graphics.DrawString("×", new Font(Font.FontFamily, 10F, FontStyle.Bold), closeBrush, closeRect.Location);
+        e.Graphics.DrawString("×", new Font(Font.FontFamily, 10F, FontStyle.Bold), closeBrush, closeRect, cf);
     }
 
     private void TabControl_MouseDown(object? sender, MouseEventArgs e)
@@ -431,7 +585,7 @@ public partial class SqlQueryForm : Form
         for (int i = 0; i < tabControl.TabPages.Count; i++)
         {
             var r = tabControl.GetTabRect(i);
-            var closeRect = new Rectangle(r.Right - 18, r.Top + (r.Height - 14) / 2, 14, 14);
+            var closeRect = new Rectangle(r.Right - 18, r.Top, 14, r.Height);
             if (closeRect.Contains(e.Location))
             {
                 tabControl.SelectedIndex = i;
@@ -489,6 +643,63 @@ public partial class SqlQueryForm : Form
     }
 
     /// <summary>
+    /// F12 转到定义：取光标处的词，从缓存中匹配数据库对象，调 OpenScript 打开。
+    /// 等同于 Explorer 双击。
+    /// </summary>
+    public void GoToDefinition()
+    {
+        var tab = GetActiveTab();
+        if (tab == null) return;
+
+        string word = tab.Editor.GetWordAtCursor();
+        if (string.IsNullOrEmpty(word)) return;
+
+        // 去掉方括号包裹：[dbo].[S_SCM_SEORDER] -> dbo.S_SCM_SEORDER
+        string clean = word.Replace("[", "").Replace("]", "").Trim();
+        if (string.IsNullOrEmpty(clean)) return;
+
+        string? schema = null;
+        string name;
+        if (clean.Contains('.'))
+        {
+            var parts = clean.Split('.');
+            schema = parts[0];
+            name = parts.Length > 1 ? parts[1] : "";
+        }
+        else
+        {
+            name = clean;
+        }
+        if (string.IsNullOrEmpty(name)) return;
+
+        if (string.IsNullOrEmpty(_currentConnStr)) return;
+
+        var objs = SqlObjectSchemaCache.GetObjectsByKind(_currentConnStr,
+            new[] {
+                SqlObjectSchemaCache.ObjectKind.Table,
+                SqlObjectSchemaCache.ObjectKind.View,
+                SqlObjectSchemaCache.ObjectKind.TableValuedFunction,
+                SqlObjectSchemaCache.ObjectKind.ScalarFunction,
+                SqlObjectSchemaCache.ObjectKind.StoredProcedure,
+                SqlObjectSchemaCache.ObjectKind.Trigger,
+            });
+
+        var match = objs.FirstOrDefault(o =>
+            o.Name.Equals(name, StringComparison.OrdinalIgnoreCase) &&
+            (schema == null || o.SchemaName.Equals(schema, StringComparison.OrdinalIgnoreCase)));
+
+        if (match == null)
+        {
+            lblStatus.Text = $"未找到对象：{clean}";
+            return;
+        }
+
+        var typeChar = SqlObjectSchemaCache.KindToTypeChar(match.Kind).Split(',')[0].Trim();
+        var fullName = $"{match.SchemaName}.{match.Name}";
+        OpenScript(database: "", objType: typeChar, objName: fullName);
+    }
+
+    /// <summary>
     /// 异步加载脚本，加载完成后填充到已创建的占位 Tab。
     /// - 不再 OpenScript 里起 NewTab（避免“切 Tab 看起来卡”）
     /// - 在这里仅做填充（Tab 文本 / Editor 内容 / 光标位置 / Status）
@@ -533,10 +744,19 @@ public partial class SqlQueryForm : Form
     // 状态回调（由 SqlQueryTabPage 调用）
     // ============================================
 
-    public void UpdateStatus(string status, long elapsedMs, int affectedRows)
+    public void UpdateStatus(string status, long elapsedMs, int affectedRows, ExecStatus kind)
     {
         lblStatus.Text = status;
         lblElapsed.Text = $"耗时: {elapsedMs} ms";
         lblRows.Text = $"影响: {affectedRows} 行";
+        // 状态栏文字颜色按执行结果区分（绿/红/灰/蓝）—— 让用户一眼看出有没有成功
+        lblStatus.ForeColor = kind switch
+        {
+            ExecStatus.Success   => Color.FromArgb(57, 181, 74),   // #39b54a green
+            ExecStatus.Failure   => Color.FromArgb(251, 67, 42),   // #fb432a red
+            ExecStatus.Cancelled => Color.FromArgb(138, 143, 152), // #8a8f98 gray
+            ExecStatus.Running   => Color.FromArgb(27, 161, 226),  // #1ba1e2 blue
+            _                    => SystemColors.ControlText,        // 默认黑
+        };
     }
 }

@@ -42,6 +42,11 @@ partial class ObjectExplorerForm
         BuildTab(ref this.tabPageTrigger,  "触发器 (TR)",      out this.treeTrigger,  out this.txtFilterTrigger);
 
         this.imageList = new ImageList(components);
+        this.contextMenuTree = new ContextMenuStrip(components);
+        this.miCopyName = new ToolStripMenuItem();
+        this.miCopyFullName = new ToolStripMenuItem();
+        this.miOpenScript = new ToolStripMenuItem();
+        this.contextMenuTree.SuspendLayout();
 
         pnlTop.SuspendLayout();
         tabExplorer.SuspendLayout();
@@ -91,6 +96,34 @@ partial class ObjectExplorerForm
         this.tabExplorer.Name = "tabExplorer";
         this.tabExplorer.Size = new System.Drawing.Size(320, 444);
         this.tabExplorer.TabIndex = 0;
+
+        // ───── contextMenuTree
+        //
+        this.contextMenuTree.Items.AddRange(new ToolStripItem[] {
+            this.miOpenScript,
+            this.miCopyName,
+            this.miCopyFullName
+        });
+        this.contextMenuTree.Name = "contextMenuTree";
+        this.contextMenuTree.Size = new Size(180, 80);
+        //
+        // miCopyName
+        //
+        this.miCopyName.Name = "miCopyName";
+        this.miCopyName.Size = new Size(179, 22);
+        this.miCopyName.Text = "复制对象名";
+        //
+        // miCopyFullName
+        //
+        this.miCopyFullName.Name = "miCopyFullName";
+        this.miCopyFullName.Size = new Size(179, 22);
+        this.miCopyFullName.Text = "复制完整路径";
+        //
+        // miOpenScript
+        //
+        this.miOpenScript.Name = "miOpenScript";
+        this.miOpenScript.Size = new Size(179, 22);
+        this.miOpenScript.Text = "打开脚本";
 
         // ───── imageList (7 key: schema/table/view/tvf/fn/proc/trigger/column)
         //
@@ -144,7 +177,8 @@ partial class ObjectExplorerForm
             ImageList = this.imageList,         // 共享一份 ImageList
             BorderStyle = System.Windows.Forms.BorderStyle.None,
             HideSelection = false,
-            Font = new System.Drawing.Font("Microsoft YaHei UI", 9F)
+            Font = new System.Drawing.Font("Microsoft YaHei UI", 9F),
+            ContextMenuStrip = this.contextMenuTree
         };
         // 先添加 TreeView，再添加 TextBox（后加的 Dock=Top 永远在上）
         pnl.Controls.Add(tree);
@@ -192,4 +226,9 @@ partial class ObjectExplorerForm
     private TextBox txtFilterTable, txtFilterView, txtFilterTvf, txtFilterScalarFn, txtFilterProc, txtFilterTrigger;
 
     private ImageList imageList;
+
+    private ContextMenuStrip contextMenuTree;
+    private ToolStripMenuItem miCopyName;
+    private ToolStripMenuItem miCopyFullName;
+    private ToolStripMenuItem miOpenScript;
 }

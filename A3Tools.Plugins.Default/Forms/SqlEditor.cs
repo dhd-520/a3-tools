@@ -17,6 +17,9 @@ public class SqlEditor : RichTextBox
     private const int WM_MOUSEWHEEL = 0x20A;
     private const int WM_HSCROLL = 0x114;
     private const int EM_LINESCROLL = 0xB6;
+    private const int SB_HORZ = 0;
+    private const int SB_VERT = 1;
+    private const int SB_THUMBPOSITION = 4;
 
     // 冻结重绘：设置重绘抑制标志 + 解除后强制刷新。避免高亮过程中多次
     // Select + SelectionColor 引起的 RichTextBox 闪烁（richEdit 重绘不双缓冲，
@@ -24,6 +27,12 @@ public class SqlEditor : RichTextBox
     private const int WM_SETREDRAW = 0x000B;
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    // 保存和恢复滚动位置
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetScrollPos(IntPtr hWnd, int nBar);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int SetScrollPos(IntPtr hWnd, int nBar, int nPos, bool bRedraw);
 
     private readonly System.Windows.Forms.Timer _highlightTimer;
     private bool _suppressHighlight;
@@ -37,6 +46,9 @@ public class SqlEditor : RichTextBox
 
     public SqlEditor()
     {
+        // 默认字体设大2个字号，使用Consolas等宽字体更适合SQL
+        Font = new System.Drawing.Font("Consolas", 12f);
+
         _highlightTimer = new System.Windows.Forms.Timer { Interval = 200 };
         _highlightTimer.Tick += (_, _) =>
         {
@@ -70,6 +82,13 @@ public class SqlEditor : RichTextBox
     /// <summary>便捷：恢复 IntelliSense</summary>
     public void ResumeIntelliSense() => _suppressIntelliSense = false;
 
+    /// <summary>显示查找/替换对话框</summary>
+    public void ShowSearchReplace(bool replaceMode)
+    {
+        var dlg = new SearchReplaceDialog(this, replaceMode);
+        dlg.Show(this);
+    }
+
     public void HighlightNow()
     {
         _highlightTimer.Stop();
@@ -81,6 +100,41 @@ public class SqlEditor : RichTextBox
 
     /// <summary>当前字号（供外部读取 / 重设）</summary>
     public float CurrentFontSize => Font.Size;
+
+    /// <summary>F12 转到定义事件。由 SqlQueryTabPage 订阅。</summary>
+    public event Action? GoToDefinitionRequested;
+
+    /// <summary>
+    /// 获取光标位置的词（含 schema. / [] 转义）。
+    /// 从 caret 同时向左、右找边界（照顾"光标在词中间"的情况）。
+    /// 返回 schema.name / schema.[name] / [schema].[name] / 纯 name 都 OK。
+    /// </summary>
+    public string GetWordAtCursor()
+    {
+        int caret = SelectionStart;
+        if (caret < 0 || caret > Text.Length) return "";
+
+        int start = caret;
+        while (start > 0)
+        {
+            char c = Text[start - 1];
+            if (!(char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#' || c == '.' || c == '[' || c == ']'))
+                break;
+            start--;
+        }
+
+        int end = caret;
+        while (end < Text.Length)
+        {
+            char c = Text[end];
+            if (!(char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#' || c == '.' || c == '[' || c == ']'))
+                break;
+            end++;
+        }
+
+        if (start == end) return "";
+        return Text.Substring(start, end - start);
+    }
 
     private const float MinFontSize = 8F;
     private const float MaxFontSize = 32F;
@@ -154,6 +208,21 @@ public class SqlEditor : RichTextBox
     {
         base.OnSelectionChanged(e);
         ViewChanged?.Invoke(this, EventArgs.Empty);
+        
+        // 光标位置改变：如果新位置不在当前正在输入的单词范围内 → 隐藏联想框
+        if (_intelliSense.IsVisible)
+        {
+            int caret = SelectionStart;
+            string word = GetCurrentWord();
+            int wordStart = GetCurrentWordStart();
+            
+            // 判断：新位置是否在 [wordStart, wordStart+word.Length] 范围内
+            // 如果不在 → 隐藏
+            if (word.Length == 0 || caret < wordStart || caret > wordStart + word.Length)
+            {
+                _intelliSense.Hide();
+            }
+        }
     }
 
     protected override void OnVScroll(EventArgs e)
@@ -164,6 +233,28 @@ public class SqlEditor : RichTextBox
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        // Ctrl+F = 查找
+        if (e.Control && e.KeyCode == Keys.F && !e.Shift && !e.Alt)
+        {
+            ShowSearchReplace(false);
+            e.SuppressKeyPress = true;
+            return;
+        }
+        // Ctrl+H = 替换
+        if (e.Control && e.KeyCode == Keys.H && !e.Shift && !e.Alt)
+        {
+            ShowSearchReplace(true);
+            e.SuppressKeyPress = true;
+            return;
+        }
+        // F12 = 转到定义
+        if (e.KeyCode == Keys.F12 && !e.Control && !e.Shift && !e.Alt)
+        {
+            GoToDefinitionRequested?.Invoke();
+            e.SuppressKeyPress = true;
+            return;
+        }
+
         // IntelliSense 拦截（仅在 popup visible 时）
         if (_intelliSense.IsVisible)
         {
@@ -211,43 +302,69 @@ public class SqlEditor : RichTextBox
         // 只处理 Enter 自动缩进
         if (e.KeyCode == Keys.Enter && e.Modifiers == Keys.None)
         {
-            // 暂存原始行为，先让 RichTextBox 处理换行
-            base.OnKeyDown(e);
-            // 然后追加当前行的缩进
-            int curLineIdx = GetLineFromCharIndex(SelectionStart);
-            if (curLineIdx <= 0) return;
-            int prevLineStart = GetFirstCharIndexFromLine(curLineIdx - 1);
-            int curLineStart = GetFirstCharIndexFromLine(curLineIdx);
+            HandleEnterWithIndent(e);
+            return;
+        }
+        base.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// 回车自动缩进：1) 先记住上一行的缩进文本，2) base.OnKeyDown 处理换行，
+    /// 3) 插入缩进文本。
+    /// 修复：之前在 base.OnKeyDown 后再调 e.SuppressKeyPress 会不起作用，且 base.OnKeyDown
+    /// 返回后状态可能错乱。改为一个干净的实现（2026-07-07）。
+    /// </summary>
+    private void HandleEnterWithIndent(KeyEventArgs e)
+    {
+        // 1. 计算上一行缩进
+        int caretBefore = SelectionStart;
+        int lineIdxBefore = GetLineFromCharIndex(caretBefore);
+        string indent = "";
+        bool needExtraIndent = false;
+        if (lineIdxBefore > 0)
+        {
+            int prevLineStart = GetFirstCharIndexFromLine(lineIdxBefore - 1);
+            int curLineStart = GetFirstCharIndexFromLine(lineIdxBefore);
             int prevLineLen = curLineStart - prevLineStart;
-            string prevLineText = Text.Substring(prevLineStart, prevLineLen);
-            string indent = "";
-            foreach (char c in prevLineText)
+            if (prevLineLen > 0)
             {
-                if (c == ' ' || c == '\t') indent += c;
-                else break;
+                string prevLineText = Text.Substring(prevLineStart, prevLineLen);
+                foreach (char c in prevLineText)
+                {
+                    if (c == ' ' || c == '\t') indent += c;
+                    else break;
+                }
+                var trimmed = prevLineText.TrimEnd();
+                needExtraIndent =
+                    trimmed.EndsWith("BEGIN", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.EndsWith("IF ", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.EndsWith("WHILE ", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.EndsWith("CASE ", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.EndsWith("(", StringComparison.Ordinal);
+                if (needExtraIndent) indent += "    ";
             }
-            // 如果上一行以 BEGIN/IF/WHILE/CASE/( 结尾，再加一级缩进
-            var trimmed = prevLineText.TrimEnd();
-            if (trimmed.EndsWith("BEGIN", StringComparison.OrdinalIgnoreCase)
-                || trimmed.EndsWith("IF ", StringComparison.OrdinalIgnoreCase)
-                || trimmed.EndsWith("WHILE ", StringComparison.OrdinalIgnoreCase)
-                || trimmed.EndsWith("CASE ", StringComparison.OrdinalIgnoreCase)
-                || trimmed.EndsWith("(", StringComparison.Ordinal)
-                || trimmed.EndsWith("(", StringComparison.Ordinal))
-            {
-                indent += "    ";
-            }
-            if (indent.Length > 0)
+        }
+
+        // 2. 默认行为（处理换行）
+        base.OnKeyDown(e);
+        // 让 base.OnKeyDown 吃掉这个 key，后续不再处理
+        e.SuppressKeyPress = true;
+
+        // 3. 插入缩进
+        if (!string.IsNullOrEmpty(indent) && !IsDisposed && IsHandleCreated)
+        {
+            try
             {
                 _suppressHighlight = true;
+                _suppressIntelliSense = true;
                 SelectedText = indent;
-                _suppressHighlight = false;
             }
-            e.SuppressKeyPress = true;
-        }
-        else
-        {
-            base.OnKeyDown(e);
+            catch { /* 控件可能正在销毁 */ }
+            finally
+            {
+                _suppressHighlight = false;
+                _suppressIntelliSense = false;
+            }
         }
     }
 
@@ -352,16 +469,23 @@ public class SqlEditor : RichTextBox
         if (_suppressIntelliSense) return;
 
         string word = GetCurrentWord();
+        int caret = SelectionStart;
 
-        // 空单词 或 处于不合适的上下文（光标前刚输入了非标识符字符）→ 关闭
-        if (word.Length < 1)
+        // 上下文检测：EXEC / SELECT / FROM 等关键字后空格 → 即使 word="" 也要弹
+        // 陛下反馈：“EXEC 空格后没联想”、“SELECT * 后不输表名.也没联想” 都是这个原因。
+        // 原逻辑 word.Length<1 直接 Hide，导致空白后不会弹。
+        var ctx = SqlIntelliSenseProvider.DetectContext(Text, caret);
+        bool isStrongContext =
+            ctx == SqlIntelliSenseProvider.SqlContextKind.AfterExec ||
+            ctx == SqlIntelliSenseProvider.SqlContextKind.AfterObjectKeyword ||
+            ctx == SqlIntelliSenseProvider.SqlContextKind.AfterColumnKeyword;
+
+        // 不弹的条件：word 空 且 不在强上下文
+        if (word.Length < 1 && !isStrongContext)
         {
             _intelliSense.Hide();
             return;
         }
-
-        // 光标位置：用于 1) popup 锚点 2) 给 SqlAliasResolver 留扩展点
-        int caret = SelectionStart;
 
         var matches = SqlIntelliSenseProvider.GetSuggestions(word, ConnectionString, Text, caret, 80).ToList();
         if (matches.Count == 0)
@@ -370,27 +494,27 @@ public class SqlEditor : RichTextBox
             return;
         }
 
-        // 计算 popup 屏幕位置：在光标所在行的"下一行"顶部（不要用 Font.Size 凑数，
-        // 那是字号不是行高，会让 popup 顶部落在文字中间。按下一行首字符的位置才是准的）
+        // 计算 popup 屏幕位置：在光标所在行的"下一行"顶部，X坐标对准当前光标位置！
         // ────────────────────────────────────────────────────────────────
         Point screenPos;
+        Point caretPos = GetPositionFromCharIndex(caret);
         int lineIdx = GetLineFromCharIndex(caret);
         int nextLineCharIdx = GetFirstCharIndexFromLine(lineIdx + 1);
         if (nextLineCharIdx >= 0)
         {
-            // 有下一行：用下一行首字符位置作为 popup 锚点
+            // 有下一行：用下一行首字符Y + 当前光标X
             Point nextLinePos = GetPositionFromCharIndex(nextLineCharIdx);
-            screenPos = PointToScreen(nextLinePos);
+            screenPos = PointToScreen(new Point(caretPos.X, nextLinePos.Y));
         }
         else
         {
-            // 已经在最后一行：用当前字符位置 + 该行行高（Font.Height 是真正的行高，含行间距）
-            Point charPos = GetPositionFromCharIndex(caret);
-            int lineHeight = Font.Height; // 真行高（1.2x Font.Size），比 Font.Size 准
-            screenPos = PointToScreen(new Point(charPos.X, charPos.Y + lineHeight + 2));
+            // 已经在最后一行：用当前光标位置X + 该行行高（Font.Height 是真正的行高）
+            int lineHeight = Font.Height;
+            screenPos = PointToScreen(new Point(caretPos.X, caretPos.Y + lineHeight + 2));
         }
 
-        _intelliSense.ShowNearCaret(this, screenPos, 320, 280, matches);
+        // 陛下反馈：popup 宽应按内容自适应。传 width=0 → ShowNearCaret 内部自动量。
+        _intelliSense.ShowNearCaret(this, screenPos, 0, 280, matches);
     }
 
     // ============================================
@@ -433,6 +557,9 @@ public class SqlEditor : RichTextBox
 
         int selStart = SelectionStart;
         int selLen = SelectionLength;
+        // 保存滚动位置
+        int vScroll = GetScrollPos(Handle, SB_VERT);
+        int hScroll = GetScrollPos(Handle, SB_HORZ);
 
         _suppressHighlight = true;
         // 冻结重绘 → 防 RichTextBox 闪烁（仅窗口被冻结，不影响其他控件）
@@ -489,6 +616,12 @@ public class SqlEditor : RichTextBox
         }
         finally
         {
+            // 恢复滚动位置
+            SetScrollPos(Handle, SB_VERT, vScroll, false);
+            SetScrollPos(Handle, SB_HORZ, hScroll, false);
+            SendMessage(Handle, WM_VSCROLL, (IntPtr)(SB_THUMBPOSITION | (vScroll << 16)), IntPtr.Zero);
+            SendMessage(Handle, WM_HSCROLL, (IntPtr)(SB_THUMBPOSITION | (hScroll << 16)), IntPtr.Zero);
+
             ResumeLayout();
             _suppressHighlight = false;
             // 解冻重绘 + 主动 Invalidate：让富文本一次性画出，跳过中间状态

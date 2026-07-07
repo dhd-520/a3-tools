@@ -112,4 +112,20 @@ public class AppSettings
 
     /// <summary>集成开发工具密码（AES 加密存储，所有账套共用）</summary>
     public string DevToolsPassword { get; set; } = string.Empty;
+
+    // ===== 内置 SQL 查询工具窗体状态（2026-07-06 随记住大小需求新增）=====
+    /// <summary>SqlQueryForm 上次关闭时的宽度（px）</summary>
+    public int SqlQueryFormWidth { get; set; } = 0;
+
+    /// <summary>SqlQueryForm 上次关闭时的高度（px）</summary>
+    public int SqlQueryFormHeight { get; set; } = 0;
+
+    /// <summary>SqlQueryForm 上次关闭时的 Left（px）</summary>
+    public int SqlQueryFormLeft { get; set; } = -1;
+
+    /// <summary>SqlQueryForm 上次关闭时的 Top（px）</summary>
+    public int SqlQueryFormTop { get; set; } = -1;
+
+    /// <summary>SqlQueryForm 上次关闭时是否最大化</summary>
+    public bool SqlQueryFormMaximized { get; set; } = true;
 }

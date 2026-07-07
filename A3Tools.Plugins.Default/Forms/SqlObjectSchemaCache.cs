@@ -105,6 +105,42 @@ public static class SqlObjectSchemaCache
     }
 
     /// <summary>
+    /// 同步等待缓存加载完成（供 IntelliSense 同步调用 GetSuggestions 使用）。
+    /// 陛下反馈 EXEC 弹不出存储过程 — 原因：WarmupAsync 是 fire-and-forget，
+    /// 缓存未就绪时 GetObjectsByKind 返空。修复：GetSuggestions 内调本方法同步等。
+    /// 注意：不能直接 Wait() 已有 _loadingTasks（会 UI context 死锁）。
+    /// 严格走 Task.Run + ConfigureAwait(false) 避免 WinForms 同步上下文死锁。
+    /// </summary>
+    public static bool EnsureLoadedSync(string connectionString, int timeoutMs = 10000)
+    {
+        if (string.IsNullOrEmpty(connectionString)) return false;
+        var key = KeyOf(connectionString);
+
+        // 已就绪 → 返 true
+        if (_cache.ContainsKey(key)) return true;
+
+        // 不管_loadingTasks 是否有进行中任务，统一起一个新 Task
+        // 内部 WarmupAsync 会重用已有 loading task（GetOrAdd 逻辑）
+        // 关键：Task.Run 让所有 continuation 留在 ThreadPool，不回 UI context → 不死锁
+        var t = Task.Run(async () =>
+        {
+            try
+            {
+                await WarmupAsync(connectionString).ConfigureAwait(false);
+            }
+            catch { /* 加载失败，缓存仍空 */ }
+        });
+        try { t.Wait(timeoutMs); } catch { /* timeout 也返 false */ }
+        return _cache.ContainsKey(key);
+    }
+
+    private static string KeyOf(string connectionString)
+    {
+        try { var (key, _) = ParseKey(connectionString); return key; }
+        catch { return connectionString; }
+    }
+
+    /// <summary>
     /// 从缓存拿前缀匹配的对象名候选（用于 IntelliSense 弹窗）。
     /// 自动按 Schema 限定：
     /// - 输入 "SELECT * FROM dbo." → 只返 dbo 下

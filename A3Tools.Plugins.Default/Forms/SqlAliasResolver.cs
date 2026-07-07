@@ -77,6 +77,25 @@ public static class SqlAliasResolver
             @"\s+(?<alias>\w+)\s*\(",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // 3. 逗号分隔的多表：FROM A a, B b, C c  —— aliasObj 只记第一个，逗号后面需要单独提
+        var regexComma = new Regex(
+            @",\s*(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|RIGHT\s+(?:OUTER\s+)?|FULL\s+(?:OUTER\s+)?|CROSS\s+(?:OUTER\s+)?)?" +
+            @"(?<obj>(?:\[[^\]]+\]|\w+)\.(?:\[[^\]]+\]|\w+)|\[[^\]]+\]|\w+)" +
+            @"\s+(?:AS\s+)?" +
+            @"(?<alias>\w+)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // 4. 陛下反馈：SELECT BI FROM S_SCM_SEORDER → BI 应弹 S_SCM_SEORDER 的列
+        // 原因：表后没别名，旧 regex 要求 FROM 后必须带 alias 才记入 aliasMap
+        // 修复：FROM/JOIN 后只一个 obj、无别名 → 以表名末段为 alias 记入
+        // 边界：表名后必须是 $ ; , ( ) \r \n WHERE/GROUP/ORDER/.../JOIN/...
+        var regexObjNoAlias = new Regex(
+            @"(?:\b(?:FROM|JOIN)\b|,)\s+" +
+            @"(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|RIGHT\s+(?:OUTER\s+)?|FULL\s+(?:OUTER\s+)?|CROSS\s+(?:OUTER\s+)?)?" +
+            @"(?<obj>(?:\[[^\]]+\]|\w+)\.(?:\[[^\]]+\]|\w+)|\[[^\]]+\]|\w+)" +
+            @"\s*(?=$|;|,|\(|\)|\r|\n|\b(?:WHERE|GROUP|ORDER|HAVING|LIMIT|UNION|INTERSECT|EXCEPT|JOIN|LEFT|RIGHT|FULL|CROSS|INNER|OUTER|APPLY)\b)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         try
         {
             foreach (Match m in regexObj.Matches(sqlText))
@@ -93,6 +112,30 @@ public static class SqlAliasResolver
                 if (!map.ContainsKey(alias))
                 {
                     var (schema, name) = SplitObj(m.Groups["obj"].Value);
+                    map[alias] = new AliasedObject(schema, name);
+                }
+            }
+
+            // 逗号分隔的多表：FROM A a, B b  → b 关联到 B
+            foreach (Match m in regexComma.Matches(sqlText))
+            {
+                var alias = StripBrackets(m.Groups["alias"].Value);
+                if (!map.ContainsKey(alias))
+                {
+                    var (schema, name) = SplitObj(m.Groups["obj"].Value);
+                    map[alias] = new AliasedObject(schema, name);
+                }
+            }
+
+            // 4. FROM/JOIN 后无别名：以表名末段为 alias 记入
+            // 例：SELECT * FROM S_SCM_SEORDER  → map["S_SCM_SEORDER"] = (null, S_SCM_SEORDER)
+            foreach (Match m in regexObjNoAlias.Matches(sqlText))
+            {
+                var (schema, name) = SplitObj(m.Groups["obj"].Value);
+                // alias 用表名末段
+                var alias = name;
+                if (!map.ContainsKey(alias))
+                {
                     map[alias] = new AliasedObject(schema, name);
                 }
             }

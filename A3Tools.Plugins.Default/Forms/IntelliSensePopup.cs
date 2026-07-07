@@ -54,7 +54,7 @@ public class IntelliSensePopup : Form
             // 之前 ItemHeight = 20 + DrawItem 用 Graphics.DrawString 描字，文字 ascent + descent ≈ 16-18px
             // 实际超出 20px 范围，文字底部被切掉，看起来"下行挡住"。
             // 这里改用 TextRenderer.DrawText + 足够 ItemHeight，全部可见。
-            ItemHeight = 22,
+            ItemHeight = 24,
             DrawMode = DrawMode.OwnerDrawFixed,  // 改 Fixed，强制严格按 ItemHeight 切行
             BackColor = Color.FromArgb(250, 251, 253),
             ForeColor = Color.FromArgb(40, 50, 70)
@@ -73,6 +73,7 @@ public class IntelliSensePopup : Form
     /// <summary>
     /// 在屏幕坐标处显示（不抢焦点）。
     /// owner = 编辑器控件（用于 Show 时归还焦点 + 关闭时跟随 owner 卸载）。
+    /// width 传 0 或负数 → 按 items 最长字符串自动算宽度。
     /// </summary>
     public void ShowNearCaret(Control owner, Point screenLocation, int width, int maxHeight, IEnumerable<string> items)
     {
@@ -88,10 +89,29 @@ public class IntelliSensePopup : Form
         listBox.Items.Clear();
         listBox.Items.AddRange(items.ToArray());
 
-        int popupWidth = Math.Max(width, 120);
+        // 陛下反馈：对象名长时显示不全 → 宽自适应。
+        // 用 TextRenderer 测最长 item 文本宽度（不加 scrollbar）
+        // 如果传入 width > 0 → 仍受传入 width 限制（最小下限）
+        int minWidth = 120;
+        int maxAutoWidth = 800;  // 防极端长名（特殊业务名）超过屏幕
+        int autoWidth = minWidth;
+        if (width <= 0)
+        {
+            using var measureFont = new Font(listBox.Font?.FontFamily ?? new Font("Consolas", 10F).FontFamily, listBox.Font?.Size ?? 10F);
+            int textPad = 12;  // 左右 padding
+            int maxTextWidth = 0;
+            foreach (var it in _allItems)
+            {
+                var sz = TextRenderer.MeasureText(it, measureFont, new Size(int.MaxValue, int.MaxValue),
+                    TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                if (sz.Width > maxTextWidth) maxTextWidth = sz.Width;
+            }
+            autoWidth = Math.Min(Math.Max(maxTextWidth + textPad, minWidth), maxAutoWidth);
+        }
+        int popupWidth = (width > 0 ? Math.Max(width, minWidth) : autoWidth);
         listBox.Width = popupWidth;
-        // 行高统一 22（构造函数里定的 ItemHeight）
-        const int rowHeight = 22;
+        // 行高统一 24（构造函数里定的 ItemHeight）
+        const int rowHeight = 24;
         int showCount = Math.Min(listBox.Items.Count, maxHeight / rowHeight);
         if (showCount < 1) showCount = 1;
         if (showCount > listBox.Items.Count) showCount = listBox.Items.Count;
@@ -171,7 +191,7 @@ public class IntelliSensePopup : Form
             return;
         }
 
-        const int rowHeight = 22;
+        const int rowHeight = 24;
         int showCount = Math.Min(listBox.Items.Count, 12);
         int popupHeight = showCount * rowHeight + 4;
         listBox.Height = popupHeight;

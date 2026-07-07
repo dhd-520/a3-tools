@@ -104,7 +104,7 @@ partial class SqlQueryTabPage
 
         rtbEditor.Dock = DockStyle.Fill;
         rtbEditor.BorderStyle = BorderStyle.None;
-        rtbEditor.Font = new Font("Consolas", 10F);
+        rtbEditor.Font = new Font("Consolas", 12F);
         rtbEditor.BackColor = Color.White;
         rtbEditor.WordWrap = false;
         rtbEditor.AcceptsTab = true;

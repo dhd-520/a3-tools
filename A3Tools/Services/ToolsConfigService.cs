@@ -59,6 +59,9 @@ public class ToolsConfigService
         try
         {
             string json = File.ReadAllText(_toolsConfigFile, Encoding.UTF8);
+            // 陛下反馈：tools.json 不支持 // 注释。预处理移除 // 单行注释后再解析。
+            // System.Text.Json 不支持 JSON5 / 注释，手动剥引号外的 // 后缀。
+            json = StripJsonLineComments(json);
             var config = JsonSerializer.Deserialize<ToolsConfiguration>(json, _jsonOptions);
             Tools = config?.Tools ?? new List<ToolConfig>();
             
@@ -72,6 +75,36 @@ public class ToolsConfigService
         }
     }
     
+    /// <summary>
+    /// 剥除 JSON 文本中的 // 单行注释（仅击输入双引号外部分）。
+    /// 解决陛下手动注释一个工具后整个文件解析失败 → 工具都消失的问题（2026-07-07）。
+    /// </summary>
+    private static string StripJsonLineComments(string json)
+    {
+        if (string.IsNullOrEmpty(json)) return json;
+        var sb = new StringBuilder(json.Length);
+        bool inString = false;
+        bool escape = false;
+        for (int i = 0; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (escape) { sb.Append(c); escape = false; continue; }
+            if (c == '\\') { sb.Append(c); if (inString) escape = true; continue; }
+            if (c == '"') { inString = !inString; sb.Append(c); continue; }
+            // 在字符串内 原样走
+            if (inString) { sb.Append(c); continue; }
+            // // 注释起点 → 跳过到行尾
+            if (c == '/' && i + 1 < json.Length && json[i + 1] == '/')
+            {
+                while (i < json.Length && json[i] != '\n') i++;
+                if (i < json.Length) sb.Append('\n');
+                continue;
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     /// <summary>
     /// 保存工具配置
     /// </summary>

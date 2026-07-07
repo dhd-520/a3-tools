@@ -6,6 +6,18 @@ using Microsoft.Data.SqlClient;
 namespace A3Tools.Plugins.Default.Forms;
 
 /// <summary>
+/// SQL 执行状态（影响 Tab 标题图标 + 状态栏颜色）。
+/// </summary>
+public enum ExecStatus
+{
+    Idle,
+    Running,
+    Success,
+    Failure,
+    Cancelled,
+}
+
+/// <summary>
 /// SQL 查询 TabPage 内容（编辑器 + 结果 + 消息）。
 /// 编辑器用 SqlEditor（继承 RichTextBox）+ LineNumberPanel 自绘行号 + SQL 高亮。
 /// 嵌入到 SqlQueryForm 的 TabPage.Controls 中，由 SqlQueryForm 管理生命周期。
@@ -14,7 +26,8 @@ public partial class SqlQueryTabPage : UserControl
 {
     private readonly SqlQueryForm _parent;
     private CancellationTokenSource? _cts;
-    private Action<string, long, int>? _statusReporter;
+    private Action<string, long, int, ExecStatus>? _statusReporter;
+    private bool _suppressStatusClear;  // SetEditorText 程序性赋值时屏蔽 TextChanged 触发清状态图标
 
     /// <summary>当前 Tab 对应的 TabPage（由 SqlQueryForm 在嵌入时设置）</summary>
     public TabPage? Page { get; set; }
@@ -22,6 +35,9 @@ public partial class SqlQueryTabPage : UserControl
     public SqlEditor Editor => rtbEditor;
     public DataGridView ResultGrid => dgvResult;
     public RichTextBox Messages => rtbMessages;
+
+    /// <summary>字号变化事件→主窗体状态栏（2026-07-07）</summary>
+    public event EventHandler? FontSizeChanged;
 
     /// <summary>设计器无参构造（VS 加载设计时使用）。运行时走带参构造。</summary>
     public SqlQueryTabPage() : this(null!)
@@ -41,6 +57,16 @@ public partial class SqlQueryTabPage : UserControl
     private void InitEditor()
     {
         rtbEditor.KeyDown += SqlEditor_KeyDown;
+        // 字号改变 → 转发给 SqlQueryForm 状态栏（2026-07-07）
+        rtbEditor.FontSizeChanged += (_, _) => FontSizeChanged?.Invoke(this, EventArgs.Empty);
+        FontSizeChanged?.Invoke(this, EventArgs.Empty);
+        // F12 转到定义（按词查缓存 → OpenScript）
+        rtbEditor.GoToDefinitionRequested += () => _parent.GoToDefinition();
+        // 用户在编辑器里改动 → 清掉上次执行结果的状态图标（结果已经过期）
+        rtbEditor.TextChanged += (_, _) =>
+        {
+            if (!_suppressStatusClear) SetTabStatusIcon(ExecStatus.Idle);
+        };
     }
 
     private void SqlEditor_KeyDown(object? sender, KeyEventArgs e)
@@ -130,6 +156,8 @@ public partial class SqlQueryTabPage : UserControl
     {
         // 临时屏蔽 IntelliSense（防止加载脚本后末行 "GO" 触发 [GOTO/...] 的莫名提示）
         rtbEditor.SuppressIntelliSense();
+        // 屏蔽 TextChanged 清状态图标（程序性加载不应清掉刚跑完的状态图标）
+        _suppressStatusClear = true;
         try
         {
             rtbEditor.Text = text;
@@ -137,6 +165,7 @@ public partial class SqlQueryTabPage : UserControl
         }
         finally
         {
+            _suppressStatusClear = false;
             // 短暂延迟后再开放，避免用户键入第一个字符仍保留抑制
             // （如果定时器已起不会被取消；之前未起也不会新起）
             var t = new System.Windows.Forms.Timer { Interval = 250 };
@@ -145,13 +174,44 @@ public partial class SqlQueryTabPage : UserControl
         }
     }
 
+    /// <summary>
+    /// 设置 Tab 标题上的执行状态图标：✓ 成功 / ✗ 失败 / ⏸ 停止 / ⏳ 运行中 / 空=无状态。
+    /// 同步触发 TabControl 重绘（Page.Text 变更会自动触发）。
+    /// </summary>
+    private void SetTabStatusIcon(ExecStatus status)
+    {
+        if (Page == null) return;
+        string current = Page.Text ?? "";
+        // 去掉已有的状态图标（✓ ✗ ⏸ ⏳），保持标题文本干净
+        foreach (var icon in new[] { "✓", "✗", "⏸", "⏳" })
+        {
+            int idx = current.LastIndexOf(icon);
+            if (idx >= 0)
+            {
+                current = current.Substring(0, idx).TrimEnd();
+                break;
+            }
+        }
+        string suffix = status switch
+        {
+            ExecStatus.Success   => "  ✓",
+            ExecStatus.Failure   => "  ✗",
+            ExecStatus.Cancelled => "  ⏸",
+            ExecStatus.Running   => "  ⏳",
+            _                    => "",
+        };
+        string newText = string.IsNullOrEmpty(suffix) ? current : $"{current}{suffix}";
+        // 相同文本不重写，避免每次按键都触发 Tab 重绘闪烁
+        if (Page.Text != newText) Page.Text = newText;
+    }
+
     public void AppendMessage(string msg)
     {
         if (InvokeRequired) { BeginInvoke(() => AppendMessage(msg)); return; }
         rtbMessages.AppendText(msg);
     }
 
-    public void SetStatusReporter(Action<string, long, int> reporter) => _statusReporter = reporter;
+    public void SetStatusReporter(Action<string, long, int, ExecStatus> reporter) => _statusReporter = reporter;
 
     public void ClearResults()
     {
@@ -232,6 +292,10 @@ public partial class SqlQueryTabPage : UserControl
         dgvResult.DataSource = null;
         _cts = new CancellationTokenSource();
 
+        // 执行前 → 状态图标 = ⏳，状态栏 = 蓝色 "执行中..."
+        SetTabStatusIcon(ExecStatus.Running);
+        _statusReporter?.Invoke("执行中...", 0, 0, ExecStatus.Running);
+
         var sw = Stopwatch.StartNew();
         try
         {
@@ -298,23 +362,34 @@ public partial class SqlQueryTabPage : UserControl
 
             sw.Stop();
             if (anyBatchError)
-                _statusReporter?.Invoke("部分批次执行失败", sw.ElapsedMilliseconds, affectedRows);
+            {
+                SetTabStatusIcon(ExecStatus.Failure);
+                _statusReporter?.Invoke($"✗ 部分批次失败（{batches.Count} 批），成功 {affectedRows} 行", sw.ElapsedMilliseconds, affectedRows, ExecStatus.Failure);
+                // 失败 → 强制切到 消息 Tab（即使有部分结果也要看错误详情）
+                if (tabResultSwitcher.SelectedTab != tabMessages)
+                    tabResultSwitcher.SelectedTab = tabMessages;
+            }
             else
-                _statusReporter?.Invoke($"执行成功，影响 {affectedRows} 行", sw.ElapsedMilliseconds, affectedRows);
-            if (!hasResult && tabResultSwitcher.SelectedTab != tabMessages)
-                tabResultSwitcher.SelectedTab = tabMessages;
+            {
+                SetTabStatusIcon(ExecStatus.Success);
+                _statusReporter?.Invoke($"✓ 执行成功，影响 {affectedRows} 行", sw.ElapsedMilliseconds, affectedRows, ExecStatus.Success);
+                if (!hasResult && tabResultSwitcher.SelectedTab != tabMessages)
+                    tabResultSwitcher.SelectedTab = tabMessages;
+            }
         }
         catch (OperationCanceledException)
         {
             sw.Stop();
             AppendMessage($"[{DateTime.Now:HH:mm:ss}] 已停止\n");
-            _statusReporter?.Invoke("已停止", sw.ElapsedMilliseconds, 0);
+            SetTabStatusIcon(ExecStatus.Cancelled);
+            _statusReporter?.Invoke("⏸ 已停止", sw.ElapsedMilliseconds, 0, ExecStatus.Cancelled);
         }
         catch (Exception ex)
         {
             sw.Stop();
             AppendMessage($"[{DateTime.Now:HH:mm:ss}] [错误] {ex.Message}\n");
-            _statusReporter?.Invoke("执行失败", sw.ElapsedMilliseconds, 0);
+            SetTabStatusIcon(ExecStatus.Failure);
+            _statusReporter?.Invoke($"✗ 执行失败：{ex.Message}", sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
             if (tabResultSwitcher.SelectedTab != tabMessages)
                 tabResultSwitcher.SelectedTab = tabMessages;
         }

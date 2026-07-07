@@ -29,6 +29,7 @@ partial class SqlQueryForm
     private ToolStripStatusLabel lblStatus;
     private ToolStripStatusLabel lblElapsed;
     private ToolStripStatusLabel lblRows;
+    private ToolStripStatusLabel lblFontSize;
 
     protected override void Dispose(bool disposing)
     {
@@ -61,6 +62,7 @@ partial class SqlQueryForm
         lblStatus = new ToolStripStatusLabel();
         lblElapsed = new ToolStripStatusLabel();
         lblRows = new ToolStripStatusLabel();
+        lblFontSize = new ToolStripStatusLabel();
         ctxTab.SuspendLayout();
         pnlTop.SuspendLayout();
         pnlToolBar.SuspendLayout();
@@ -228,12 +230,14 @@ partial class SqlQueryForm
         tabControl.Padding = new Point(12, 6);
         tabControl.SelectedIndex = 0;
         tabControl.Size = new Size(1280, 603);
+        tabControl.SizeMode = TabSizeMode.Fixed;
+        tabControl.ItemSize = new Size(220, 28);
         tabControl.TabIndex = 1;
         // 
         // statusStrip
         // 
         statusStrip.ImageScalingSize = new Size(28, 28);
-        statusStrip.Items.AddRange(new ToolStripItem[] { lblConnInfo, lblStatus, lblElapsed, lblRows });
+        statusStrip.Items.AddRange(new ToolStripItem[] { lblConnInfo, lblStatus, lblElapsed, lblRows, lblFontSize });
         statusStrip.Location = new Point(0, 679);
         statusStrip.Name = "statusStrip";
         statusStrip.Size = new Size(1280, 41);
@@ -268,6 +272,13 @@ partial class SqlQueryForm
         lblRows.Name = "lblRows";
         lblRows.Size = new Size(78, 32);
         lblRows.Text = "影响: -";
+        // 
+        // lblFontSize
+        //
+        lblFontSize.BorderSides = ToolStripStatusLabelBorderSides.Left;
+        lblFontSize.Name = "lblFontSize";
+        lblFontSize.Size = new Size(120, 32);
+        lblFontSize.Text = "字号: 12pt";
         // 
         // SqlQueryForm
         // 

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using A3Tools.Models;
 
 namespace A3Tools.Plugins.Default.Forms;
@@ -32,6 +33,7 @@ public partial class ObjectExplorerForm : Form
 {
     private readonly SqlQueryForm _owner;
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
+    private TreeNode? _selectedNode;
     private CancellationTokenSource? _rebuildCts;
     private Task? _currentRefreshTask;          // 跟踪主后台任务
     private bool _isClosing = false;             // OnFormClosing 重入闸门
@@ -52,12 +54,23 @@ public partial class ObjectExplorerForm : Form
 
         if (DesignMode) return;
 
+        // ★ 关键：设 Owner 让 Windows 自动维护 Z-order（owned window 永远在 owner 之上）
+        //   位置通过 FixLocation + WndProc 拦截锁定，绕过 WinForms 内部的位置纠正
+        //   这是一对的：Owner 给 Z-order，WndProc 锁位置
+        this.Owner = owner;
+
         BindAllTabs();
 
         // 顶栏：刷新按钮 + 模式切换按钮
         btnRefreshRoot.Click += (_, _) => _ = RefreshAsync(forceReload: true);
         btnMode.Click += (_, _) => ToggleMode();
         UpdateModeButtonText();
+
+        // 右键菜单事件
+        miCopyName.Click += MiCopyName_Click;
+        miCopyFullName.Click += MiCopyFullName_Click;
+        miOpenScript.Click += MiOpenScript_Click;
+        contextMenuTree.Opening += ContextMenuTree_Opening;
 
         // 关窗安全处理：依赖 OnFormClosing 重写（完整同步等 + 安全 dispose）
     }
@@ -121,6 +134,8 @@ public partial class ObjectExplorerForm : Form
 
         // 双击事件：共用一个 handler
         tree.NodeMouseDoubleClick += Tree_NodeMouseDoubleClick;
+        // 右键菜单：记录选中节点
+        tree.NodeMouseClick += Tree_NodeMouseClick;
 
         // 节流 Timer：每 Tab 一个，200ms 内多次 TextChanged 只触发最后一次
         var t = new System.Windows.Forms.Timer { Interval = 200 };
@@ -452,6 +467,117 @@ public partial class ObjectExplorerForm : Form
         var fullName = tag.Item2.Substring(pipeIdx + 1);
 
         _owner.OpenScript(database: "", objType: objType, objName: fullName);
+    }
+
+    // ============================================
+    // 右键菜单事件
+    // ============================================
+
+    private void Tree_NodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right)
+        {
+            _selectedNode = e.Node;
+            if (_selectedNode != null)
+                _selectedNode.TreeView.SelectedNode = _selectedNode;
+        }
+    }
+
+    private void ContextMenuTree_Opening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // 如果没有选中对象节点，禁用菜单项
+        bool hasObject = _selectedNode?.Tag is ValueTuple<string, string> tag && tag.Item1 == "object";
+        miCopyName.Enabled = hasObject;
+        miCopyFullName.Enabled = hasObject;
+        miOpenScript.Enabled = hasObject;
+    }
+
+    private void MiCopyName_Click(object? sender, EventArgs e)
+    {
+        if (_selectedNode?.Tag is ValueTuple<string, string> tag && tag.Item1 == "object")
+        {
+            var pipeIdx = tag.Item2.IndexOf('|');
+            var fullName = tag.Item2.Substring(pipeIdx + 1);
+            var dotIdx = fullName.LastIndexOf('.');
+            var name = dotIdx > 0 ? fullName.Substring(dotIdx + 1) : fullName;
+            Clipboard.SetText(name);
+        }
+    }
+
+    private void MiCopyFullName_Click(object? sender, EventArgs e)
+    {
+        if (_selectedNode?.Tag is ValueTuple<string, string> tag && tag.Item1 == "object")
+        {
+            var pipeIdx = tag.Item2.IndexOf('|');
+            var fullName = tag.Item2.Substring(pipeIdx + 1);
+            Clipboard.SetText(fullName);
+        }
+    }
+
+    private void MiOpenScript_Click(object? sender, EventArgs e)
+    {
+        if (_selectedNode?.Tag is ValueTuple<string, string> tag && tag.Item1 == "object")
+        {
+            var pipeIdx = tag.Item2.IndexOf('|');
+            var objType = tag.Item2.Substring(0, pipeIdx);
+            var fullName = tag.Item2.Substring(pipeIdx + 1);
+            _owner.OpenScript(database: "", objType: objType, objName: fullName);
+        }
+    }
+
+    // ============================================
+    // 位置锁定（WndProc 拦截 WinForms Owner 引起的位置纠正）
+    // ============================================
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWPOS
+    {
+        public IntPtr hwnd;
+        public IntPtr hwndInsertAfter;
+        public int x;
+        public int y;
+        public int cx;
+        public int cy;
+        public uint flags;
+    }
+
+    private const int WM_WINDOWPOSCHANGING = 0x0046;
+    private Point? _fixedLocation;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    /// <summary>
+    /// 锁定 Explorer 到指定位置。绕过 WinForms Form.Owner 自动位置纠正（见 2026-07-04 worklist）。
+    /// 必须在 Owner 设了之后调用（创建 Form 后立刻）。
+    /// </summary>
+    public void FixLocation(Point location)
+    {
+        _fixedLocation = location;
+        if (IsHandleCreated)
+            SetWindowPos(Handle, IntPtr.Zero, location.X, location.Y, 0, 0, 0x0010 | 0x0001); // NOACTIVATE | NOSIZE
+    }
+
+    /// <summary>
+    /// 拦截 WM_WINDOWPOSCHANGING：WinForms 想改位置时强制使用 _fixedLocation。
+    /// 这样不管 Show() / Resize() / 任何 WinForms 内部逻辑，都不会把 Explorer 移走。
+    /// </summary>
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_WINDOWPOSCHANGING && _fixedLocation.HasValue)
+        {
+            var pos = (WINDOWPOS)Marshal.PtrToStructure(m.LParam, typeof(WINDOWPOS))!;
+            // 只在 WinForms 想改位置时拦截（SWP_NOMOVE 没设）
+            if ((pos.flags & 0x0002) == 0 &&
+                (pos.x != _fixedLocation.Value.X || pos.y != _fixedLocation.Value.Y))
+            {
+                pos.x = _fixedLocation.Value.X;
+                pos.y = _fixedLocation.Value.Y;
+                pos.flags |= 0x0002; // 加上 NOMOVE 让 WinForms 别再改
+                Marshal.StructureToPtr(pos, m.LParam, false);
+            }
+        }
+        base.WndProc(ref m);
     }
 }
 

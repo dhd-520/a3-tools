@@ -126,7 +126,7 @@ partial class MainForm
         lblVersion.Name = "lblVersion";
         lblVersion.Size = new Size(69, 28);
         lblVersion.TabIndex = 0;
-        lblVersion.Text = "v2.1.0";
+        lblVersion.Text = "v2.2.0";
         // 
         // lblTitle
         // 
