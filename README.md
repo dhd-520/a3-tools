@@ -207,6 +207,35 @@ dotnet run --project A3Tools\A3Tools.csproj
 
 ## 版本历史
 
+### v2.2.0 (2026-07-07)
+
+**重点：内置 SQL 查询工具**（替代 SSMS 日常使用）
+
+- **多 Tab 查询** —— 自绘 × 关闭按钮、中键关闭、右键菜单（关闭当前/关闭其他/重命名）
+- **对象资源管理器** —— 树状浏览表/视图/函数/存储过程/触发器；右键【复制对象名/复制完整路径/打开脚本】
+- **IntelliSense 智能提示** —— 上下文推断 + 50ms 节流；EXEC 后空格、SELECT * 后未输表名都能弹；Ctrl+滚轮调字号
+- **SQL 高亮** —— 关键字/字符串/数字/注释分色，闪烁冻结重绘 + 滚动位置保留
+- **GO 批处理分割** —— 仿 SSMS 按 GO 拆批执行，单批失败不中断
+- **Ctrl+F 查找 / Ctrl+H 替换** —— 上一个/下一个、区分大小写、全部替换
+- **多屏位置记忆** —— 记住上次所在屏幕（DeviceName.HashCode），副屏拔走后回退主屏中心
+- **多库切换** —— 顶栏下拉 + 异步加载数据库列表
+- **状态栏实时字号** —— 默认 12pt，随时看到当前字号
+- **字体默认 11pt → 12pt** —— Consolas 等宽，SQL 友好
+- **联想框行高 22 → 24** —— 文字不部被切
+
+**修复**
+
+- 回车只能输入一次（重写 HandleEnterWithIndent + SuppressKeyPress 顺序）
+- 高亮后滚动条跳回顶部（保存/恢复 vScroll+hScroll）
+- 选中状态紊乱（精确保存 selStart/selLen/selColor）
+- tools.json 不支持 // 注释（StripJsonLineComments 字符串状态机预处理）
+- 联想框光标位置不准（对准当前光标 X）
+- 联想框光标移到别处不关闭（OnSelectionChanged 隐藏）
+
+**新增组件**：`SqlEditor`、`IntelliSensePopup`、`LineNumberPanel`、`ObjectExplorerForm`、`SearchReplaceDialog`、`SqlIntelliSenseProvider`、`SqlObjectSchemaCache`、`SqlQueryForm`、`SqlQueryTabPage`、`SqlScriptLoader`、`SettingsStore`
+
+**调佣方式**：账套右键 → **SQL 查询**
+
 ### v2.1.0 (2026-06-27)
 
 - **新增自定义工具 MVP**：工具箱新增「自定义工具」分组，支持可视化配置工具名称、主表、复制关键字、关联表（`;` 分隔多个）、关联字段
