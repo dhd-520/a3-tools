@@ -21,7 +21,11 @@ param(
 
     [string]$ReleaseNotes,
 
-    [string]$PublishDir = "publish"
+    [string]$PublishDir = "publish",
+
+    # 默认$true：2026-07-08 陛下决定先只用 Gitee（GitHub 国内连接不稳 + gh CLI 未 auth）
+    # 设 -IncludeGitHub 可手动启用 GitHub 发布
+    [bool]$SkipGitHub = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -133,9 +137,14 @@ Info ("Pushing tag " + $tag + " to remotes")
 try {
     & git tag -d $tag 2>$null | Out-Null
     & git tag $tag
-    # push tag 到所有 remote（每个 Gitee/GitHub 都拿到）
+    # 2026-07-08：只推 Gitee remote（GitHub 国内连接不稳）
     $remotes = (& git remote)
     foreach ($remote in $remotes) {
+        $url = (& git remote get-url $remote)
+        if ($url -notmatch 'gitee\.com') {
+            Info ("  skip " + $remote + " (not gitee)")
+            continue
+        }
         try {
             Info ("  pushing tag to " + $remote + "...")
             & git push $remote $tag --force
@@ -143,7 +152,7 @@ try {
             Warn ("  push to " + $remote + " failed: " + $_.Exception.Message)
         }
     }
-    Ok "tag pushed to all remotes"
+    Ok "tag pushed to Gitee remotes"
 } catch {
     Warn ("tag push failed (may not affect API publish): " + $_.Exception.Message)
 }
@@ -208,9 +217,11 @@ if ($giteeToken) {
     Info "Skipping Gitee (no token)"
 }
 
-# 10) GitHub 发布
+# 10) GitHub 发布（默认跳过）
 $githubReleaseUrl = $null
-if ($githubToken -or $ghCli) {
+if ($SkipGitHub) {
+    Info "Skipping GitHub (SkipGitHub=$SkipGitHub, set -IncludeGitHub to enable)"
+} elseif ($githubToken -or $ghCli) {
     Info "Publishing to GitHub..."
     $ghOwner = $env:GITHUB_OWNER
     $ghRepo  = $env:GITHUB_REPO
