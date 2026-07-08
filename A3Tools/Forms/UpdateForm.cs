@@ -83,7 +83,9 @@ public partial class UpdateForm : Form
         {
             string currentExe = Process.GetCurrentProcess().MainModule!.FileName!;
             string currentDir = Path.GetDirectoryName(currentExe)!;
-            string tempExe = Path.Combine(currentDir, $"A3Tools_{_update.Version}_new.exe");
+            // 按资产类型决定后缀：zip 必须 .zip，exe 才 .exe
+            string ext = _update.IsZipPackage ? ".zip" : ".exe";
+            string tempExe = Path.Combine(currentDir, $"A3Tools_{_update.Version}_new{ext}");
 
             _cts = new CancellationTokenSource();
             var progress = new Progress<DownloadProgress>(p =>

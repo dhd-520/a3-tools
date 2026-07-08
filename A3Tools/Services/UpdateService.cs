@@ -368,32 +368,46 @@ del ""%~f0""
         string currentExe = Process.GetCurrentProcess().MainModule!.FileName!;
         string currentDir = Path.GetDirectoryName(currentExe)!;
         string backupDir = Path.Combine(Path.GetDirectoryName(currentDir)!, "A3Tools_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+        string logPath = Path.Combine(currentDir, "_update.log");
 
         // 1. 备份当前整个目录（深度 1）
         CopyDirectory(currentDir, backupDir);
 
-        // 2. 写 bat：等待当前进程退出后，解压 zip 覆盖 → 重启
+        // 2. 写 bat：等待当前进程退出后，调用 .NET ZipFile.ExtractToDirectory 覆盖 → 重启
+        //    用 PowerShell + System.IO.Compression.ZipFile 而不是 Expand-Archive（后者路径超长会失败）
         string tempExtract = Path.Combine(Path.GetTempPath(), "A3Tools_update_" + Guid.NewGuid().ToString("N").Substring(0, 8));
 
         string batContent = $@"@echo off
 chcp 65001 >nul
+echo [%date% %time%] update bat started > ""{logPath}""
+
 timeout /t 2 /nobreak >nul
 
-:: 1. 解压 zip 到临时目录
-powershell -NoProfile -Command ""Expand-Archive -Path '{zipPath}' -DestinationPath '{tempExtract}' -Force""
+:: 1. 解压 zip 到临时目录（用 .NET ZipFile，避开 Expand-Archive 路径长度限制）
+powershell -NoProfile -Command ""try {{ Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('{zipPath}', '{tempExtract}') ; 'unzip OK' }} catch {{ 'unzip FAILED: ' + $_.Exception.Message }}"" >> ""{logPath}"" 2>&1
+
+if not exist ""{tempExtract}"" (
+    echo [%date% %time%] FATAL: tempExtract not exist >> ""{logPath}""
+    start """" ""{currentExe}""
+    del ""%~f0""
+    exit /b 1
+)
 
 :: 2. 找出 zip 里的顶层目录（可能叫 StandaloneSF 或 A3Tools）
 set ""SRC={tempExtract}\StandaloneSF""
 if not exist ""%SRC%"" set ""SRC={tempExtract}\A3Tools""
 if not exist ""%SRC%"" set ""SRC={tempExtract}""
 
+echo [%date% %time%] src=%SRC% >> ""{logPath}""
+
 :: 3. 覆盖所有文件到 currentDir
-xcopy /Y /E /I /Q ""%SRC%\*"" ""{currentDir}\""
+xcopy /Y /E /I /Q ""%SRC%\*"" ""{currentDir}\"" >> ""{logPath}"" 2>&1
 
 :: 4. 启动新版本
 start """" ""{currentExe}""
 
-:: 5. 清理
+:: 5. 清理临时 zip 和 bat（保留日志）
+del ""{zipPath}"" >nul 2>&1
 del ""%~f0""
 ";
         string batPath = Path.Combine(currentDir, "_update.bat");

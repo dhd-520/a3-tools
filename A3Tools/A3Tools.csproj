@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>A3Tool.ico</ApplicationIcon>
     <AssemblyName>A3Tools</AssemblyName>
-    <Version>2.3.2</Version>
+    <Version>2.3.3</Version>
 
     <!-- 单文件发布参数（默认关闭，需要时通过命令行-p:PublishSingleFile=true 启用？-->
     <PublishSingleFile Condition="'$(PublishSingleFile)' == ''">false</PublishSingleFile>
