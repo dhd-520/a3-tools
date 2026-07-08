@@ -164,7 +164,7 @@ if ($giteeToken) {
     $giteeOwner = $env:GITEE_OWNER
     $giteeRepo  = $env:GITEE_REPO
     if (-not $giteeOwner) { $giteeOwner = "wangq80368036" }
-    if (-not $giteeRepo)  { $giteeRepo  = "A3ToolsRelease" }
+    if (-not $giteeRepo)  { $giteeRepo  = "a3-tools" }
 
     # 创建 release
     $createBody = @{

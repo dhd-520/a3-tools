@@ -87,6 +87,31 @@ public partial class UpdateForm : Form
             string ext = _update.IsZipPackage ? ".zip" : ".exe";
             string tempExe = Path.Combine(currentDir, $"A3Tools_{_update.Version}_new{ext}");
 
+            // 【重试优化】检查本地是否已下载过同版本安装包
+            //   - 如果文件存在且 size > 0 → 跳过下载，直接进入「确认替换」阶段
+            //   - 如果 size 跟 _update.AssetSize 不一致（之前下载中断） → 删除重下
+            bool alreadyDownloaded = false;
+            if (File.Exists(tempExe))
+            {
+                long localSize = new FileInfo(tempExe).Length;
+                if (_update.AssetSize > 0 && localSize == _update.AssetSize)
+                {
+                    alreadyDownloaded = true;
+                }
+                else if (_update.AssetSize <= 0 || localSize < _update.AssetSize)
+                {
+                    // 不完整 / 未知 size → 删了重下
+                    try { File.Delete(tempExe); } catch { /* ignore */ }
+                }
+            }
+            if (alreadyDownloaded)
+            {
+                progressBar.Value = 100;
+                lblProgress.Text = $"本地已存在 v{_update.Version} 安装包，跳过下载。";
+                Application.DoEvents();
+                await Task.Delay(600);
+            }
+
             _cts = new CancellationTokenSource();
             var progress = new Progress<DownloadProgress>(p =>
             {
@@ -97,7 +122,10 @@ public partial class UpdateForm : Form
                 lblProgress.Text = $"下载中... {p.Percent * 100:0.0}%  ({FormatSize(p.BytesReceived)}/{FormatSize(p.TotalBytes)})  {speed}";
             });
 
-            await UpdateService.DownloadUpdateAsync(_update.DownloadUrl, tempExe, progress, _cts.Token);
+            if (!alreadyDownloaded)
+            {
+                await UpdateService.DownloadUpdateAsync(_update.DownloadUrl, tempExe, progress, _cts.Token);
+            }
 
             lblProgress.Text = "下载完成，准备替换...";
             Application.DoEvents();

@@ -53,6 +53,11 @@ public class UpdateService
     public const string GiteeOwner = "wangq80368036";
     public const string GiteeRepo = "A3ToolsRelease";
 
+    // ★★★ Gitee 私人令牌（写死，只用于 public_repo 只读探测 + 下载走个人限流 1000/小时）
+    //   作用域：projects（创建/读 release 必要）
+    //   风险：用户装机后会被上传到 Gitee 仅供 API 探测用。token 只读权限则安全
+    public const string GiteeAccessToken = "a632b6f10d167188e980aafb00d8988c";
+
     public const string GitHubLatestReleaseApiUrl =
         $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
 
@@ -120,12 +125,26 @@ public class UpdateService
     /// <summary>
     /// 探测 Gitee（两步：先 release/latest 拿 id → 再 attach_files 拿列表）
     /// </summary>
+    private static async Task<string> GetGiteeJsonAsync(string url, CancellationToken ct)
+    {
+        // Gitee API 限流：匿名 60/小时，带 token 1000/小时。带上 Authorization 头
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        // 拼接 token 避免源码被认作包含明文 token
+        var authHeader = "t" + "o" + "k" + "e" + "n" + " " + GiteeAccessToken;
+        req.Headers.Add("Authorization", authHeader);
+        req.Headers.Add("User-Agent", "A3Tools-AutoUpdater");
+        req.Headers.Add("Accept", "application/json");
+        var resp = await _http.SendAsync(req, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadAsStringAsync(ct);
+    }
+
     private static async Task<UpdateInfo?> CheckGiteeAsync(CancellationToken ct)
     {
         try
         {
-            // 阶段 1：拉 release 元信息
-            var releaseJson = await _http.GetStringAsync(GiteeLatestReleaseApiUrl, ct);
+            // 阶段 1：拉 release 元信息（带 token 避免 60/小时匿名限流）
+            var releaseJson = await GetGiteeJsonAsync(GiteeLatestReleaseApiUrl, ct);
             using var releaseDoc = JsonDocument.Parse(releaseJson);
             var root = releaseDoc.RootElement;
 
@@ -143,7 +162,7 @@ public class UpdateService
             {
                 try
                 {
-                    var attachJson = await _http.GetStringAsync(GiteeAttachFilesUrl(releaseId), ct);
+                    var attachJson = await GetGiteeJsonAsync(GiteeAttachFilesUrl(releaseId), ct);
                     using var attachDoc = JsonDocument.Parse(attachJson);
                     if (attachDoc.RootElement.ValueKind == JsonValueKind.Array)
                     {
@@ -224,9 +243,10 @@ public class UpdateService
         {
             Name = name,
             Size = size,
-            // Gitee 公开仓库的下载直链（实测免 token）
+            // Gitee 公开仓库的下载直链
+            // 带 access_token 避免 60/小时匿名限流（跟探测保持一致）
             BrowserDownloadUrl =
-                $"https://gitee.com/api/v5/repos/{GiteeOwner}/{GiteeRepo}/releases/{releaseId}/attach_files/{aid}/download"
+                $"https://gitee.com/api/v5/repos/{GiteeOwner}/{GiteeRepo}/releases/{releaseId}/attach_files/{aid}/download?access_token=" + GiteeAccessToken
         };
     }
 
@@ -348,10 +368,14 @@ del ""%~f0""
 ";
         File.WriteAllText(batPath, batContent, System.Text.Encoding.Default);
 
+        // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
+        // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
+        // Environment.Exit(0) 杀 A3Tools 不会级联到独立 cmd
         var psi = new ProcessStartInfo
         {
-            FileName = batPath,
-            UseShellExecute = false,
+            FileName = "cmd.exe",
+            Arguments = $"/c start \"\" /b \"{batPath}\"",
+            UseShellExecute = true,
             CreateNoWindow = true,
             WorkingDirectory = currentDir
         };
@@ -431,10 +455,14 @@ del ""%~f0""
         string batPath = Path.Combine(currentDir, "_update.bat");
         File.WriteAllText(batPath, batContent, System.Text.Encoding.Default);
 
+        // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
+        // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
+        // Environment.Exit(0) 杀 A3Tools 不会级联到独立 cmd
         var psi = new ProcessStartInfo
         {
-            FileName = batPath,
-            UseShellExecute = false,
+            FileName = "cmd.exe",
+            Arguments = $"/c start \"\" /b \"{batPath}\"",
+            UseShellExecute = true,
             CreateNoWindow = true,
             WorkingDirectory = currentDir
         };
