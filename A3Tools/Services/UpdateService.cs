@@ -355,8 +355,26 @@ del ""%~f0""
             CreateNoWindow = true,
             WorkingDirectory = currentDir
         };
-        Process.Start(psi);
 
+        // 1) 启动 bat 后台进程（异步）
+        var batProc = Process.Start(psi);
+
+        // 2) 等 bat 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
+        if (batProc != null)
+        {
+            for (int i = 0; i < 30; i++)
+            {
+                if (!batProc.HasExited) break;
+                Thread.Sleep(50);
+            }
+        }
+
+        // 3) StandaloneSF 单文件模式下 A3Tools.exe 是 self-extracted，
+        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 bat。
+        //    给 bat 1 秒时间复制 / 解压完自己再退出。
+        Thread.Sleep(1000);
+
+        // 4) 强制退出
         Environment.Exit(0);
     }
 
@@ -420,8 +438,26 @@ del ""%~f0""
             CreateNoWindow = true,
             WorkingDirectory = currentDir
         };
-        Process.Start(psi);
 
+        // 1) 启动 bat 后台进程（异步）
+        var batProc = Process.Start(psi);
+
+        // 2) 等 bat 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
+        if (batProc != null)
+        {
+            for (int i = 0; i < 30; i++)
+            {
+                if (!batProc.HasExited) break;
+                Thread.Sleep(50);
+            }
+        }
+
+        // 3) StandaloneSF 单文件模式下 A3Tools.exe 是 self-extracted，
+        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 bat。
+        //    给 bat 1 秒时间复制 / 解压完自己再退出。
+        Thread.Sleep(1000);
+
+        // 4) 强制退出
         Environment.Exit(0);
     }
 
