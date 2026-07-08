@@ -348,7 +348,9 @@ public class UpdateService
     /// </summary>
     public static void PerformUpdate(string newExePath)
     {
-        string currentExe = Process.GetCurrentProcess().MainModule!.FileName!;
+        // StandaloneSF 单文件发布下，MainModule.FileName 会返回 self-extract 临时目录
+        // 优先用 Environment.ProcessPath（.NET 6+）获取真实启动 exe 路径
+        string currentExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule!.FileName!;
         string currentDir = Path.GetDirectoryName(currentExe)!;
         string backupExe = currentExe + ".bak";
 
@@ -356,17 +358,29 @@ public class UpdateService
         File.Copy(currentExe, backupExe);
 
         string batPath = Path.Combine(currentDir, "_update.bat");
+        string logPath = Path.Combine(currentDir, "_update.log");
         string batContent = $@"@echo off
 chcp 65001 >nul
+setlocal
+cd /d ""%~dp0""
+echo. >> ""{logPath}""
+echo ====================================================== >> ""{logPath}""
+echo [%date% %time%] exe update bat started >> ""{logPath}""
+echo [%date% %time%] cwd=%CD% >> ""{logPath}""
+echo [%date% %time%] currentExe={currentExe} >> ""{logPath}""
+echo [%date% %time%] newExePath={newExePath} >> ""{logPath}""
 timeout /t 2 /nobreak >nul
 :retry
+echo [%date% %time%] retry del {currentExe} >> ""{logPath}""
 del ""{currentExe}"" >nul 2>&1
 if exist ""{currentExe}"" goto retry
-move ""{newExePath}"" ""{currentExe}""
+echo [%date% %time%] moving new exe >> ""{logPath}""
+move ""{newExePath}"" ""{currentExe}"" >> ""{logPath}"" 2>&1
+echo [%date% %time%] moving done, errorlevel=%errorlevel% >> ""{logPath}""
 start """" ""{currentExe}""
 del ""%~f0""
 ";
-        File.WriteAllText(batPath, batContent, System.Text.Encoding.Default);
+        File.WriteAllText(batPath, batContent, new System.Text.UTF8Encoding(true));
 
         // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
         // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
@@ -407,7 +421,9 @@ del ""%~f0""
     /// </summary>
     public static void PerformZipUpdate(string zipPath)
     {
-        string currentExe = Process.GetCurrentProcess().MainModule!.FileName!;
+        // StandaloneSF 单文件发布下，MainModule.FileName 会返回 self-extract 临时目录
+        // 优先用 Environment.ProcessPath（.NET 6+）获取真实启动 exe 路径
+        string currentExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule!.FileName!;
         string currentDir = Path.GetDirectoryName(currentExe)!;
         string backupDir = Path.Combine(Path.GetDirectoryName(currentDir)!, "A3Tools_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
         string logPath = Path.Combine(currentDir, "_update.log");
@@ -419,45 +435,82 @@ del ""%~f0""
         //    用 PowerShell + System.IO.Compression.ZipFile 而不是 Expand-Archive（后者路径超长会失败）
         string tempExtract = Path.Combine(Path.GetTempPath(), "A3Tools_update_" + Guid.NewGuid().ToString("N").Substring(0, 8));
 
+        // bat 详细日志版：每一步 echo 到 _update.log
+        // Plan B: cd /d %~dp0 强制切到 bat 所在目录，不依赖 C# 传的 WorkingDirectory
+        // bat 用 UTF-8 写入避免 GBK 中文乱码
         string batContent = $@"@echo off
 chcp 65001 >nul
-echo [%date% %time%] update bat started > ""{logPath}""
+setlocal
+
+:: === Plan B: 强制切到 bat 所在目录，不依赖父进程传过来的 WorkingDirectory ===
+cd /d ""%~dp0""
+
+:: 初始化日志（追加模式）
+echo. >> ""{logPath}""
+echo ====================================================== >> ""{logPath}""
+echo [%date% %time%] update bat started >> ""{logPath}""
+echo [%date% %time%] batPath=%~f0 >> ""{logPath}""
+echo [%date% %time%] cwd=%CD% >> ""{logPath}""
+echo [%date% %time%] currentExe={currentExe} >> ""{logPath}""
+echo [%date% %time%] zipPath={zipPath} >> ""{logPath}""
+echo [%date% %time%] tempExtract={tempExtract} >> ""{logPath}""
 
 timeout /t 2 /nobreak >nul
 
-:: 1. 解压 zip 到临时目录（用 .NET ZipFile，避开 Expand-Archive 路径长度限制）
-powershell -NoProfile -Command ""try {{ Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('{zipPath}', '{tempExtract}') ; 'unzip OK' }} catch {{ 'unzip FAILED: ' + $_.Exception.Message }}"" >> ""{logPath}"" 2>&1
-
-if not exist ""{tempExtract}"" (
-    echo [%date% %time%] FATAL: tempExtract not exist >> ""{logPath}""
+:: === 1. 解压 zip 到临时目录 ===
+echo [%date% %time%] STEP 1: unzipping... >> ""{logPath}""
+powershell -NoProfile -Command ""try {{ Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('{zipPath}', '{tempExtract}') }} catch {{ 'unzip FAILED: ' + $_.Exception.Message; exit 1 }}"" >> ""{logPath}"" 2>&1
+if errorlevel 1 (
+    echo [%date% %time%] FATAL: unzip failed >> ""{logPath}""
     start """" ""{currentExe}""
     del ""%~f0""
     exit /b 1
 )
 
-:: 2. 找出 zip 里的顶层目录（可能叫 StandaloneSF 或 A3Tools）
+if not exist ""{tempExtract}"" (
+    echo [%date% %time%] FATAL: tempExtract not exist after unzip >> ""{logPath}""
+    start """" ""{currentExe}""
+    del ""%~f0""
+    exit /b 1
+)
+
+:: === 2. 找出 zip 里的顶层目录（可能叫 StandaloneSF 或 A3Tools）===
 set ""SRC={tempExtract}\StandaloneSF""
 if not exist ""%SRC%"" set ""SRC={tempExtract}\A3Tools""
 if not exist ""%SRC%"" set ""SRC={tempExtract}""
+echo [%date% %time%] STEP 2: src=%SRC% >> ""{logPath}""
+echo [%date% %time%] STEP 2: exists=%SRC%>> ""{logPath}"" & dir ""%SRC%"" >> ""{logPath}"" 2>&1
 
-echo [%date% %time%] src=%SRC% >> ""{logPath}""
+:: === 3. 覆盖所有文件到 currentDir ===
+echo [%date% %time%] STEP 3: xcopy %SRC%\* to %CD%\ >> ""{logPath}""
+xcopy /Y /E /I /Q ""%SRC%\*"" ""%CD%\\"" >> ""{logPath}"" 2>&1
+echo [%date% %time%] STEP 3 done, errorlevel=%errorlevel% >> ""{logPath}""
 
-:: 3. 覆盖所有文件到 currentDir
-xcopy /Y /E /I /Q ""%SRC%\*"" ""{currentDir}\"" >> ""{logPath}"" 2>&1
+:: === 4. 验证 exe 已被覆盖 ===
+echo [%date% %time%] STEP 4: verify A3Tools.exe >> ""{logPath}""
+if exist ""%CD%\A3Tools.exe"" (
+    echo [%date% %time%] A3Tools.exe exists, size=%~zA3Tools.exe >> ""{logPath}""
+) else (
+    echo [%date% %time%] FATAL: A3Tools.exe missing after xcopy >> ""{logPath}""
+)
 
-:: 4. 启动新版本
+:: === 5. 启动新版本 ===
+echo [%date% %time%] STEP 5: start {currentExe} >> ""{logPath}""
 start """" ""{currentExe}""
 
-:: 5. 清理临时 zip 和 bat（保留日志）
+:: === 6. 清理临时 zip 和 bat ===
+echo [%date% %time%] cleanup >> ""{logPath}""
 del ""{zipPath}"" >nul 2>&1
 del ""%~f0""
 ";
         string batPath = Path.Combine(currentDir, "_update.bat");
-        File.WriteAllText(batPath, batContent, System.Text.Encoding.Default);
+        // bat 写 UTF-8 with BOM，chcp 65001 才能正确显示中文
+        File.WriteAllText(batPath, batContent, new System.Text.UTF8Encoding(true));
 
         // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
         // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
         // Environment.Exit(0) 杀 A3Tools 不会级联到独立 cmd
+        // WorkingDirectory 不传（bat 第一行 cd /d %~dp0 自救）
         var psi = new ProcessStartInfo
         {
             FileName = "cmd.exe",
