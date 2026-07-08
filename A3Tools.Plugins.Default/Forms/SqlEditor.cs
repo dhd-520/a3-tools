@@ -325,16 +325,24 @@ public class SqlEditor : RichTextBox
     }
 
     /// <summary>
-    /// 回车自动缩进：1) 先记住上一行的缩进文本，2) base.OnKeyDown 处理换行，
-    /// 3) 插入缩进文本。
-    /// 修复：之前在 base.OnKeyDown 后再调 e.SuppressKeyPress 会不起作用，且 base.OnKeyDown
-    /// 返回后状态可能错乱。改为一个干净的实现（2026-07-07）。
+    /// 回车自动缩进。
+    ///
+    /// Bug 历史（2026-07-08 修复）：
+    /// 之前是 "base.OnKeyDown(e) → e.SuppressKeyPress = true → SelectedText = indent" 三段式，
+    /// 注释自夸"修复了 base 后 suppress 不起作用的问题"，实际代码依然保持错误顺序。
+    /// 根因：WinForms RichTextBox 的换行不是 base.OnKeyDown 干的，而是 base.OnKeyDown 返回后
+    /// WinForms 走"WM_CHAR 注入 '\r' → richedit 处理 → 插入段落符"这条链路实现的。
+    /// 此时再设 SuppressKeyPress=true 已经拦不到 WM_CHAR 之前的部分（WM_CHAR 链路整体被吃掉，
+    /// 结果就是 richedit 永远看不到 '\r' → 不换行）。注释里"之前在 base.OnKeyDown 后再调
+    /// e.SuppressKeyPress 会不起作用"的观察完全正确，但修复没改成。
+    ///
+    /// 正确做法（2026-07-08）：绕开隐式 WM_CHAR 链路，显式用 SelectedText 插入 换行+缩进，
+    /// 然后 SuppressKeyPress=true 防止 base/WM_CHAR 二次插入。
     /// </summary>
     private void HandleEnterWithIndent(KeyEventArgs e)
     {
         // 1. 计算上一行缩进
-        int caretBefore = SelectionStart;
-        int lineIdxBefore = GetLineFromCharIndex(caretBefore);
+        int lineIdxBefore = GetLineFromCharIndex(SelectionStart);
         string indent = "";
         bool needExtraIndent = false;
         if (lineIdxBefore > 0)
@@ -361,27 +369,28 @@ public class SqlEditor : RichTextBox
             }
         }
 
-        // 2. 默认行为（处理换行）
-        base.OnKeyDown(e);
-        // 让 base.OnKeyDown 吃掉这个 key，后续不再处理
-        e.SuppressKeyPress = true;
-
-        // 3. 插入缩进
-        if (!string.IsNullOrEmpty(indent) && !IsDisposed && IsHandleCreated)
+        // 2. 显式插入 换行 + 缩进（不再依赖 base.OnKeyDown 的隐式段落插入）
+        if (IsDisposed || !IsHandleCreated)
         {
-            try
-            {
-                _suppressHighlight = true;
-                _suppressIntelliSense = true;
-                SelectedText = indent;
-            }
-            catch { /* 控件可能正在销毁 */ }
-            finally
-            {
-                _suppressHighlight = false;
-                _suppressIntelliSense = false;
-            }
+            e.SuppressKeyPress = true;
+            return;
         }
+        _suppressHighlight = true;
+        _suppressIntelliSense = true;
+        try
+        {
+            // Environment.NewLine = "\r\n" → richedit 标准段落符
+            SelectedText = Environment.NewLine + indent;
+        }
+        catch { /* 控件可能正在销毁 */ }
+        finally
+        {
+            _suppressHighlight = false;
+            _suppressIntelliSense = false;
+        }
+
+        // 3. 阻断 base.OnKeyDown 与后续 WM_CHAR 二次插入
+        e.SuppressKeyPress = true;
     }
 
     // ============================================

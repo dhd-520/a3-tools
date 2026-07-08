@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <RootNamespace>TestContext</RootNamespace>
+    <AssemblyName>TestContext</AssemblyName>
+    <UseWindowsForms>false</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\A3Tools.Plugins.Default\A3Tools.Plugins.Default.csproj" />
+  </ItemGroup>
+</Project>

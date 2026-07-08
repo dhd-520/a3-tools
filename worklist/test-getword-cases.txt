@@ -1,0 +1,79 @@
+===== 测试用例 =====
+
+# EXEC 后输入
+fullSql = "EXEC s"
+caret = 6
+prefix = GetCurrentWord → "s"
+beforeStart = 6 - 1 = 5
+before = fullSql.Substring(0, 5) = "EXEC "
+TrimEnd → "EXEC"
+EndsWith("EXEC") → True
+kwStart = 4 - 4 = 0
+kwStart == 0 → return true ✓
+
+# EXEC 后空格 + 字符
+fullSql = "EXEC "
+caret = 4 (光标在末尾空白后)
+prefix = GetCurrentWord → ""
+word.Length < 1 → _intelliSense.Hide() ✗ BUG！
+
+# 用户在 EXEC 后面输入第一个字符瞬间
+fullSql = "EXEC s"
+按 's' 时:
+- OnTextChanged → 50ms 后触发 TriggerIntelliSense
+- 此时 caret = 6, prefix = "s"
+- 走到 IsAfterExecKeyword → True → 返回存储过程列表
+- 应该弹 popup ✓
+
+# 但 EXEC 后直接输入字符之前：word="" → 关 popup
+这是合理的（用户在输入空白，本来就不该弹）
+但用户报的"EXEC 空格后再输入" 应该能弹（因为 word="s"）
+
+# SELECT * FROM 表后 在*前面输入
+fullSql = "SELECT * FROM T1 a"
+用户在 'a' 后输入 'b'（光标在 a 后面输入 b 把它变成 ab）
+OR
+用户在 'T1 a' 后输入 'b'
+caret = 19, prefix = "ab" or "b"
+GetSuggestions 路径:
+1. IsAfterExecKeyword? no
+2. ColumnResult? "ab" 不含 . → null
+3. 关键字 + 对象 → OK，能弹
+
+# 用户说"在*前面输入"
+可能场景: SELECT * FROM T1 a SELECT|*
+    光标在 SELECT 后准备打列名
+    或者: SELECT FROM T1 a  (用户改 select 后输入 *)
+
+实际上用户的场景更可能是:
+SELECT * FROM T1 a → 在 * 前面输入东西
+比如 SELECT (改成) SEL*ECT FROM T1 a
+此时 caret 在 * 位置
+prefix = GetCurrentWord → "" (前面是空白)
+word.Length < 1 → Hide ✗ BUG！
+
+或者
+SELECT * FROM T1 a   SELECT * 
+                  ↑光标在这里，prefix=""
+→ Hide ✗
+
+OR 用户想表达的是：
+SELECT * FROM T1 a SELECT 
+然后在 SELECT 后输入 "Cust" 想让 Cust.* 提示列
+但前缀是 "Cust"，没有 . 不算列
+
+==== 用户真实场景大概率是 ====
+1. EXEC 后的弹出本来就工作，但**关键字里 EXEC/EXECUTE 在 AllKeywords 第 1 位**，
+   用户输入 "EXEC" 时弹出的是关键字列表里靠前的项，不是存储过程
+2. 用户在 EXEC 后按空格（word=""），popup 关闭；再输入 s 时弹出应该走存储过程分支
+
+让臣确认下：用户报告说 "EXEC 空格后再输入没有存储过程提示"
+可能的原因：
+A. cache 没预热（连接串空）
+B. ConnectionString 属性没赋值
+C. IsAfterExecKeyword 的 caretOffset 计算错了
+D. StorageProcedure 在缓存里但 SchemaName.Name.StartsWith("s") 过滤逻辑出 bug
+
+最可能的：D（proc 名是 dbo.sp_help 等，prefix="s" 应该匹配）
+
+让臣看 GetObjectsByKind 是否真的工作：

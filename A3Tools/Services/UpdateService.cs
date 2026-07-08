@@ -13,18 +13,35 @@ using System.Threading.Tasks;
 namespace A3Tools.Services;
 
 /// <summary>
-/// 自动更新服务
+/// 更新数据来源
+/// </summary>
+public enum UpdateSource
+{
+    GitHub = 0,
+    Gitee = 1
+}
+
+/// <summary>
+/// 自动更新服务（双源：Gitee 主源 + GitHub 兜底）
 ///
-/// 数据源：GitHub Releases API（无需 Token，公开仓库）
+/// 数据源 1 — Gitee Releases API（公开仓库，免 token，国内快）
+///   GET https://gitee.com/api/v5/repos/{owner}/{repo}/releases/latest
+///   响应字段：id / tag_name / name / body / created_at
+///   ⚠️ 不带 assets，要再调：
+///   GET https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{id}/attach_files
+///   下载：
+///   GET https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{id}/attach_files/{aid}/download
+///
+/// 数据源 2 — GitHub Releases API（公开仓库，免 token）
 ///   GET https://api.github.com/repos/{owner}/{repo}/releases/latest
-///   响应字段：tag_name（如 "v2.2.0"）、name、body（发布说明）、
-///             assets[]（下载附件，含 browser_download_url + size + name）
+///   响应字段：tag_name / name / body / published_at / assets[]
+///   下载：assets[].browser_download_url
 ///
 /// 流程：
-/// 1. 启动时 → 异步 CheckForUpdateAsync()，不阻塞 UI
-/// 2. 比对本地 AssemblyVersion 与远端 tag_name
-/// 3. 有新版本 → 主窗体弹 UpdateForm，让用户点【更新】或【取消】
-/// 4. 点【更新】→ 后台下载 zip → 备份当前 exe → 解压覆盖 → 启动新版
+/// 1. 启动时 → 并发探测两个源（不阻塞 UI）
+/// 2. 比对两个源的版本号，取高的
+/// 3. 有新版本 → 主窗体弹 UpdateForm，用户点【更新】或【取消】
+/// 4. 点【更新】→ 下载 → 备份 → bat 覆盖 → 重启
 /// </summary>
 public class UpdateService
 {
@@ -32,17 +49,33 @@ public class UpdateService
     public const string GitHubOwner = "dhd-520";
     public const string GitHubRepo = "a3-tools";
 
-    public const string LatestReleaseApiUrl =
+    // ★ Gitee 镜像仓库（陛下手动配置）
+    public const string GiteeOwner = "wangq80368036";
+    public const string GiteeRepo = "A3ToolsRelease";
+
+    public const string GitHubLatestReleaseApiUrl =
         $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
+
+    public static string GiteeLatestReleaseApiUrl =>
+        $"https://gitee.com/api/v5/repos/{GiteeOwner}/{GiteeRepo}/releases/latest";
+
+    public static string GiteeAttachFilesUrl(string releaseId) =>
+        $"https://gitee.com/api/v5/repos/{GiteeOwner}/{GiteeRepo}/releases/{releaseId}/attach_files";
+
+    public static string GiteeReleasePageUrl(string tag) =>
+        $"https://gitee.com/{GiteeOwner}/{GiteeRepo}/releases/tag/{tag}";
+
+    public static string GitHubReleasePageUrl(string tag) =>
+        $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/tag/{tag}";
 
     private static readonly HttpClient _http = new()
     {
         Timeout = TimeSpan.FromSeconds(15),
         DefaultRequestHeaders =
         {
-            // GitHub API 要求 User-Agent
+            // GitHub API 要求 User-Agent；Gitee 也接受
             { "User-Agent", "A3Tools-AutoUpdater" },
-            { "Accept", "application/vnd.github+json" }
+            { "Accept", "application/json" }
         }
     };
 
@@ -57,22 +90,174 @@ public class UpdateService
     }
 
     /// <summary>
-    /// 检查更新：异步拉 GitHub Releases/latest，比对版本号
+    /// 检查更新：并发探测 Gitee + GitHub，取版本号高的那个
     /// </summary>
     public static async Task<UpdateInfo?> CheckForUpdateAsync(CancellationToken ct = default)
     {
+        // 并发探测双源（任一失败不影响另一个）
+        var giteeTask = CheckGiteeAsync(ct);
+        var githubTask = CheckGitHubAsync(ct);
+
+        UpdateInfo? gitee = null, github = null;
+        try { gitee = await giteeTask; } catch { /* 单源失败不致命 */ }
+        try { github = await githubTask; } catch { /* 单源失败不致命 */ }
+
+        // 两个都失败
+        if (gitee == null && github == null)
+        {
+            Debug.WriteLine("[UpdateService] Gitee 和 GitHub 都探测失败");
+            return null;
+        }
+
+        // 只有一个成功
+        if (gitee == null) return github;
+        if (github == null) return gitee;
+
+        // 两个都成功 → 取版本号高的
+        return CompareVersion(gitee.Version, github.Version) > 0 ? gitee : github;
+    }
+
+    /// <summary>
+    /// 探测 Gitee（两步：先 release/latest 拿 id → 再 attach_files 拿列表）
+    /// </summary>
+    private static async Task<UpdateInfo?> CheckGiteeAsync(CancellationToken ct)
+    {
         try
         {
-            var json = await _http.GetStringAsync(LatestReleaseApiUrl, ct);
+            // 阶段 1：拉 release 元信息
+            var releaseJson = await _http.GetStringAsync(GiteeLatestReleaseApiUrl, ct);
+            using var releaseDoc = JsonDocument.Parse(releaseJson);
+            var root = releaseDoc.RootElement;
+
+            string? tagName = root.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
+            if (string.IsNullOrEmpty(tagName)) return null;
+            string? releaseId = root.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+
+            // 阶段 2：拉附件列表（拿到下载 URL + 大小 + 名称）
+            string? downloadUrl = null;
+            string? assetName = null;
+            long assetSize = 0;
+            bool isZip = false;
+
+            if (!string.IsNullOrEmpty(releaseId))
+            {
+                try
+                {
+                    var attachJson = await _http.GetStringAsync(GiteeAttachFilesUrl(releaseId), ct);
+                    using var attachDoc = JsonDocument.Parse(attachJson);
+                    if (attachDoc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        // 优先 .zip（含 Plugins/），其次 .exe
+                        GitHubAsset? zipAsset = null, exeAsset = null;
+                        foreach (var el in attachDoc.RootElement.EnumerateArray())
+                        {
+                            var asset = ParseGiteeAsset(el, releaseId);
+                            if (asset == null) continue;
+                            if (asset.Name?.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) == true)
+                                zipAsset ??= asset;
+                            else if (asset.Name?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true)
+                                exeAsset ??= asset;
+                        }
+                        var picked = zipAsset ?? exeAsset;
+                        if (picked != null)
+                        {
+                            downloadUrl = picked.BrowserDownloadUrl;
+                            assetName = picked.Name;
+                            assetSize = picked.Size;
+                            isZip = picked == zipAsset;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[UpdateService] Gitee attach_files 失败: {ex.Message}");
+                    // 拿不到附件列表 → release 信息也无意义，返 null
+                    return null;
+                }
+            }
+
+            string remoteVer = tagName.TrimStart('v', 'V');
+            string? name = root.TryGetProperty("name", out var n) ? n.GetString() : null;
+            string? body = root.TryGetProperty("body", out var b) ? b.GetString() : null;
+            DateTimeOffset publishedAt = default;
+            if (root.TryGetProperty("created_at", out var cEl) &&
+                DateTimeOffset.TryParse(cEl.GetString(), out var cDt))
+            {
+                publishedAt = cDt;
+            }
+
+            return new UpdateInfo
+            {
+                Source = UpdateSource.Gitee,
+                TagName = tagName,
+                Version = remoteVer,
+                Name = name ?? tagName,
+                Body = body ?? "(无发布说明)",
+                PublishedAt = publishedAt,
+                DownloadUrl = downloadUrl,
+                AssetName = assetName,
+                AssetSize = assetSize,
+                IsZipPackage = isZip,
+                HasUpdate = CompareVersion(remoteVer, CurrentVersion) > 0
+            };
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[UpdateService] Gitee 探测失败: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>解析 Gitee attach_file 元素为统一结构（伪装成 GitHubAsset 复用）</summary>
+    private static GitHubAsset? ParseGiteeAsset(JsonElement el, string releaseId)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        string? aid = el.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+        string? name = el.TryGetProperty("name", out var n) ? n.GetString() : null;
+        long size = 0;
+        if (el.TryGetProperty("size", out var sEl) && sEl.ValueKind == JsonValueKind.Number)
+            size = sEl.GetInt64();
+
+        if (string.IsNullOrEmpty(aid) || string.IsNullOrEmpty(name)) return null;
+
+        return new GitHubAsset
+        {
+            Name = name,
+            Size = size,
+            // Gitee 公开仓库的下载直链（实测免 token）
+            BrowserDownloadUrl =
+                $"https://gitee.com/api/v5/repos/{GiteeOwner}/{GiteeRepo}/releases/{releaseId}/attach_files/{aid}/download"
+        };
+    }
+
+    /// <summary>
+    /// 探测 GitHub（一步：release 详情自带 assets）
+    /// </summary>
+    private static async Task<UpdateInfo?> CheckGitHubAsync(CancellationToken ct)
+    {
+        try
+        {
+            // GitHub 严格 UA 要求
+            using var req = new HttpRequestMessage(HttpMethod.Get, GitHubLatestReleaseApiUrl);
+            req.Headers.Add("User-Agent", "A3Tools-AutoUpdater");
+            req.Headers.Add("Accept", "application/vnd.github+json");
+
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Debug.WriteLine($"[UpdateService] GitHub HTTP {(int)resp.StatusCode}");
+                return null;
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(ct);
             var release = JsonSerializer.Deserialize<GitHubRelease>(json);
             if (release == null || string.IsNullOrEmpty(release.TagName))
                 return null;
 
-            // tag_name 是 "v2.2.0" 格式，去掉 v 前缀
             string remoteVer = release.TagName.TrimStart('v', 'V');
             string localVer = CurrentVersion;
 
-            // 资产优先级：.zip（包含完整目录，含 Plugins/） > .exe（仅主程序）
+            // 资产优先级：.zip（完整目录，含 Plugins/） > .exe（仅主程序）
             var zipAsset = release.Assets?.FirstOrDefault(a =>
                 a.Name != null && a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
             var exeAsset = release.Assets?.FirstOrDefault(a =>
@@ -81,6 +266,7 @@ public class UpdateService
 
             return new UpdateInfo
             {
+                Source = UpdateSource.GitHub,
                 TagName = release.TagName,
                 Version = remoteVer,
                 Name = release.Name ?? release.TagName,
@@ -95,12 +281,12 @@ public class UpdateService
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[UpdateService] 检查更新失败: {ex.Message}");
+            Debug.WriteLine($"[UpdateService] GitHub 探测失败: {ex.Message}");
             return null;
         }
     }
 
-    /// <summary>下载新版 exe 到指定路径（带进度回调）</summary>
+    /// <summary>下载新版 exe/zip 到指定路径（带进度回调）</summary>
     public static async Task DownloadUpdateAsync(
         string url,
         string savePath,
@@ -187,8 +373,6 @@ del ""%~f0""
         CopyDirectory(currentDir, backupDir);
 
         // 2. 写 bat：等待当前进程退出后，解压 zip 覆盖 → 重启
-        //    zip 是 "包含顶层目录" 结构：解压时会创建 StandaloneSF/xxx
-        //    所以先解压到临时位置，然后把内部内容挪到 currentDir
         string tempExtract = Path.Combine(Path.GetTempPath(), "A3Tools_update_" + Guid.NewGuid().ToString("N").Substring(0, 8));
 
         string batContent = $@"@echo off
@@ -203,7 +387,7 @@ set ""SRC={tempExtract}\StandaloneSF""
 if not exist ""%SRC%"" set ""SRC={tempExtract}\A3Tools""
 if not exist ""%SRC%"" set ""SRC={tempExtract}""
 
-:: 3. 覆盖所有文件到 currentDir（排除 .bak 备份、DATA、logs）
+:: 3. 覆盖所有文件到 currentDir
 xcopy /Y /E /I /Q ""%SRC%\*"" ""{currentDir}\""
 
 :: 4. 启动新版本
@@ -228,7 +412,7 @@ del ""%~f0""
     }
 
     /// <summary>
-    /// 备份当前整个目录（仅备份顶层文件+Plugins+DATA，不递归过深）
+    /// 备份当前整个目录（仅备份顶层文件+Plugins，不递归过深）
     /// </summary>
     private static void CopyDirectory(string sourceDir, string destDir)
     {
@@ -236,11 +420,9 @@ del ""%~f0""
         foreach (var file in Directory.GetFiles(sourceDir))
         {
             var name = Path.GetFileName(file);
-            // 跳过 _update.bat 这种临时文件
             if (name.StartsWith("_")) continue;
             File.Copy(file, Path.Combine(destDir, name), true);
         }
-        // Plugins 子目录
         var pluginsSrc = Path.Combine(sourceDir, "Plugins");
         if (Directory.Exists(pluginsSrc))
         {
@@ -253,15 +435,15 @@ del ""%~f0""
         }
     }
 
-    /// <summary>比较版本号：remote > local → 1；remote < local → -1；相等 → 0</summary>
-    public static int CompareVersion(string remote, string local)
+    /// <summary>比较版本号：a > b → 1；a < b → -1；相等 → 0</summary>
+    public static int CompareVersion(string a, string b)
     {
-        var r = ParseVersion(remote);
-        var l = ParseVersion(local);
-        for (int i = 0; i < Math.Max(r.Length, l.Length); i++)
+        var ra = ParseVersion(a);
+        var rb = ParseVersion(b);
+        for (int i = 0; i < Math.Max(ra.Length, rb.Length); i++)
         {
-            int ri = i < r.Length ? r[i] : 0;
-            int li = i < l.Length ? l[i] : 0;
+            int ri = i < ra.Length ? ra[i] : 0;
+            int li = i < rb.Length ? rb[i] : 0;
             if (ri > li) return 1;
             if (ri < li) return -1;
         }
@@ -280,6 +462,7 @@ del ""%~f0""
 /// <summary>更新信息（给 UI 层用）</summary>
 public class UpdateInfo
 {
+    public UpdateSource Source { get; set; } = UpdateSource.GitHub;
     public string TagName { get; set; } = "";
     public string Version { get; set; } = "";
     public string Name { get; set; } = "";
@@ -301,6 +484,19 @@ public class DownloadProgress
     public double SpeedBytesPerSec { get; set; }
 }
 
+/// <summary>GitHub / Gitee 资产（统一结构，Gitee attach_file 也复用）</summary>
+internal class GitHubAsset
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
+
+    [JsonPropertyName("browser_download_url")]
+    public string? BrowserDownloadUrl { get; set; }
+}
+
 /// <summary>GitHub Release 响应模型（精简版）</summary>
 internal class GitHubRelease
 {
@@ -319,17 +515,3 @@ internal class GitHubRelease
     [JsonPropertyName("assets")]
     public List<GitHubAsset>? Assets { get; set; }
 }
-
-internal class GitHubAsset
-{
-    [JsonPropertyName("name")]
-    public string? Name { get; set; }
-
-    [JsonPropertyName("size")]
-    public long Size { get; set; }
-
-    [JsonPropertyName("browser_download_url")]
-    public string? BrowserDownloadUrl { get; set; }
-}
-
-// LINQ 引用在 using System.Linq; 中

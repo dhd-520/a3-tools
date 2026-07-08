@@ -28,9 +28,10 @@ public partial class UpdateForm : Form
 
     private void UpdateForm_Load(object? sender, EventArgs e)
     {
+        string sourceText = _update.Source == UpdateSource.Gitee ? "Gitee" : "GitHub";
         lblTitle.Text = $"发现新版本：{_update.Name}";
         lblVersion.Text = $"v{_update.Version}";
-        lblDate.Text = $"发布时间：{_update.PublishedAt.LocalDateTime:yyyy-MM-dd HH:mm}";
+        lblDate.Text = $"发布时间：{_update.PublishedAt.LocalDateTime:yyyy-MM-dd HH:mm}  ·  来源：{sourceText}";
         lblCurrent.Text = $"当前版本：{UpdateService.CurrentVersion}";
 
         // 把 markdown 风格的 body 简单转一下（去掉 # ## 等）
@@ -74,7 +75,9 @@ public partial class UpdateForm : Form
         progressBar.Visible = true;
         lblProgress.Visible = true;
         progressBar.Value = 0;
-        lblProgress.Text = "准备下载...";
+        lblProgress.Text = _update.Source == UpdateSource.Gitee
+            ? "从 Gitee 下载中..."
+            : "从 GitHub 下载中...";
 
         try
         {
@@ -132,8 +135,10 @@ public partial class UpdateForm : Form
 
     private void BtnViewRelease_Click(object? sender, EventArgs e)
     {
-        // 打开 GitHub Release 页面
-        var url = $"https://github.com/{UpdateService.GitHubOwner}/{UpdateService.GitHubRepo}/releases/tag/{_update.TagName}";
+        // 按实际来源打开对应仓库的 Release 页面
+        var url = _update.Source == UpdateSource.Gitee
+            ? UpdateService.GiteeReleasePageUrl(_update.TagName)
+            : UpdateService.GitHubReleasePageUrl(_update.TagName);
         try
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });

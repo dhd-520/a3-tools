@@ -10,14 +10,14 @@
     <AssemblyName>A3Tools</AssemblyName>
     <Version>2.3.1</Version>
 
-    <!-- 单文件发布参数（默认关闭，需要时通过命令�?-p:PublishSingleFile=true 启用�?-->
+    <!-- 单文件发布参数（默认关闭，需要时通过命令行-p:PublishSingleFile=true 启用？-->
     <PublishSingleFile Condition="'$(PublishSingleFile)' == ''">false</PublishSingleFile>
     <SelfContained Condition="'$(SelfContained)' == ''">false</SelfContained>
     <IncludeNativeLibrariesForSelfExtract Condition="'$(IncludeNativeLibrariesForSelfExtract)' == ''">false</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile Condition="'$(EnableCompressionInSingleFile)' == ''">false</EnableCompressionInSingleFile>
   </PropertyGroup>
 
-  <!-- �?Designer.cs 添加嵌套关系（SDK默认已包含，通过Update添加DependentUpon�?-->
+  <!-- 为Designer.cs 添加嵌套关系（SDK默认已包含，通过Update添加DependentUpon？-->
   <ItemGroup>
     <Compile Update="Forms\MainForm.Designer.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
@@ -50,20 +50,20 @@
     </None>
   </ItemGroup>
 
-  <!-- 构建后复制插�?DLL 到输出目�?Plugins 子目录（插件 DLL 不进单文件包，需保持为独立文件） -->
+  <!-- 构建后复制插件DLL 到输出目录Plugins 子目录（插件 DLL 不进单文件包，需保持为独立文件） -->
   <Target Name="CopyPluginsToFolder" AfterTargets="Build">
     <Copy SourceFiles="$(OutputPath)A3Tools.Plugins.Default.dll" DestinationFolder="$(OutputPath)Plugins" Condition="Exists('$(OutputPath)A3Tools.Plugins.Default.dll')" />
-    <!-- A3Tools.Common 被插件项目引用，必须和插�?DLL 放在同一目录，否�?Assembly.LoadFrom 加载插件会失败，工具箱显�?0 �?-->
+    <!-- A3Tools.Common 被插件项目引用，必须和插件DLL 放在同一目录，否则Assembly.LoadFrom 加载插件会失败，工具箱显示0 个-->
     <Copy SourceFiles="$(OutputPath)A3Tools.Common.dll" DestinationFolder="$(OutputPath)Plugins" Condition="Exists('$(OutputPath)A3Tools.Common.dll')" />
   </Target>
 
-  <!-- 发布后复制真正构建出来的插件 DLL 到发布目�?Plugins 子目录，避免复制 A3Tools\Plugins 下的�?DLL -->
+  <!-- 发布后复制真正构建出来的插件 DLL 到发布目录Plugins 子目录，避免复制 A3Tools\Plugins 下的旧DLL -->
   <Target Name="CopyPluginsToPublishFolder" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
     <Copy SourceFiles="$(OutputPath)Plugins\A3Tools.Plugins.Default.dll" DestinationFolder="$(PublishDir)Plugins" Condition="Exists('$(OutputPath)Plugins\A3Tools.Plugins.Default.dll')" />
     <Copy SourceFiles="$(OutputPath)Plugins\A3Tools.Common.dll" DestinationFolder="$(PublishDir)Plugins" Condition="Exists('$(OutputPath)Plugins\A3Tools.Common.dll')" />
   </Target>
 
-  <!-- 复制图标到输出目录（托盘图标用，单文件发布时也保留为独立文件，方便运行时加载�?-->
+  <!-- 复制图标到输出目录（托盘图标用，单文件发布时也保留为独立文件，方便运行时加载？-->
   <ItemGroup>
     <None Include="A3Tool.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

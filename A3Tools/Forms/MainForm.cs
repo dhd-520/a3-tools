@@ -2309,7 +2309,13 @@ public partial class MainForm : Form, IToolContext
 
     private void MenuAbout_Click(object? sender, EventArgs e)
     {
-        MessageBox.Show("A3工具箱 v2.2.0\n\n一个用于管理A3账套的桌面工具。\n\n包含账套管理、一键启动、数据库连接、远程访问、内置 SQL 查询工具等功能。\n\n仓库：https://github.com/dhd-520/a3-tools", "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show(
+            $"A3工具箱 v{UpdateService.CurrentVersion}\n\n" +
+            "一个用于管理A3账套的桌面工具。\n\n" +
+            "包含账套管理、一键启动、数据库连接、远程访问、内置 SQL 查询工具等功能。\n\n" +
+            $"GitHub: https://github.com/{UpdateService.GitHubOwner}/{UpdateService.GitHubRepo}\n" +
+            $"Gitee:  https://gitee.com/{UpdateService.GiteeOwner}/{UpdateService.GiteeRepo}",
+            "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private async void MenuCheckUpdate_Click(object? sender, EventArgs e)
