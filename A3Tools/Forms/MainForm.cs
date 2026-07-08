@@ -235,6 +235,8 @@ public partial class MainForm : Form, IToolContext
         LoadCustomTools();
         this.scrollPanel?.BringToFront();
         this.Resize += MainForm_Resize;
+        // 2026-07-08：右上角版本号原本 Designer 里写死 v2.2.0，现在改为动态读 AssemblyVersion
+        lblVersion.Text = "v" + A3Tools.Services.UpdateService.CurrentVersion;
         UpdateVersionPosition();
         _isInitializing = false;
         UpdateRootModeUI();
