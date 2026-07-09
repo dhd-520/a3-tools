@@ -203,11 +203,14 @@ if ($giteeToken) {
 
     $giteeReleaseId = $null
     try {
+        # 【2026-07-09 中文乱码修复】Content-Type 必须带 charset=utf-8 + Body 显式 UTF-8 字节。
+        #   PS 5.1 不带 charset 时会按 Default encoding（系统区域，GBK）发，Gitee 收 GBK 中文 → mojibake
+        $jsonText = $createBody
         $release = Invoke-RestMethod `
             -Uri ("https://gitee.com/api/v5/repos/" + $giteeOwner + "/" + $giteeRepo + "/releases") `
             -Method Post `
-            -ContentType "application/json" `
-            -Body $createBody
+            -ContentType "application/json; charset=utf-8" `
+            -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonText))
         $giteeReleaseId = $release.id
         Ok (("Gitee release created (id=" + $giteeReleaseId + ")"))
     } catch {
