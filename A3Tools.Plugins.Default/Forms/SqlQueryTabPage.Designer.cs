@@ -22,7 +22,7 @@ partial class SqlQueryTabPage
 
     private TabControl tabResultSwitcher;
     private TabPage tabResult;
-    private DataGridView dgvResult;
+    private TabControl tcResults;   // 【2026-07-09】多结果集容器：每个结果集一个 sub-Tab（仿 SSMS）
     private TabPage tabMessages;
     private RichTextBox rtbMessages;
 
@@ -51,7 +51,7 @@ partial class SqlQueryTabPage
 
         tabResultSwitcher = new TabControl();
         tabResult = new TabPage();
-        dgvResult = new DataGridView();
+        tcResults = new TabControl();   // 【2026-07-09】多结果集容器
         tabMessages = new TabPage();
         rtbMessages = new RichTextBox();
 
@@ -130,32 +130,14 @@ partial class SqlQueryTabPage
         tabResultSwitcher.Dock = DockStyle.Fill;
         tabResultSwitcher.Padding = new Point(8, 4);
 
-        // 结果 Tab
+        // 结果 Tab —— 【2026-07-09 重构】多结果集容器
+        //   老逻辑是固定的 dgvResult 只能放 1 个结果集，其他丢到 Messages
+        //   新逻辑用 tcResults TabControl 装多个结果集，每个一个 sub-Tab
         tabResult.Text = "结果";
-        dgvResult.Dock = DockStyle.Fill;
-        dgvResult.AllowUserToAddRows = false;
-        dgvResult.AllowUserToDeleteRows = false;
-        dgvResult.ReadOnly = true;
-        dgvResult.RowHeadersVisible = false;
-        dgvResult.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells;
-        dgvResult.SelectionMode = DataGridViewSelectionMode.CellSelect;
-        dgvResult.BackgroundColor = Color.White;
-        dgvResult.BorderStyle = BorderStyle.None;
-        dgvResult.ColumnHeadersDefaultCellStyle.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        dgvResult.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(240, 242, 245);
-        dgvResult.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.FromArgb(220, 230, 245);
-        dgvResult.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
-        // 右键复制
-        var ctx = new ContextMenuStrip(components);
-        var miCopyCell = new ToolStripMenuItem("复制单元格");
-        miCopyCell.Click += (s, e) => CopySelectedCell();
-        var miCopyRow = new ToolStripMenuItem("复制整行（TSV）");
-        miCopyRow.Click += (s, e) => CopySelectedRow();
-        var miCopyAll = new ToolStripMenuItem("复制全部（TSV）");
-        miCopyAll.Click += (s, e) => CopyAllToClipboard();
-        ctx.Items.AddRange(new ToolStripItem[] { miCopyCell, miCopyRow, new ToolStripSeparator(), miCopyAll });
-        dgvResult.ContextMenuStrip = ctx;
-        tabResult.Controls.Add(dgvResult);
+        tcResults.Dock = DockStyle.Fill;
+        tcResults.Padding = new Point(8, 4);
+        // 运行时第一个结果集自动选中后切到结果 Tab
+        tabResult.Controls.Add(tcResults);
 
         // 消息 Tab
         tabMessages.Text = "消息";

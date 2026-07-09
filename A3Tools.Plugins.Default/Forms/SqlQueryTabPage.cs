@@ -29,11 +29,29 @@ public partial class SqlQueryTabPage : UserControl
     private Action<string, long, int, ExecStatus>? _statusReporter;
     private bool _suppressStatusClear;  // SetEditorText 程序性赋值时屏蔽 TextChanged 触发清状态图标
 
+    // 【2026-07-09 多结果集】所有结果集 DataGridView 共享的右键菜单（随 components 自动释放）
+    private ContextMenuStrip ctxResultMenu = null!;
+
+    // 【2026-07-09 大数据流式读】每读 N 行让出一次 UI 线程，让用户能点“停止”+ 状态栏实时刷新
+    private const int _streamBatchSize = 1000;
+    // 【2026-07-09 列宽自适应阈值】超过 N 行不开 AutoSizeColumnsMode（AllCells 扫所有行算列宽，100万行 + 50列量级会卡几秒）
+    //   ≤ 列宽自适应限制：保留 AllCells，视觉好看
+    //   >：列宽 = None，用户手动拉或双击列头自适应（DataGridView 内置支持）
+    private const int _autoSizeColumnLimit = 100;
+
+    // 【2026-07-09 性能】保存当前正在执行的 batchCmd，让“停止”按钮可以调 SqlCommand.Cancel()
+    //   立即中断卡住的 reader.Read()，避免用户取消后还要等当前 Read 返回（最坏 1 秒）
+    private SqlCommand? _currentBatchCmd;
+
     /// <summary>当前 Tab 对应的 TabPage（由 SqlQueryForm 在嵌入时设置）</summary>
     public TabPage? Page { get; set; }
 
     public SqlEditor Editor => rtbEditor;
-    public DataGridView ResultGrid => dgvResult;
+    /// <summary>【2026-07-09 重构】返回第一个结果集的 DataGridView（多结果集时取首集）；没有结果集返 null</summary>
+    public DataGridView? ResultGrid =>
+        tcResults.TabPages.Count > 0
+            ? tcResults.TabPages[0].Controls.OfType<DataGridView>().FirstOrDefault()
+            : null;
     public RichTextBox Messages => rtbMessages;
 
     /// <summary>字号变化事件→主窗体状态栏（2026-07-07）</summary>
@@ -56,6 +74,16 @@ public partial class SqlQueryTabPage : UserControl
 
     private void InitEditor()
     {
+        // 【2026-07-09 多结果集】所有结果集 DataGridView 共享一个右键菜单
+        ctxResultMenu = new ContextMenuStrip(components);
+        var miCopyCell = new ToolStripMenuItem("复制单元格");
+        miCopyCell.Click += (_, _) => CopySelectedCell();
+        var miCopyRow = new ToolStripMenuItem("复制整行（TSV）");
+        miCopyRow.Click += (_, _) => CopySelectedRow();
+        var miCopyAll = new ToolStripMenuItem("复制全部（TSV）");
+        miCopyAll.Click += (_, _) => CopyAllToClipboard();
+        ctxResultMenu.Items.AddRange(new ToolStripItem[] { miCopyCell, miCopyRow, new ToolStripSeparator(), miCopyAll });
+
         rtbEditor.KeyDown += SqlEditor_KeyDown;
         // 字号改变 → 转发给 SqlQueryForm 状态栏（2026-07-07）
         rtbEditor.FontSizeChanged += (_, _) => FontSizeChanged?.Invoke(this, EventArgs.Empty);
@@ -216,14 +244,21 @@ public partial class SqlQueryTabPage : UserControl
     public void ClearResults()
     {
         if (InvokeRequired) { BeginInvoke(ClearResults); return; }
-        dgvResult.DataSource = null;
+        // 【2026-07-09 多结果集】清空所有结果集 sub-Tab + 释放里面的 DataGridView
+        while (tcResults.TabPages.Count > 0)
+        {
+            var page = tcResults.TabPages[0];
+            tcResults.TabPages.RemoveAt(0);
+            foreach (Control c in page.Controls) c.Dispose();
+            page.Dispose();
+        }
     }
 
     public void ClearAll()
     {
         if (InvokeRequired) { BeginInvoke(ClearAll); return; }
         rtbEditor.Text = "";
-        dgvResult.DataSource = null;
+        ClearResults();
         rtbMessages.Clear();
     }
 
@@ -259,6 +294,8 @@ public partial class SqlQueryTabPage : UserControl
     private void BtnStop_Click(object? sender, EventArgs e)
     {
         _cts?.Cancel();
+        // 【2026-07-09】立即中断卡住的 reader.Read()，避免等当前 IO 返回（最坏 1 秒）
+        try { _currentBatchCmd?.Cancel(); } catch { /* ignore */ }
         AppendMessage("[提示] 已请求停止\n");
     }
 
@@ -289,7 +326,7 @@ public partial class SqlQueryTabPage : UserControl
         btnExecute.Enabled = false;
         btnExecuteSelected.Enabled = true;
         btnStop.Enabled = true;
-        dgvResult.DataSource = null;
+        ClearResults();
         _cts = new CancellationTokenSource();
 
         // 执行前 → 状态图标 = ⏳，状态栏 = 蓝色 "执行中..."
@@ -327,25 +364,80 @@ public partial class SqlQueryTabPage : UserControl
                 try
                 {
                     using var reader = await batchCmd.ExecuteReaderAsync(_cts.Token);
+                    _currentBatchCmd = batchCmd;
                     try
                     {
+                        int resultInBatch = 0;
                         do
                         {
+                            // 【2026-07-09 多结果集 + 大数据】分阶段读
+                            //   - CreateResultTab：先建空 DataGridView（**不绑 DataTable**，性能关键）
+                            //   - 同步 Read 填 dt（不用 await ReadAsync，每次 1ms 调度开销叠加 = 几秒）
+                            //   - 每 1000 行 Application.DoEvents 让出 UI 线程（同步 Read 会卡 UI）
+                            //     + 检查 _cts.Token 让用户能点“停止”
+                            //   - 读完 dgv.DataSource = dt 一次性绑（不走 5万单元格×N行 通知）
+                            //   - FinalizeResultTab：改 tab 标题（带行数 + 取消标记 ⏸） + 按阈值决定列宽自适应
+                            var (page, dgv) = CreateResultTab(i + 1, ++resultInBatch);
                             var dt = new DataTable();
-                            dt.Load(reader);
-                            if (!hasResult)
+                            // 列定义（从 reader 拿）
+                            for (int c = 0; c < reader.FieldCount; c++)
                             {
-                                dgvResult.DataSource = dt;
-                                hasResult = true;
+                                var colName = reader.GetName(c);
+                                if (string.IsNullOrEmpty(colName)) colName = $"Column{c + 1}";
+                                Type colType = reader.GetFieldType(c) ?? typeof(object);
+                                dt.Columns.Add(colName, colType);
                             }
-                            else
+                            // 分批读行（同步 Read，不用 await，避免 N×1ms 调度开销叠加）
+                            int totalRead = 0;
+                            bool cancelled = false;
+                            int batchRead = 0;
+                            try
                             {
-                                AppendMessage($"--- 后续结果集（{dt.Rows.Count} 行 x {dt.Columns.Count} 列）---\n");
-                                AppendMessage(DataTableToText(dt));
+                                while (reader.Read())  // 同步读：比 ReadAsync 快 N 倍
+                                {
+                                    var row = dt.NewRow();
+                                    for (int c = 0; c < dt.Columns.Count; c++)
+                                        row[c] = reader.IsDBNull(c) ? DBNull.Value : reader.GetValue(c);
+                                    dt.Rows.Add(row);
+                                    totalRead++;
+                                    if (++batchRead >= _streamBatchSize)
+                                    {
+                                        batchRead = 0;
+                                        // 临时标题让用户看到进度
+                                        page.Text = $"结果 {tcResults.TabPages.IndexOf(page) + 1}  ·  {totalRead:N0} 行…";
+                                        _statusReporter?.Invoke(
+                                            $"读取中… {totalRead:N0} 行  ({sw.Elapsed:mm\\:ss})",
+                                            sw.ElapsedMilliseconds, totalRead, ExecStatus.Running);
+                                        // 让出 UI 线程让用户能点“停止”（同步 Read 会阻塞 UI）
+                                        Application.DoEvents();
+                                        // 检查取消（用户点停止后 _cts.Cancel()，这里 break）
+                                        if (_cts.IsCancellationRequested)
+                                        {
+                                            cancelled = true;
+                                            // 立即中断卡住的 reader.Read()（最坏 1 秒延迟）
+                                            try { batchCmd.Cancel(); } catch { /* ignore */ }
+                                            break;
+                                        }
+                                    }
+                                }
                             }
-                            affectedRows += dt.Rows.Count;
+                            catch (Exception ex) when (_cts.IsCancellationRequested)
+                            {
+                                // batchCmd.Cancel() 会让 Read 抛 SqlException，这里静默吃掉
+                                cancelled = true;
+                            }
+                            if (cancelled)
+                            {
+                                AppendMessage($"[{DateTime.Now:HH:mm:ss}] [提示] 结果集 {resultInBatch} 已被用户取消（已读 {totalRead:N0} 行）\n");
+                            }
+                            // 关键性能点：读完后一次性绑 DGV（DataGridView 接收 DataTable 是最快路径）
+                            dgv.DataSource = dt;
+                            // 收尾：改 tab 标题 + 按阈值决定列宽自适应
+                            FinalizeResultTab(page, dgv, dt, totalRead, cancelled);
+                            hasResult = true;
+                            affectedRows += totalRead;
                         }
-                        while (await reader.NextResultAsync(_cts.Token));
+                        while (reader.NextResult());
                     }
                     catch (InvalidOperationException) when (reader.IsClosed)
                     {
@@ -364,7 +456,10 @@ public partial class SqlQueryTabPage : UserControl
             if (anyBatchError)
             {
                 SetTabStatusIcon(ExecStatus.Failure);
-                _statusReporter?.Invoke($"✗ 部分批次失败（{batches.Count} 批），成功 {affectedRows} 行", sw.ElapsedMilliseconds, affectedRows, ExecStatus.Failure);
+                int resultSetCount = tcResults.TabPages.Count;
+                _statusReporter?.Invoke(
+                    $"✗ 部分批次失败（{batches.Count} 批 / {resultSetCount} 个结果集），成功 {affectedRows} 行",
+                    sw.ElapsedMilliseconds, affectedRows, ExecStatus.Failure);
                 // 失败 → 强制切到 消息 Tab（即使有部分结果也要看错误详情）
                 if (tabResultSwitcher.SelectedTab != tabMessages)
                     tabResultSwitcher.SelectedTab = tabMessages;
@@ -372,8 +467,16 @@ public partial class SqlQueryTabPage : UserControl
             else
             {
                 SetTabStatusIcon(ExecStatus.Success);
-                _statusReporter?.Invoke($"✓ 执行成功，影响 {affectedRows} 行", sw.ElapsedMilliseconds, affectedRows, ExecStatus.Success);
-                if (!hasResult && tabResultSwitcher.SelectedTab != tabMessages)
+                int resultSetCount = tcResults.TabPages.Count;
+                _statusReporter?.Invoke(
+                    resultSetCount > 1
+                        ? $"✓ 执行成功，{resultSetCount} 个结果集 / {affectedRows} 行"
+                        : $"✓ 执行成功，影响 {affectedRows} 行",
+                    sw.ElapsedMilliseconds, affectedRows, ExecStatus.Success);
+                // 有结果集 → 切到结果 Tab；没结果集 → 切到消息 Tab（看 PRINT）
+                if (hasResult && tabResultSwitcher.SelectedTab != tabResult)
+                    tabResultSwitcher.SelectedTab = tabResult;
+                else if (!hasResult && tabResultSwitcher.SelectedTab != tabMessages)
                     tabResultSwitcher.SelectedTab = tabMessages;
             }
         }
@@ -449,20 +552,110 @@ public partial class SqlQueryTabPage : UserControl
     }
 
     // ============================================
-    // 复制到剪贴板
+    // 多结果集支持（2026-07-09）
+    // ============================================
+
+    /// <summary>当前 tcResults 中选中的 sub-Tab 里的 DataGridView（多结果集时取当前可见那个）</summary>
+    private DataGridView? CurrentResultGrid =>
+        tcResults.SelectedTab?.Controls.OfType<DataGridView>().FirstOrDefault();
+
+    /// <summary>
+    /// 【2026-07-09 流式读】为单个结果集创建空 sub-Tab + 空 DataGridView（**不绑 DataTable**）。
+    /// 返回的容器由调用方填 dt，读完手动 dgv.DataSource = dt 一次性绑。
+    /// 性能关键：**读过程中 DGV 不绑 dt → DataTable.Rows.Add 不触发 DGV 通知**
+    ///   （DGV 每行通知 = N×M 单元格创建 + 布局，1000×50=5万单元格 = 几秒）
+    ///   读完后一次性绑 → DGV 一次性接收所有行 = 最快路径（与 dt.Load + 一次绑类似）
+    /// 性能要点：DGV 创建时 AutoSizeColumnsMode=None，读完后 FinalizeResultTab 按阈值决定是否 AllCells。
+    /// </summary>
+    private (TabPage page, DataGridView dgv) CreateResultTab(int batchIndex, int resultInBatch)
+    {
+        var page = new TabPage($"结果 {tcResults.TabPages.Count + 1}  ·  读取中…");
+        var dgv = CreateResultDataGridView();
+        // 性能优化：读阶段关闭自动列宽（让 DGV 走默认列宽，读完再算）
+        dgv.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+        page.Controls.Add(dgv);
+        tcResults.TabPages.Add(page);
+        // 第一个结果集自动选中 + 切到结果 Tab
+        if (tcResults.TabPages.Count == 1)
+        {
+            tcResults.SelectedTab = page;
+            if (tabResultSwitcher.SelectedTab != tabResult)
+                tabResultSwitcher.SelectedTab = tabResult;
+        }
+        return (page, dgv);
+    }
+
+    /// <summary>
+    /// 【2026-07-09 流式读 + 阈值列宽】收尾：改 tab 标题（带行数 + 取消标记 ⏸）+ 按阈值决定是否开自适应列宽。
+    /// ·  ≤ _autoSizeColumnLimit (100)：开 AllCells 一次性算列宽（几行～几十行不卡）
+    /// ·  >：保持 None（不升）。AllCells 拖 N 行 × M 列扫描 = 几秒，陛下达超过 100 行说“很卡”才加这个阈值
+    /// ·  想看自适应变双击列头右边阶（DataGridView 内置习惯）→ →手 拉 → Left then AllCells
+    /// </summary>
+    private void FinalizeResultTab(TabPage page, DataGridView dgv, DataTable dt, int totalRows, bool cancelled)
+    {
+        int idx = tcResults.TabPages.IndexOf(page);
+        if (idx < 0) idx = tcResults.TabPages.Count;  // fallback
+        string suffix = cancelled ? "  ⏸" : "";
+        page.Text = $"结果 {idx + 1}  ·  {totalRows:N0} 行{suffix}";
+        // 阈值：超过 _autoSizeColumnLimit 行不开自适应列宽，避免扫 N 行算列宽时卡住
+        if (totalRows <= _autoSizeColumnLimit)
+        {
+            // 小数据集：一次性算列宽（AllCells 扫描当前 N 行 ≤ 100 很快）
+            dgv.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells;
+        }
+        else
+        {
+            // 大数据集：保持 None，列宽 = 列名字段串长度 * 像素（默认估算，不扫描）
+            // 用户想看真实列宽可以双击列头右边阶手工适配（DGV 内置交互习惯）
+            dgv.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+        }
+    }
+
+    /// <summary>创建一个结果集 DataGridView（与原 dgvResult 同款样式，共享右键菜单）</summary>
+    private DataGridView CreateResultDataGridView()
+    {
+        return new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            ReadOnly = true,
+            RowHeadersVisible = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells,
+            SelectionMode = DataGridViewSelectionMode.CellSelect,
+            BackgroundColor = Color.White,
+            BorderStyle = BorderStyle.None,
+            ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+                BackColor = Color.FromArgb(240, 242, 245),
+                SelectionBackColor = Color.FromArgb(220, 230, 245)
+            },
+            AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.FromArgb(248, 250, 252)
+            },
+            ContextMenuStrip = ctxResultMenu
+        };
+    }
+
+    // ============================================
+    // 复制到剪贴板（2026-07-09：多结果集改用 CurrentResultGrid 而非固定 dgvResult）
     // ============================================
 
     private void CopySelectedCell()
     {
-        if (dgvResult.CurrentCell != null)
-            Clipboard.SetText(dgvResult.CurrentCell.Value?.ToString() ?? "");
+        var dgv = CurrentResultGrid;
+        if (dgv?.CurrentCell != null)
+            Clipboard.SetText(dgv.CurrentCell.Value?.ToString() ?? "");
     }
 
     private void CopySelectedRow()
     {
-        if (dgvResult.CurrentCell == null) return;
-        var rowIdx = dgvResult.CurrentCell.RowIndex;
-        if (dgvResult.DataSource is not DataTable dt) return;
+        var dgv = CurrentResultGrid;
+        if (dgv?.CurrentCell == null) return;
+        var rowIdx = dgv.CurrentCell.RowIndex;
+        if (dgv.DataSource is not DataTable dt) return;
         if (rowIdx < 0 || rowIdx >= dt.Rows.Count) return;
         var row = dt.Rows[rowIdx];
         Clipboard.SetText(string.Join("\t", row.ItemArray.Select(v => v?.ToString() ?? "NULL")));
@@ -470,7 +663,8 @@ public partial class SqlQueryTabPage : UserControl
 
     private void CopyAllToClipboard()
     {
-        if (dgvResult.DataSource is DataTable dt)
+        var dgv = CurrentResultGrid;
+        if (dgv?.DataSource is DataTable dt)
         {
             var sb = new StringBuilder();
             sb.AppendLine(string.Join("\t", dt.Columns.Cast<DataColumn>().Select(c => c.ColumnName)));
