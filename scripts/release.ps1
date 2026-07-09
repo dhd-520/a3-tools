@@ -77,7 +77,10 @@ function Load-SecretsFromFile {
         $key = $line.Substring(0, $eq).Trim()
         $val = $line.Substring($eq + 1).Trim()
         # 现有 env 优先（例手动 override），未设才从文件加载
-        if (-not (Test-Path "env:$key") -or -not (Get-Item "env:$key").Value) {
+        $existing = [Environment]::GetEnvironmentVariable($key)
+        if ([string]::IsNullOrEmpty($existing)) {
+            [Environment]::SetEnvironmentVariable($key, $val)
+            # Set-Item env: 在进程内立即可见，setx / [Environment]::SetEnvironmentVariable 只在 Process 作用域才可见
             Set-Item -Path "env:$key" -Value $val
         }
     }
