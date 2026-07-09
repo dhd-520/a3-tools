@@ -334,6 +334,14 @@ public partial class SqlQueryTabPage : UserControl
         _statusReporter?.Invoke("执行中...", 0, 0, ExecStatus.Running);
 
         var sw = Stopwatch.StartNew();
+
+        // 2026-07-09 混合连接：Http 模式走 IDataAccess 路径（同步返回，丢失流式读优化但验证可行性）
+        if (_parent.CurrentDataAccess.Mode == A3Tools.Common.DataAccess.DataAccessMode.Http)
+        {
+            await ExecuteViaDataAccessAsync(sql, sw);
+            return;
+        }
+
         try
         {
             using var conn = new SqlConnection(_parent.CurrentConnectionString);
@@ -503,6 +511,82 @@ public partial class SqlQueryTabPage : UserControl
             btnStop.Enabled = false;
             _cts?.Dispose();
             _cts = null;
+        }
+    }
+
+    /// <summary>
+    /// 2026-07-09 混合连接 Http 模式：走 IDataAccess.ExecuteBatchAsync 同步返回结果。
+    /// 丢失流式读 + 取消能力，但验证混合连接可行性。
+    /// </summary>
+    private async Task ExecuteViaDataAccessAsync(string sql, Stopwatch sw)
+    {
+        try
+        {
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] 已连接（Http 代理：{_parent.CurrentDataAccess.DisplayName}）\n");
+
+            var result = await _parent.CurrentDataAccess.ExecuteBatchAsync(sql, _cts.Token);
+
+            if (!result.Success)
+            {
+                AppendMessage($"[{DateTime.Now:HH:mm:ss}] {result.Message}\n");
+                _statusReporter?.Invoke($"✗ {result.Message}", sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
+                SetTabStatusIcon(ExecStatus.Failure);
+                tabResultSwitcher.SelectedTab = tabMessages;
+                return;
+            }
+
+            // 把 QueryResult.Tables 渲染到 sub-Tab（复用原 DGV + dt 创建逻辑）
+            int resultIdx = 0;
+            foreach (var table in result.Tables)
+            {
+                resultIdx++;
+                var dt = new DataTable();
+                foreach (var col in table.Columns)
+                    dt.Columns.Add(col.Name, Type.GetType(col.TypeName) ?? typeof(object));
+
+                foreach (var row in table.Rows)
+                {
+                    var dr = dt.NewRow();
+                    for (int i = 0; i < row.Length && i < dt.Columns.Count; i++)
+                        dr[i] = row[i] ?? DBNull.Value;
+                    dt.Rows.Add(dr);
+                }
+
+                var (page, dgv) = CreateResultTab(0, resultIdx);
+                dgv.DataSource = dt;
+                FinalizeResultTab(page, dgv, dt, dt.Rows.Count, false);
+            }
+
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] {result.Message}（耗时 {sw.ElapsedMilliseconds}ms）\n");
+
+            if (result.Tables.Count == 1)
+            {
+                _statusReporter?.Invoke($"✓ Http 执行成功，影响 {result.TotalRows} 行", sw.ElapsedMilliseconds, result.TotalRows, ExecStatus.Success);
+            }
+            else
+            {
+                _statusReporter?.Invoke($"✓ Http 执行成功，{result.Tables.Count} 个结果集 / {result.TotalRows} 行", sw.ElapsedMilliseconds, result.TotalRows, ExecStatus.Success);
+            }
+            SetTabStatusIcon(ExecStatus.Success);
+            tabResultSwitcher.SelectedTab = tabResult;
+        }
+        catch (OperationCanceledException)
+        {
+            _statusReporter?.Invoke("⏸ 已停止", sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
+            SetTabStatusIcon(ExecStatus.Failure);
+        }
+        catch (Exception ex)
+        {
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] Http 代理错误：{ex.Message}\n");
+            _statusReporter?.Invoke($"✗ {ex.Message}", sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
+            SetTabStatusIcon(ExecStatus.Failure);
+            tabResultSwitcher.SelectedTab = tabMessages;
+        }
+        finally
+        {
+            btnExecute.Enabled = true;
+            btnExecuteSelected.Enabled = true;
+            btnStop.Enabled = false;
         }
     }
 

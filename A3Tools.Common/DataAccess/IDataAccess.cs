@@ -38,6 +38,11 @@ namespace A3Tools.Common.DataAccess
         Task<int> ExecuteNonQueryAsync(string sql, CancellationToken ct = default);
 
         /// <summary>
+        /// 执行批量 SQL（GO 切分），返回合并的多结果集
+        /// </summary>
+        Task<QueryResult> ExecuteBatchAsync(string batchSql, CancellationToken ct = default);
+
+        /// <summary>
         /// 获取表/视图列表
         /// </summary>
         Task<List<TableInfo>> GetTablesAsync(string? schemaFilter = null, CancellationToken ct = default);

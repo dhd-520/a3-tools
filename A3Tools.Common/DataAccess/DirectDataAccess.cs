@@ -119,6 +119,120 @@ namespace A3Tools.Common.DataAccess
             return await cmd.ExecuteNonQueryAsync(ct);
         }
 
+        /// <summary>
+        /// 批量执行（GO 切分）—— 复刻 SqlQueryTabPage 的逻辑
+        /// </summary>
+        public async Task<QueryResult> ExecuteBatchAsync(string batchSql, CancellationToken ct = default)
+        {
+            var result = new QueryResult { Success = true };
+            var batches = SplitSqlByGo(batchSql);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            try
+            {
+                using var conn = new SqlConnection(_connStr);
+                await conn.OpenAsync(ct);
+
+                for (int i = 0; i < batches.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var batch = batches[i].Trim();
+                    if (string.IsNullOrWhiteSpace(batch)) continue;
+
+                    using var batchCmd = new SqlCommand(batch, conn) { CommandTimeout = 0 };
+                    using var reader = await batchCmd.ExecuteReaderAsync(ct);
+
+                    do
+                    {
+                        var table = new ResultTable();
+                        for (int c = 0; c < reader.FieldCount; c++)
+                        {
+                            var colName = reader.GetName(c);
+                            if (string.IsNullOrEmpty(colName)) colName = $"Column{c + 1}";
+                            var colType = reader.GetFieldType(c);
+                            table.Columns.Add(new ColumnInfo
+                            {
+                                Name = colName,
+                                TypeName = colType?.FullName ?? "System.Object"
+                            });
+                        }
+
+                        int rowCount = 0;
+                        while (await reader.ReadAsync(ct))
+                        {
+                            var row = new object?[reader.FieldCount];
+                            for (int c = 0; c < reader.FieldCount; c++)
+                            {
+                                row[c] = await reader.IsDBNullAsync(c) ? null : reader.GetValue(c);
+                            }
+                            table.Rows.Add(row);
+                            rowCount++;
+                        }
+
+                        result.Tables.Add(table);
+                        result.TotalRows += rowCount;
+                    }
+                    while (await reader.NextResultAsync(ct));
+                }
+
+                sw.Stop();
+                result.ElapsedMs = sw.ElapsedMilliseconds;
+                result.Message = $"{batches.Count} batch(es), {result.Tables.Count} result set(s), {result.TotalRows} row(s)";
+            }
+            catch (OperationCanceledException)
+            {
+                sw.Stop();
+                result.Success = false;
+                result.ElapsedMs = sw.ElapsedMilliseconds;
+                result.Message = "Cancelled by user";
+            }
+            catch (SqlException ex)
+            {
+                sw.Stop();
+                result.Success = false;
+                result.ElapsedMs = sw.ElapsedMilliseconds;
+                result.Message = $"SQL Error {ex.Number}: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                result.Success = false;
+                result.ElapsedMs = sw.ElapsedMilliseconds;
+                result.Message = ex.Message;
+            }
+
+            return result;
+        }
+
+        private static List<string> SplitSqlByGo(string sql)
+        {
+            var result = new List<string>();
+            var lines = sql.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
+            var current = new System.Text.StringBuilder();
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Equals("GO", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (current.Length > 0)
+                    {
+                        result.Add(current.ToString());
+                        current.Clear();
+                    }
+                }
+                else
+                {
+                    current.AppendLine(line);
+                }
+            }
+
+            if (current.Length > 0)
+                result.Add(current.ToString());
+
+            return result;
+        }
+
         public async Task<List<TableInfo>> GetTablesAsync(string? schemaFilter = null, CancellationToken ct = default)
         {
             var tables = new List<TableInfo>();

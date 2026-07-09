@@ -161,6 +161,51 @@ public partial class SqlQueryForm : Form
     public string CurrentConnectionString => _currentConnStr;
 
     /// <summary>
+    /// 2026-07-09 混合连接：按账套 ConnectionMode 返回 Direct 或 Http 实现。
+    /// 直连账号仍用 _currentConnStr；Http 账号会把连接串加密后送到 A3ToolsHub。
+    /// </summary>
+    public A3Tools.Common.DataAccess.IDataAccess CurrentDataAccess
+    {
+        get
+        {
+            if (_currentDataAccess != null) return _currentDataAccess;
+
+            // 从 SqlConnectionStringBuilder 拼原始 connStr（HttpDataAccess 需要）
+            // Http 模式下这个 connStr 是账套数据库的原始连接串（不在 A3ToolsHub 所在服务器上的）
+            var rawConnStr = BuildHttpConnStr();
+
+            if (_account.ConnectionMode == A3Tools.Common.DataAccess.DataAccessMode.Http)
+            {
+                _currentDataAccess = new A3Tools.Common.DataAccess.HttpDataAccess(
+                    endpoint: _account.HttpEndpoint,
+                    connStr: rawConnStr,
+                    secretKey: _account.HttpSecretKey,
+                    serverPublicKey: _account.HttpServerPublicKey,
+                    displayName: _account.Name);
+            }
+            else
+            {
+                _currentDataAccess = new A3Tools.Common.DataAccess.DirectDataAccess(
+                    connStr: rawConnStr,
+                    displayName: _account.Name);
+            }
+            return _currentDataAccess;
+        }
+    }
+    private A3Tools.Common.DataAccess.IDataAccess? _currentDataAccess = null;
+
+    /// <summary>
+    /// 从 _currentConnStr 重建原始连接串（HttpDataAccess 需要原始 connStr，不是 SqlConnectionStringBuilder 转译过的）
+    /// </summary>
+    private string BuildHttpConnStr()
+    {
+        // 优先用账套 ConnectionString 属性（拼接好的），否则退回到 _currentConnStr
+        var raw = _account.ConnectionString;
+        if (!string.IsNullOrEmpty(raw)) return raw;
+        return _currentConnStr;
+    }
+
+    /// <summary>
     /// 把当前账套的 ConnectionString 同步给所有 Tab 编辑器 → IntelliSense 自动切到当前库。
     /// NewTab / LoadDatabasesAsync / CmbDatabase_SelectedIndexChanged 都要调。
     /// </summary>

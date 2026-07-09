@@ -63,6 +63,11 @@ namespace A3Tools.Common.DataAccess
             return result.AffectedRows;
         }
 
+        public async Task<QueryResult> ExecuteBatchAsync(string batchSql, CancellationToken ct = default)
+        {
+            return await SendRequestAsync("batch", batchSql, ct);
+        }
+
         public async Task<List<TableInfo>> GetTablesAsync(string? schemaFilter = null, CancellationToken ct = default)
         {
             var result = await SendRequestAsync("tables", "", ct, schema: schemaFilter);
