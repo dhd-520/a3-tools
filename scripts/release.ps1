@@ -220,19 +220,57 @@ if ($giteeToken) {
         }
     }
 
-    # 上传 zip
+    # 上传 zip（PS 5.1 不支持 -Form，手动构造 multipart/form-data）
     if ($giteeReleaseId) {
         Info "Uploading zip to Gitee..."
         try {
-            $form = @{
-                access_token = $giteeToken
-                file         = Get-Item $zipPath
-            }
-            $null = Invoke-RestMethod `
+            $boundary = [System.Guid]::NewGuid().ToString()
+            $fileBytes = [System.IO.File]::ReadAllBytes($zipPath)
+            $fileName  = Split-Path $zipPath -Leaf
+            $enc = [System.Text.Encoding]::GetEncoding("utf-8")
+
+            # multipart 体的各部分
+            $bodyParts = @()
+            # access_token 字段
+            $bodyParts += "--" + $boundary
+            $bodyParts += "Content-Disposition: form-data; name=""access_token"""
+            $bodyParts += ""
+            $bodyParts += $giteeToken
+            # file 字段（头部 + 二进制 + 结尾）
+            $bodyParts += "--" + $boundary
+            $bodyParts += ("Content-Disposition: form-data; name=""file""; filename=""" + $fileName + """")
+            $bodyParts += "Content-Type: application/zip"
+            $bodyParts += ""
+            # 这里需要拼接二制内容，所以用 .NET HttpClient 走
+
+            # 使用 .NET HttpClient 处理（拼接字符串头部 + 二进制文件体 + 结尾边界）
+            $crlf = "`r`n"
+            $preamble = (($bodyParts -join $crlf) + $crlf + $crlf).ToCharArray() | ForEach-Object { [byte]$_ } | ForEach-Object { [byte]$_ }
+            # 上面拼接是 UTF-8 字符串，但 PS char 转换不安全；换用 [System.Text.EncodingBuilder]
+            $sb = New-Object System.Text.StringBuilder
+            $null = $sb.AppendLine("--" + $boundary)
+            $null = $sb.AppendLine("Content-Disposition: form-data; name=""access_token""")
+            $null = $sb.AppendLine("")
+            $null = $sb.AppendLine($giteeToken)
+            $null = $sb.AppendLine("--" + $boundary)
+            $null = $sb.AppendLine(("Content-Disposition: form-data; name=""file""; filename=""" + $fileName + """"))
+            $null = $sb.AppendLine("Content-Type: application/zip")
+            $null = $sb.AppendLine("")
+            $preambleBytes = $enc.GetBytes($sb.ToString())
+            $closingBytes = $enc.GetBytes(($crlf + "--" + $boundary + "--" + $crlf))
+
+            $ms = New-Object System.IO.MemoryStream
+            $ms.Write($preambleBytes, 0, $preambleBytes.Length)
+            $ms.Write($fileBytes, 0, $fileBytes.Length)
+            $ms.Write($closingBytes, 0, $closingBytes.Length)
+            $body = $ms.ToArray()
+
+            $resp = Invoke-RestMethod `
                 -Uri ("https://gitee.com/api/v5/repos/" + $giteeOwner + "/" + $giteeRepo + "/releases/" + $giteeReleaseId + "/attach_files") `
                 -Method Post `
-                -Form $form
-            Ok "Gitee zip uploaded"
+                -ContentType ("multipart/form-data; boundary=" + $boundary) `
+                -Body $body
+            Ok "Gitee zip uploaded (browser_download_url: " + $resp.browser_download_url + ")"
             $giteeReleaseUrl = ("https://gitee.com/" + $giteeOwner + "/" + $giteeRepo + "/releases/tag/" + $tag)
         } catch {
             Err ("Gitee zip upload failed: " + $_.Exception.Message)
