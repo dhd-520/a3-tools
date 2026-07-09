@@ -410,6 +410,15 @@ del ""%~f0""
         // 2) 等 cmd 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
         if (batProc != null)
         {
+            // 【2026-07-09 cmd 不关闭 修复】重定向 stdout/stderr 后必须 async drain，
+            //   否则 cmd 内部 stdout buffer 满了后会阻塞不退出——表现就是“升级后黑窗卡住不关”。
+            //   老版本未读 stream + Environment.Exit(0) 杀进程 → cmd 变孤儿进程卡 buffer。
+            //   现在开两个后台线程异步 ReadToEnd（fire-and-forget），不阻塞主线程。
+            if (psi.RedirectStandardOutput)
+                Task.Run(() => { try { batProc.StandardOutput.ReadToEnd(); } catch { } });
+            if (psi.RedirectStandardError)
+                Task.Run(() => { try { batProc.StandardError.ReadToEnd(); } catch { } });
+
             for (int i = 0; i < 30; i++)
             {
                 if (!batProc.HasExited) break;
@@ -545,6 +554,13 @@ del ""%~f0""
         // 2) 等 bat 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
         if (batProc != null)
         {
+            // 【2026-07-09 cmd 不关闭 修复】重定向 stdout/stderr 后必须 async drain，
+            //   否则 cmd 内部 stdout buffer 满了后会阻塞不退出——表现就是“升级后黑窗卡住不关”。
+            if (psi.RedirectStandardOutput)
+                Task.Run(() => { try { batProc.StandardOutput.ReadToEnd(); } catch { } });
+            if (psi.RedirectStandardError)
+                Task.Run(() => { try { batProc.StandardError.ReadToEnd(); } catch { } });
+
             for (int i = 0; i < 30; i++)
             {
                 if (!batProc.HasExited) break;
