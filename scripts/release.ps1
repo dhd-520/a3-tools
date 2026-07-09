@@ -11,6 +11,8 @@
     2. 配置环境变量（任选其一方式）：
        - $env:GITEE_TOKEN = "xxx"   Gitee 私人令牌：https://gitee.com/profile/personal_access_tokens
        - $env:GITHUB_TOKEN = "xxx"  GitHub PAT（勾选 repo 权限；或装 gh CLI）
+       - 或在项目根目录创建 secrets.local.env（脚本自动加载，**已 .gitignore**）
+         格式：GITEE_TOKEN=xxx
     3. 在 D:\work\A3Tools 根目录运行
 #>
 
@@ -61,7 +63,27 @@ if ($gitStatus) {
     if ($ans -ne 'y' -and $ans -ne 'Y') { exit 1 }
 }
 
-# 3) Token 校验
+# 3) Token 校验（优先读 env，其次读项目根 ./secrets.local.env）
+#    持久化位点：D:\work\A3Tools\secrets.local.env（.gitignore，已限 ACL 仅当前用户可读）
+function Load-SecretsFromFile {
+    param([string]$FilePath)
+    if (-not (Test-Path $FilePath)) { return }
+    Write-Host ("[secret] loading " + $FilePath)
+    Get-Content $FilePath | ForEach-Object {
+        $line = $_.Trim()
+        if (-not $line -or $line.StartsWith("#")) { return }
+        $eq = $line.IndexOf("=")
+        if ($eq -lt 1) { return }
+        $key = $line.Substring(0, $eq).Trim()
+        $val = $line.Substring($eq + 1).Trim()
+        # 现有 env 优先（例手动 override），未设才从文件加载
+        if (-not (Test-Path "env:$key") -or -not (Get-Item "env:$key").Value) {
+            Set-Item -Path "env:$key" -Value $val
+        }
+    }
+}
+Load-SecretsFromFile (Join-Path $gitRoot "secrets.local.env")
+
 $giteeToken = $env:GITEE_TOKEN
 $githubToken = $env:GITHUB_TOKEN
 $ghCli = $null

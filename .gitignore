@@ -15,6 +15,13 @@ DATA/*.json
 *.dll
 *.pdb
 
+# Local secrets (发布脚本 token 存放点，**绝不进版本控制**)
+# 格式：GITEE_TOKEN=xxx
+# 加载方式：release.ps1 会自动读 ./secrets.local.env
+secrets.local.env
+secrets.*.env
+!.gitkeep_in_secrets_dir
+
 # VS
 .vs/
 
