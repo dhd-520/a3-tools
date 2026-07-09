@@ -1,5 +1,6 @@
 using System;
 using System.Windows.Forms;
+using A3Tools.Common.DataAccess;
 using A3Tools.Models;
 using A3Tools.Services;
 
@@ -27,6 +28,7 @@ public partial class AccountDialog : Form
         else
             GenerateDefaultCode();
         UpdateTitle();
+        ProxyMode_Changed(null, EventArgs.Empty);
     }
 
     private void GenerateDefaultCode()
@@ -67,6 +69,14 @@ public partial class AccountDialog : Form
         this.txtRemark.Text = account.Remark;
 
         this.txtServerUsername.Text = account.ServerUsername;
+
+        // 2026-07-09 代理模式
+        if (account.ConnectionMode == DataAccessMode.Http)
+            this.rbHttp.Checked = true;
+        else
+            this.rbDirect.Checked = true;
+        this.txtProxySecretKey.Text = account.HttpSecretKey;
+        this.txtProxyServerPublicKey.Text = account.HttpServerPublicKey;
 
         if (ShowPasswords)
         {
@@ -144,7 +154,35 @@ public partial class AccountDialog : Form
             RemoteUser = this.txtRemoteUser.Text.Trim(),
             RemotePassword = this.txtRemotePassword.Text,
             Remark = this.txtRemark.Text.Trim(),
-            ServerUsername = this.txtServerUsername.Text.Trim()
+            ServerUsername = this.txtServerUsername.Text.Trim(),
+            // 2026-07-09 代理模式
+            ConnectionMode = this.rbHttp.Checked ? DataAccessMode.Http : DataAccessMode.Direct,
+            HttpEndpoint = BuildHttpEndpoint(this.txtServer.Text.Trim()),
+            HttpSecretKey = this.txtProxySecretKey.Text.Trim(),
+            HttpServerPublicKey = this.txtProxyServerPublicKey.Text.Trim()
         };
+    }
+
+    /// <summary>
+    /// 从账套地址自动拼 HttpEndpoint：账套地址 + /A3ToolsHub
+    /// 例：http://192.168.1.50:8080 → http://192.168.1.50:8080/A3ToolsHub
+    /// 账套地址为空时返回空串
+    /// </summary>
+    private static string BuildHttpEndpoint(string server)
+    {
+        if (string.IsNullOrWhiteSpace(server)) return string.Empty;
+        return server.TrimEnd('/') + "/A3ToolsHub";
+    }
+
+    /// <summary>
+    /// 代理模式切换：显示/隐藏密钥和公钥输入框
+    /// </summary>
+    private void ProxyMode_Changed(object? sender, EventArgs e)
+    {
+        bool isHttp = rbHttp.Checked;
+        lblProxySecretKey.Visible = isHttp;
+        txtProxySecretKey.Visible = isHttp;
+        lblProxyServerPublicKey.Visible = isHttp;
+        txtProxyServerPublicKey.Visible = isHttp;
     }
 }

@@ -44,6 +44,16 @@ partial class AccountDialog
     private Label lblRemark = null!;
     private TextBox txtRemark = null!;
 
+    // ===== 代理模式（2026-07-09 A3ToolsHub）=====
+    private Panel pnlProxyGroup = null!;
+    private Label lblProxyHint = null!;
+    private RadioButton rbDirect = null!;
+    private RadioButton rbHttp = null!;
+    private Label lblProxySecretKey = null!;
+    private TextBox txtProxySecretKey = null!;
+    private Label lblProxyServerPublicKey = null!;
+    private TextBox txtProxyServerPublicKey = null!;
+
     // ===== 网页版自动登录 =====
     private Panel pnlWebGroup = null!;
     private Label lblWebHint = null!;
@@ -94,6 +104,14 @@ partial class AccountDialog
         txtRemotePassword = new TextBox();
         lblRemark = new Label();
         txtRemark = new TextBox();
+        pnlProxyGroup = new Panel();
+        lblProxyHint = new Label();
+        rbDirect = new RadioButton();
+        rbHttp = new RadioButton();
+        lblProxySecretKey = new Label();
+        txtProxySecretKey = new TextBox();
+        lblProxyServerPublicKey = new Label();
+        txtProxyServerPublicKey = new TextBox();
         pnlWebGroup = new Panel();
         lblWebHint = new Label();
         lblServerUsername = new Label();
@@ -103,6 +121,7 @@ partial class AccountDialog
         btnSave = new Button();
         titleBar.SuspendLayout();
         contentPanel.SuspendLayout();
+        pnlProxyGroup.SuspendLayout();
         pnlWebGroup.SuspendLayout();
         footerPanel.SuspendLayout();
         SuspendLayout();
@@ -161,12 +180,13 @@ partial class AccountDialog
         contentPanel.Controls.Add(txtRemotePassword);
         contentPanel.Controls.Add(lblRemark);
         contentPanel.Controls.Add(txtRemark);
+        contentPanel.Controls.Add(pnlProxyGroup);
         contentPanel.Controls.Add(pnlWebGroup);
         contentPanel.Dock = DockStyle.Fill;
         contentPanel.Location = new Point(0, 50);
         contentPanel.Name = "contentPanel";
         contentPanel.Padding = new Padding(30, 20, 30, 20);
-        contentPanel.Size = new Size(900, 590);
+        contentPanel.Size = new Size(900, 710);
         contentPanel.TabIndex = 1;
         // 
         // lblCode
@@ -442,15 +462,106 @@ partial class AccountDialog
         txtRemark.ScrollBars = ScrollBars.Vertical;
         txtRemark.Size = new Size(590, 60);
         txtRemark.TabIndex = 27;
-        // 
+        //
+        // pnlProxyGroup
+        //
+        pnlProxyGroup.BackColor = Color.FromArgb(245, 248, 252);
+        pnlProxyGroup.BorderStyle = BorderStyle.FixedSingle;
+        pnlProxyGroup.Controls.Add(lblProxyHint);
+        pnlProxyGroup.Controls.Add(rbDirect);
+        pnlProxyGroup.Controls.Add(rbHttp);
+        pnlProxyGroup.Controls.Add(lblProxySecretKey);
+        pnlProxyGroup.Controls.Add(txtProxySecretKey);
+        pnlProxyGroup.Controls.Add(lblProxyServerPublicKey);
+        pnlProxyGroup.Controls.Add(txtProxyServerPublicKey);
+        pnlProxyGroup.Location = new Point(30, 695);
+        pnlProxyGroup.Name = "pnlProxyGroup";
+        pnlProxyGroup.Size = new Size(840, 110);
+        pnlProxyGroup.TabIndex = 28;
+        //
+        // lblProxyHint
+        //
+        lblProxyHint.Font = new Font("微软雅黑", 10F, FontStyle.Bold, GraphicsUnit.Point);
+        lblProxyHint.ForeColor = Color.FromArgb(24, 145, 176);
+        lblProxyHint.Location = new Point(15, 8);
+        lblProxyHint.Name = "lblProxyHint";
+        lblProxyHint.Size = new Size(800, 20);
+        lblProxyHint.TabIndex = 0;
+        lblProxyHint.Text = "🔒 连接模式（数据库不对外时使用 A3ToolsHub 代理转发）";
+        //
+        // rbDirect
+        //
+        rbDirect.AutoSize = true;
+        rbDirect.Checked = true;
+        rbDirect.Font = new Font("微软雅黑", 10F);
+        rbDirect.Location = new Point(15, 35);
+        rbDirect.Name = "rbDirect";
+        rbDirect.Size = new Size(140, 22);
+        rbDirect.TabIndex = 1;
+        rbDirect.Text = "● 直连数据库";
+        rbDirect.UseVisualStyleBackColor = true;
+        rbDirect.CheckedChanged += ProxyMode_Changed;
+        //
+        // rbHttp
+        //
+        rbHttp.AutoSize = true;
+        rbHttp.Font = new Font("微软雅黑", 10F);
+        rbHttp.Location = new Point(170, 35);
+        rbHttp.Name = "rbHttp";
+        rbHttp.Size = new Size(240, 22);
+        rbHttp.TabIndex = 2;
+        rbHttp.Text = "走 A3ToolsHub 代理（账套地址 + /A3ToolsHub）";
+        rbHttp.UseVisualStyleBackColor = true;
+        rbHttp.CheckedChanged += ProxyMode_Changed;
+        //
+        // lblProxySecretKey
+        //
+        lblProxySecretKey.AutoSize = true;
+        lblProxySecretKey.Font = new Font("微软雅黑", 9F);
+        lblProxySecretKey.ForeColor = Color.FromArgb(80, 80, 80);
+        lblProxySecretKey.Location = new Point(15, 65);
+        lblProxySecretKey.Name = "lblProxySecretKey";
+        lblProxySecretKey.Size = new Size(80, 18);
+        lblProxySecretKey.TabIndex = 3;
+        lblProxySecretKey.Text = "共享密钥：";
+        //
+        // txtProxySecretKey
+        //
+        txtProxySecretKey.Font = new Font("Consolas", 9F);
+        txtProxySecretKey.Location = new Point(95, 62);
+        txtProxySecretKey.Name = "txtProxySecretKey";
+        txtProxySecretKey.PlaceholderText = "64 字节 hex 字符串（从 A3ToolsHubSetup 输出）";
+        txtProxySecretKey.Size = new Size(330, 24);
+        txtProxySecretKey.TabIndex = 4;
+        //
+        // lblProxyServerPublicKey
+        //
+        lblProxyServerPublicKey.AutoSize = true;
+        lblProxyServerPublicKey.Font = new Font("微软雅黑", 9F);
+        lblProxyServerPublicKey.ForeColor = Color.FromArgb(80, 80, 80);
+        lblProxyServerPublicKey.Location = new Point(440, 65);
+        lblProxyServerPublicKey.Name = "lblProxyServerPublicKey";
+        lblProxyServerPublicKey.Size = new Size(80, 18);
+        lblProxyServerPublicKey.TabIndex = 5;
+        lblProxyServerPublicKey.Text = "服务端公钥：";
+        //
+        // txtProxyServerPublicKey
+        //
+        txtProxyServerPublicKey.Font = new Font("Consolas", 8F);
+        txtProxyServerPublicKey.Location = new Point(520, 62);
+        txtProxyServerPublicKey.Name = "txtProxyServerPublicKey";
+        txtProxyServerPublicKey.PlaceholderText = "rsa-public-key.xml 内容（XML 格式）";
+        txtProxyServerPublicKey.Size = new Size(310, 24);
+        txtProxyServerPublicKey.TabIndex = 6;
+        //
         // pnlWebGroup
-        // 
+        //
         pnlWebGroup.BackColor = Color.FromArgb(245, 248, 250);
         pnlWebGroup.BorderStyle = BorderStyle.FixedSingle;
         pnlWebGroup.Controls.Add(lblWebHint);
         pnlWebGroup.Controls.Add(lblServerUsername);
         pnlWebGroup.Controls.Add(txtServerUsername);
-        pnlWebGroup.Location = new Point(30, 695);
+        pnlWebGroup.Location = new Point(30, 815);
         pnlWebGroup.Name = "pnlWebGroup";
         pnlWebGroup.Size = new Size(840, 110);
         pnlWebGroup.TabIndex = 28;
@@ -550,6 +661,7 @@ partial class AccountDialog
         titleBar.ResumeLayout(false);
         contentPanel.ResumeLayout(false);
         contentPanel.PerformLayout();
+        pnlProxyGroup.ResumeLayout(false);
         pnlWebGroup.ResumeLayout(false);
         pnlWebGroup.PerformLayout();
         footerPanel.ResumeLayout(false);
