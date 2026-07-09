@@ -52,4 +52,8 @@ nul
 publish/
 
 # ILRepack tools (download manually)
-tools/
+tools/ILRepack/
+# 部署工具的输出（生成的 Web.config/公钥/README）不进 git
+tools/A3ToolsHubSetup/out/
+tools/A3ToolsHubSetup/bin/
+tools/A3ToolsHubSetup/obj/
