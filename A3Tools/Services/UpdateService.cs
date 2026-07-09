@@ -378,26 +378,36 @@ echo [%date% %time%] moving new exe >> ""{logPath}""
 move ""{newExePath}"" ""{currentExe}"" >> ""{logPath}"" 2>&1
 echo [%date% %time%] moving done, errorlevel=%errorlevel% >> ""{logPath}""
 start """" ""{currentExe}""
+:: === 清理日志：升级成功后清掉 _update.log（失败时前面的 exit /b 1 已经跳到这里） ===
+del ""{logPath}"" >nul 2>&1
 del ""%~f0""
 ";
-        File.WriteAllText(batPath, batContent, new System.Text.UTF8Encoding(true));
+        // CRITICAL: Normalize line endings to CRLF.
+        // Source file is LF only; bat would fail silently with "command not found" errors otherwise.
+        var normalizedContent = batContent.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        File.WriteAllText(batPath, normalizedContent, new System.Text.UTF8Encoding(true));
 
-        // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
-        // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
-        // Environment.Exit(0) 杀 A3Tools 不会级联到独立 cmd
+        // 关键：用 cmd.exe /c "bat.bat" 直接解释执行 bat（不开新窗口）
+        //   - UseShellExecute=false：让 CreateNoWindow=true 真正生效（UseShellExecute=true 时 .NET 文档明确 CreateNoWindow 无效）
+        //   - Arguments 用 /c ""bat.bat"" 而不是 /c start "" /b "bat.bat"：避免嵌套 cmd 实例，
+        //     父 cmd 退出时不会拖走子 cmd，子 cmd 自己解释完 bat 后正常退出
+        //   - RedirectStandardOutput/Error=true：cmd 的 stdout/stderr 重定向到 .NET stream，避免 cmd 调用 AllocConsole 弹窗
+        //   - Environment.Exit(0) 杀 A3Tools 不会影响子进程 cmd（独立进程）
         var psi = new ProcessStartInfo
         {
             FileName = "cmd.exe",
-            Arguments = $"/c start \"\" /b \"{batPath}\"",
-            UseShellExecute = true,
+            Arguments = $"/c \"\"{batPath}\"\"",
+            UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             WorkingDirectory = currentDir
         };
 
-        // 1) 启动 bat 后台进程（异步）
+        // 1) 启动 cmd 后台进程（异步）
         var batProc = Process.Start(psi);
 
-        // 2) 等 bat 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
+        // 2) 等 cmd 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
         if (batProc != null)
         {
             for (int i = 0; i < 30; i++)
@@ -408,8 +418,8 @@ del ""%~f0""
         }
 
         // 3) StandaloneSF 单文件模式下 A3Tools.exe 是 self-extracted，
-        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 bat。
-        //    给 bat 1 秒时间复制 / 解压完自己再退出。
+        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 cmd。
+        //    给 cmd 1 秒时间复制 / 解压完自己再退出。
         Thread.Sleep(1000);
 
         // 4) 强制退出
@@ -501,22 +511,31 @@ start """" ""{currentExe}""
 :: === 6. 清理临时 zip 和 bat ===
 echo [%date% %time%] cleanup >> ""{logPath}""
 del ""{zipPath}"" >nul 2>&1
+:: === 清理日志：升级成功后清掉 _update.log（前面任何 exit /b 1 都跳过这行） ===
+del ""{logPath}"" >nul 2>&1
 del ""%~f0""
 ";
         string batPath = Path.Combine(currentDir, "_update.bat");
         // bat 写 UTF-8 with BOM，chcp 65001 才能正确显示中文
-        File.WriteAllText(batPath, batContent, new System.Text.UTF8Encoding(true));
+        // CRITICAL: Normalize line endings to CRLF (source is LF only)
+        var normalizedContent = batContent.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        File.WriteAllText(batPath, normalizedContent, new System.Text.UTF8Encoding(true));
 
-        // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
-        // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
-        // Environment.Exit(0) 杀 A3Tools 不会级联到独立 cmd
+        // 关键：用 cmd.exe /c "bat.bat" 直接解释执行 bat（不开新窗口）
+        //   - UseShellExecute=false：让 CreateNoWindow=true 真正生效（UseShellExecute=true 时 .NET 文档明确 CreateNoWindow 无效）
+        //   - Arguments 用 /c ""bat.bat"" 而不是 /c start "" /b "bat.bat"：避免嵌套 cmd 实例，
+        //     父 cmd 退出时不会拖走子 cmd，子 cmd 自己解释完 bat 后正常退出
+        //   - RedirectStandardOutput/Error=true：cmd 的 stdout/stderr 重定向到 .NET stream，避免 cmd 调用 AllocConsole 弹窗
+        //   - Environment.Exit(0) 杀 A3Tools 不会影响子进程 cmd（独立进程）
         // WorkingDirectory 不传（bat 第一行 cd /d %~dp0 自救）
         var psi = new ProcessStartInfo
         {
             FileName = "cmd.exe",
-            Arguments = $"/c start \"\" /b \"{batPath}\"",
-            UseShellExecute = true,
+            Arguments = $"/c \"\"{batPath}\"\"",
+            UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             WorkingDirectory = currentDir
         };
 
