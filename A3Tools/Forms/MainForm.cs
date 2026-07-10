@@ -882,7 +882,13 @@ public partial class MainForm : Form, IToolContext
     private void ShowAccountDialog(Account? account)
     {
         bool isRoot = _isRootMode;
-        using var dialog = new AccountDialog(account, isRoot);
+        string hubConfigDir = "";
+        if (isRoot)
+        {
+            var settings = new DataService().LoadSettings();
+            hubConfigDir = settings.A3ToolsHubConfigDir;
+        }
+        using var dialog = new AccountDialog(account, isRoot, isRoot, hubConfigDir);
         if (dialog.ShowDialog() == DialogResult.OK)
         {
             var edited = dialog.GetAccount();
@@ -1735,7 +1741,7 @@ public partial class MainForm : Form, IToolContext
 
     private void BtnSettings_Click(object? sender, EventArgs e)
     {
-        using var dialog = new SettingsDialog();
+        using var dialog = new SettingsDialog(_isRootMode);
         if (dialog.ShowDialog() == DialogResult.OK)
         {
             RegisterAllHotkeys();

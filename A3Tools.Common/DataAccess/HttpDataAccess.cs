@@ -179,12 +179,31 @@ namespace A3Tools.Common.DataAccess
                 }
 
                 // 成功响应（加密 JSON）
-                string respEncData = root.GetProperty("encData").GetString() ?? "";
+                // 服务端 ASP.NET Web API 默认 PascalCase，显式设了 CamelCase 后应是 encData；
+                // 但客户端做大小写不敏感查找以兼容两种部署。
+                string respEncData = GetPropertyIgnoreCase(root, "encData")?.GetString() ?? "";
                 string respJson = CryptoHelper.AesDecrypt(respEncData, sessionKey);
-                var result = JsonSerializer.Deserialize<QueryResult>(respJson, new JsonSerializerOptions
+
+                // 用 Newtonsoft.Json 反序列化：服务端用 Newtonsoft 序列化，DateTime 会输出为 "2024-11-16T00:00:00"。
+                // System.Text.Json 会把所有值解析成 JsonElement，填 DataTable 的 DateTime 列时报 InvalidCastException。
+                // Newtonsoft.Json 能正确把 JSON 字符串还原为 DateTime。
+                QueryResult? result;
+                try
                 {
-                    PropertyNameCaseInsensitive = true
-                });
+                    result = Newtonsoft.Json.JsonConvert.DeserializeObject<QueryResult>(respJson,
+                        new Newtonsoft.Json.JsonSerializerSettings
+                        {
+                            NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore
+                        });
+                }
+                catch
+                {
+                    // 退回到 System.Text.Json（保留旧行为兜底）
+                    result = JsonSerializer.Deserialize<QueryResult>(respJson, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                }
 
                 return result ?? new QueryResult { Success = false, Message = "Failed to deserialize response" };
             }
@@ -192,6 +211,19 @@ namespace A3Tools.Common.DataAccess
             {
                 return new QueryResult { Success = false, Message = ex.Message };
             }
+        }
+
+        /// <summary>
+        /// 大小写不敏感地获取 JSON 属性（兼容服务端 PascalCase / camelCase 两种序列化）
+        /// </summary>
+        private static JsonElement? GetPropertyIgnoreCase(JsonElement root, string name)
+        {
+            foreach (var prop in root.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+                    return prop.Value;
+            }
+            return null;
         }
     }
 }

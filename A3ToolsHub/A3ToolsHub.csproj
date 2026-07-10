@@ -22,4 +22,28 @@
     <Reference Include="System.Configuration" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.Infrastructure" Version="2.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Global.asax">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="Web.config">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="PrepareIisPublishLayout" AfterTargets="Publish">
+    <ItemGroup>
+      <IisBinFiles Include="$(PublishDir)*.dll;$(PublishDir)*.pdb" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)bin" />
+    <Copy SourceFiles="@(IisBinFiles)" DestinationFolder="$(PublishDir)bin" SkipUnchangedFiles="true" />
+    <Delete Files="@(IisBinFiles)" />
+  </Target>
+
 </Project>

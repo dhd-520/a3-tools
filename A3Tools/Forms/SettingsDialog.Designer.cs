@@ -39,6 +39,12 @@ partial class SettingsDialog
         lblDevToolsPassword = new Label();
         txtDevToolsPassword = new TextBox();
         hintDevTools = new Label();
+        sepHubConfig = new Panel();
+        lblHubConfigTitle = new Label();
+        hintHubConfig = new Label();
+        lblHubConfigDir = new Label();
+        txtHubConfigDir = new TextBox();
+        btnHubConfigBrowse = new Button();
         bottom = new Panel();
         btnCancel = new Button();
         btnOK = new Button();
@@ -72,6 +78,7 @@ partial class SettingsDialog
         // 
         // mainPanel
         // 
+        mainPanel.AutoScroll = true;
         mainPanel.BackColor = Color.White;
         mainPanel.Controls.Add(lblAppDir);
         mainPanel.Controls.Add(txtAppDir);
@@ -105,6 +112,12 @@ partial class SettingsDialog
         mainPanel.Controls.Add(lblDevToolsPassword);
         mainPanel.Controls.Add(txtDevToolsPassword);
         mainPanel.Controls.Add(hintDevTools);
+        mainPanel.Controls.Add(sepHubConfig);
+        mainPanel.Controls.Add(lblHubConfigTitle);
+        mainPanel.Controls.Add(hintHubConfig);
+        mainPanel.Controls.Add(lblHubConfigDir);
+        mainPanel.Controls.Add(txtHubConfigDir);
+        mainPanel.Controls.Add(btnHubConfigBrowse);
         mainPanel.Dock = DockStyle.Fill;
         mainPanel.Location = new Point(0, 60);
         mainPanel.Name = "mainPanel";
@@ -459,13 +472,76 @@ partial class SettingsDialog
         hintDevTools.TabIndex = 24;
         hintDevTools.Text = "启动集成开发工具时，会先填客户端账号密码（用账套 ServerUsername + ServerPassword），\n通过后再填这个开发工具密码（开发账号默认记住，不需要输入）";
         // 
+        // sepHubConfig (Root 专属分隔线)
+        // 
+        sepHubConfig.BackColor = Color.FromArgb(220, 220, 220);
+        sepHubConfig.Location = new Point(36, 1090);
+        sepHubConfig.Name = "sepHubConfig";
+        sepHubConfig.Size = new Size(1080, 1);
+        sepHubConfig.TabIndex = 28;
+        // 
+        // lblHubConfigTitle
+        // 
+        lblHubConfigTitle.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
+        lblHubConfigTitle.ForeColor = Color.FromArgb(24, 145, 176);
+        lblHubConfigTitle.Location = new Point(36, 1095);
+        lblHubConfigTitle.Name = "lblHubConfigTitle";
+        lblHubConfigTitle.Size = new Size(400, 30);
+        lblHubConfigTitle.TabIndex = 29;
+        lblHubConfigTitle.Text = "🔒 A3ToolsHub 服务端配置（Root 模式）";
+        // 
+        // hintHubConfig
+        // 
+        hintHubConfig.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        hintHubConfig.ForeColor = Color.FromArgb(150, 150, 150);
+        hintHubConfig.Location = new Point(36, 1125);
+        hintHubConfig.Name = "hintHubConfig";
+        hintHubConfig.Size = new Size(900, 30);
+        hintHubConfig.TabIndex = 30;
+        hintHubConfig.Text = "设置「一键生成配置」按钮将配置文件生成到哪个目录（{账套代码+账套名称}/ 文件夹）";
+        // 
+        // lblHubConfigDir
+        // 
+        lblHubConfigDir.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblHubConfigDir.Location = new Point(36, 1155);
+        lblHubConfigDir.Name = "lblHubConfigDir";
+        lblHubConfigDir.Size = new Size(220, 50);
+        lblHubConfigDir.TabIndex = 31;
+        lblHubConfigDir.Text = "配置文件目录：";
+        lblHubConfigDir.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // txtHubConfigDir
+        // 
+        txtHubConfigDir.BackColor = Color.FromArgb(248, 248, 248);
+        txtHubConfigDir.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        txtHubConfigDir.Location = new Point(36, 1200);
+        txtHubConfigDir.Name = "txtHubConfigDir";
+        txtHubConfigDir.ReadOnly = true;
+        txtHubConfigDir.Size = new Size(800, 41);
+        txtHubConfigDir.TabIndex = 32;
+        // 
+        // btnHubConfigBrowse
+        // 
+        btnHubConfigBrowse.BackColor = Color.FromArgb(245, 245, 245);
+        btnHubConfigBrowse.Cursor = Cursors.Hand;
+        btnHubConfigBrowse.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
+        btnHubConfigBrowse.FlatStyle = FlatStyle.Flat;
+        btnHubConfigBrowse.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnHubConfigBrowse.Location = new Point(844, 1200);
+        btnHubConfigBrowse.Name = "btnHubConfigBrowse";
+        btnHubConfigBrowse.Size = new Size(150, 41);
+        btnHubConfigBrowse.TabIndex = 33;
+        btnHubConfigBrowse.Text = "浏览...";
+        btnHubConfigBrowse.UseVisualStyleBackColor = false;
+        btnHubConfigBrowse.Click += BtnHubConfigBrowse_Click;
+        // 
         // bottom
         // 
         bottom.BackColor = Color.FromArgb(248, 248, 248);
         bottom.Controls.Add(btnCancel);
         bottom.Controls.Add(btnOK);
         bottom.Dock = DockStyle.Bottom;
-        bottom.Location = new Point(0, 1302);
+        bottom.Location = new Point(0, 1350);
         bottom.Name = "bottom";
         bottom.Size = new Size(1152, 78);
         bottom.TabIndex = 0;
@@ -510,7 +586,7 @@ partial class SettingsDialog
         AcceptButton = btnOK;
         BackColor = Color.White;
         CancelButton = btnCancel;
-        ClientSize = new Size(1152, 1380);
+        ClientSize = new Size(1152, 1430);
         Controls.Add(bottom);
         Controls.Add(mainPanel);
         Controls.Add(titleBar);
@@ -554,4 +630,12 @@ partial class SettingsDialog
     private RadioButton rbQueryToolSsms;
     private RadioButton rbQueryToolBuiltIn;
     private Label hintQueryTool;
+
+    // Root 专属：A3ToolsHub 配置目录
+    private Panel sepHubConfig = null!;
+    private Label lblHubConfigTitle = null!;
+    private Label hintHubConfig = null!;
+    private Label lblHubConfigDir = null!;
+    private TextBox txtHubConfigDir = null!;
+    private Button btnHubConfigBrowse = null!;
 }

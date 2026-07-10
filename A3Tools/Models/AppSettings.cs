@@ -128,4 +128,8 @@ public class AppSettings
 
     /// <summary>SqlQueryForm 上次关闭时是否最大化</summary>
     public bool SqlQueryFormMaximized { get; set; } = true;
+
+    // ===== A3ToolsHub 一键配置（Root 模式专用）=====
+    /// <summary>A3ToolsHub 配置文件生成目录（Root 模式专用）</summary>
+    public string A3ToolsHubConfigDir { get; set; } = string.Empty;
 }

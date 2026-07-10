@@ -37,6 +37,10 @@ namespace A3ToolsHub
             var json = config.Formatters.JsonFormatter;
             json.SerializerSettings.Formatting = Newtonsoft.Json.Formatting.None;
             json.SerializerSettings.NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore;
+            // 显式设 CamelCase：ASP.NET Web API 2 默认是 DefaultContractResolver（PascalCase），
+            // 但客户端用 System.Text.Json 期望 camelCase（encData 而非 EncData）。
+            // 不设这个会导致客户端 GetProperty("encData") 抛 KeyNotFoundException。
+            json.SerializerSettings.ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver();
         }
     }
 }

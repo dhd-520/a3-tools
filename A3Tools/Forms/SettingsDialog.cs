@@ -29,8 +29,12 @@ public partial class SettingsDialog : Form
     public string AppDirectory { get; private set; } = string.Empty;
     public string TrayShowHotkey { get; private set; } = "Ctrl+Shift+Z";
 
-    public SettingsDialog()
+    /// <summary>是否是 Root 模式（决定某些设置项是否可见）</summary>
+    public bool IsRootMode { get; set; } = false;
+
+    public SettingsDialog(bool isRootMode = false)
     {
+        IsRootMode = isRootMode;
         InitializeComponent();
         LoadSettings();
     }
@@ -54,6 +58,18 @@ public partial class SettingsDialog : Form
             rbQueryToolBuiltIn.Checked = true;
         else
             rbQueryToolSsms.Checked = true;
+
+        // Root 专属设置
+        txtHubConfigDir.Text = settings.A3ToolsHubConfigDir;
+
+        // 根据是否为 Root 模式显示/隐藏专属控件
+        bool isRoot = this.IsRootMode;
+        sepHubConfig.Visible = isRoot;
+        lblHubConfigTitle.Visible = isRoot;
+        hintHubConfig.Visible = isRoot;
+        lblHubConfigDir.Visible = isRoot;
+        txtHubConfigDir.Visible = isRoot;
+        btnHubConfigBrowse.Visible = isRoot;
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -72,6 +88,15 @@ public partial class SettingsDialog : Form
             dialog.InitialDirectory = Path.GetDirectoryName(txtSsmsPath.Text);
         if (dialog.ShowDialog() == DialogResult.OK)
             txtSsmsPath.Text = dialog.FileName;
+    }
+
+    private void BtnHubConfigBrowse_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new FolderBrowserDialog { Description = "选择 A3ToolsHub 配置文件生成目录", ShowNewFolderButton = true };
+        if (!string.IsNullOrEmpty(txtHubConfigDir.Text) && Directory.Exists(txtHubConfigDir.Text))
+            dialog.SelectedPath = txtHubConfigDir.Text;
+        if (dialog.ShowDialog() == DialogResult.OK)
+            txtHubConfigDir.Text = dialog.SelectedPath;
     }
 
     private void BtnSsmsClear_Click(object? sender, EventArgs e)
@@ -95,6 +120,7 @@ public partial class SettingsDialog : Form
         settings.DevToolsAutoLogin = chkDevToolsAutoLogin.Checked;
         settings.DevToolsPassword = txtDevToolsPassword.Text;  // 明文，SaveSettings 自动加密
         settings.QueryToolMode = rbQueryToolBuiltIn.Checked ? QueryToolMode.BuiltIn : QueryToolMode.Ssms;
+        settings.A3ToolsHubConfigDir = txtHubConfigDir.Text.Trim();
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();

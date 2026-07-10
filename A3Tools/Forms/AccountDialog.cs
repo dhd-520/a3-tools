@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Windows.Forms;
 using A3Tools.Common.DataAccess;
 using A3Tools.Models;
@@ -11,15 +12,21 @@ public partial class AccountDialog : Form
     private readonly Account? _original;
     private readonly DataService _dataService = new();
 
-    /// <summary>
-    /// 是否显示密码明文（Root模式使用）
-    /// </summary>
+    /// <summary>是否显示密码明文（Root模式使用）</summary>
     public bool ShowPasswords { get; set; } = false;
 
-    public AccountDialog(Account? account, bool showPasswords = false)
+    /// <summary>是否是 Root 模式（决定某些 UI 是否可见）</summary>
+    public bool IsRootMode { get; set; } = false;
+
+    /// <summary>A3ToolsHub 配置文件目录（来自设置，Root 模式使用）</summary>
+    public string HubConfigDir { get; set; } = string.Empty;
+
+    public AccountDialog(Account? account, bool showPasswords = false, bool isRootMode = false, string hubConfigDir = "")
     {
         _original = account;
         ShowPasswords = showPasswords;
+        IsRootMode = isRootMode;
+        HubConfigDir = hubConfigDir;
         InitializeComponent();
         this.KeyPreview = true;
         this.KeyDown += AccountDialog_KeyDown;
@@ -28,7 +35,7 @@ public partial class AccountDialog : Form
         else
             GenerateDefaultCode();
         UpdateTitle();
-        ProxyMode_Changed(null, EventArgs.Empty);
+        UpdateProxyGroupVisibility();
     }
 
     private void GenerateDefaultCode()
@@ -179,10 +186,72 @@ public partial class AccountDialog : Form
     /// </summary>
     private void ProxyMode_Changed(object? sender, EventArgs e)
     {
+        UpdateProxyGroupVisibility();
+    }
+
+    private void UpdateProxyGroupVisibility()
+    {
         bool isHttp = rbHttp.Checked;
-        lblProxySecretKey.Visible = isHttp;
-        txtProxySecretKey.Visible = isHttp;
-        lblProxyServerPublicKey.Visible = isHttp;
-        txtProxyServerPublicKey.Visible = isHttp;
+        bool canShowHttp = this.IsRootMode && isHttp;
+
+        lblProxySecretKey.Visible = canShowHttp;
+        txtProxySecretKey.Visible = canShowHttp;
+        lblProxyServerPublicKey.Visible = canShowHttp;
+        txtProxyServerPublicKey.Visible = canShowHttp;
+        btnGenerateHubConfig.Visible = canShowHttp;
+
+        // 非 Root 模式下整个连接模式面板隐藏
+        pnlProxyGroup.Visible = this.IsRootMode;
+
+        if (this.IsRootMode)
+        {
+            rbHttp.Visible = true;
+            lblProxyHint.Text = "🔒 连接模式（数据库不对外时使用 A3ToolsHub 代理转发）";
+        }
+    }
+
+    private void BtnGenerateHubConfig_Click(object? sender, EventArgs e)
+    {
+        // 1. 校验配置目录
+        if (string.IsNullOrWhiteSpace(HubConfigDir) || !Directory.Exists(HubConfigDir))
+        {
+            MessageBox.Show("请先在「设置」中配置「A3ToolsHub 配置文件目录」（仅 Root 模式可见）。",
+                "未设置配置文件目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 2. 直接取账套代码和名称（打开对话框时已有值）
+        var code = txtCode.Text.Trim();
+        var name = txtName.Text.Trim();
+
+        // 3. 检查是否已存在配置
+        if (A3Tools.Common.Security.A3ToolsHubConfigGenerator.ConfigExists(HubConfigDir, code, name))
+        {
+            var dr = MessageBox.Show(
+                $"文件夹「{code}_{name}」已存在配置，是否重新生成？\n（将清空原有配置）",
+                "配置已存在", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (dr != DialogResult.Yes) return;
+        }
+
+        // 4. 生成配置
+        var result = A3Tools.Common.Security.A3ToolsHubConfigGenerator.Generate(code, name);
+
+        // 5. 写入文件
+        A3Tools.Common.Security.A3ToolsHubConfigGenerator.WriteTo(HubConfigDir, code, name, result);
+
+        // 6. 回填客户端字段
+        txtProxySecretKey.Text = result.SecretKey;
+        txtProxyServerPublicKey.Text = result.RsaPublicKey;
+
+        // 7. 切到 Http 模式
+        rbHttp.Checked = true;
+        UpdateProxyGroupVisibility();
+
+        MessageBox.Show(
+            $"配置已生成并填入对应字段！\n\n" +
+            $"生成目录：{Path.Combine(HubConfigDir, code + "_" + name)}\n" +
+            $"文件：Web.config、rsa-public-key.xml、README.txt\n\n" +
+            $"请将 Web.config 部署到服务器 A3ToolsHub 目录。",
+            "生成成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 }

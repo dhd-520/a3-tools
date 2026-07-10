@@ -34,6 +34,38 @@ namespace A3ToolsHub.Controllers
     {
         private static readonly SqlExecutor _executor = new SqlExecutor();
 
+        // CamelCase 序列化设置：ExecController 用 JsonConvert.SerializeObject 手动序列化，
+        // 绕过了 Web API 的 formatter 管线，所以必须显式指定 CamelCase，
+        // 否则默认 DefaultContractResolver 输出 PascalCase（EncData 而非 encData），
+        // 客户端 GetProperty("encData") 会抛 KeyNotFoundException。
+        private static readonly JsonSerializerSettings _jsonSettings = new JsonSerializerSettings
+        {
+            Formatting = Formatting.None,
+            NullValueHandling = NullValueHandling.Ignore,
+            ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+        };
+
+        [HttpGet]
+        [Route("")]
+        public HttpResponseMessage Health()
+        {
+            var ok = new
+            {
+                success = true,
+                message = "A3ToolsHub is running",
+                endpoint = "POST /api/exec"
+            };
+            var content = new StringContent(JsonConvert.SerializeObject(ok, _jsonSettings), Encoding.UTF8, "application/json");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        }
+
+        [HttpGet]
+        [Route("api/exec")]
+        public HttpResponseMessage ExecGet()
+        {
+            return CreateErrorResponse(HttpStatusCode.MethodNotAllowed, "A3ToolsHub is running. Use POST /api/exec.");
+        }
+
         [HttpPost]
         [Route("api/exec")]
         public HttpResponseMessage Exec([FromBody] ExecRequest req)
@@ -149,7 +181,7 @@ namespace A3ToolsHub.Controllers
             }
 
             // 8. AES 加密结果返回
-            string resultJson = JsonConvert.SerializeObject(result);
+            string resultJson = JsonConvert.SerializeObject(result, _jsonSettings);
             byte[] respIv;
             string encResult = CryptoHelper.AesEncrypt(resultJson, sessionKey, out respIv);
 
@@ -159,14 +191,14 @@ namespace A3ToolsHub.Controllers
                 Iv = Convert.ToBase64String(respIv)
             };
 
-            var respContent = new StringContent(JsonConvert.SerializeObject(response), Encoding.UTF8, "application/json");
+            var respContent = new StringContent(JsonConvert.SerializeObject(response, _jsonSettings), Encoding.UTF8, "application/json");
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = respContent };
         }
 
         private HttpResponseMessage CreateErrorResponse(HttpStatusCode code, string message)
         {
             var err = new { success = false, message = message };
-            var content = new StringContent(JsonConvert.SerializeObject(err), Encoding.UTF8, "application/json");
+            var content = new StringContent(JsonConvert.SerializeObject(err, _jsonSettings), Encoding.UTF8, "application/json");
             return new HttpResponseMessage(code) { Content = content };
         }
     }

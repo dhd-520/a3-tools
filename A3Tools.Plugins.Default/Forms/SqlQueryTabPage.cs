@@ -388,12 +388,22 @@ public partial class SqlQueryTabPage : UserControl
                             var (page, dgv) = CreateResultTab(i + 1, ++resultInBatch);
                             var dt = new DataTable();
                             // 列定义（从 reader 拿）
+                            // 处理 SELECT BILLNO,* 这类重复列名（SSMS 允许，DataTable 不允许）
                             for (int c = 0; c < reader.FieldCount; c++)
                             {
                                 var colName = reader.GetName(c);
                                 if (string.IsNullOrEmpty(colName)) colName = $"Column{c + 1}";
                                 Type colType = reader.GetFieldType(c) ?? typeof(object);
-                                dt.Columns.Add(colName, colType);
+                                // 重复列名：SSMS 允许 `SELECT BILLNO, *` 展开后两列都叫 BILLNO，
+                                // DataTable.Columns.Add 会抛 DuplicateNameException，兜底处理
+                                try { dt.Columns.Add(colName, colType); }
+                                catch (DuplicateNameException)
+                                {
+                                    var safeName = colName;
+                                    int suffix = 2;
+                                    while (dt.Columns.Contains(safeName)) safeName = $"{colName}_{suffix++}";
+                                    dt.Columns.Add(safeName, colType);
+                                }
                             }
                             // 分批读行（同步 Read，不用 await，避免 N×1ms 调度开销叠加）
                             int totalRead = 0;
@@ -548,7 +558,55 @@ public partial class SqlQueryTabPage : UserControl
                 {
                     var dr = dt.NewRow();
                     for (int i = 0; i < row.Length && i < dt.Columns.Count; i++)
-                        dr[i] = row[i] ?? DBNull.Value;
+                    {
+                        var val = row[i];
+                        if (val == null)
+                        {
+                            dr[i] = DBNull.Value;
+                            continue;
+                        }
+
+                        var colType = dt.Columns[i].DataType;
+                        if (val.GetType() == colType)
+                        {
+                            dr[i] = val;
+                        }
+                        else if (val is string s)
+                        {
+                            // Newtonsoft.Json 反序列化 object?[] 时，DateTime/ Guid/ decimal 等都会变成 string
+                            if (colType == typeof(DateTime))
+                                dr[i] = DateTime.TryParse(s, out var dt2) ? dt2 : DBNull.Value;
+                            else if (colType == typeof(decimal))
+                                dr[i] = decimal.TryParse(s, out var dec2) ? dec2 : DBNull.Value;
+                            else if (colType == typeof(long) || colType == typeof(int))
+                                dr[i] = long.TryParse(s, out var lng2) ? lng2 : (object)DBNull.Value;
+                            else if (colType == typeof(bool))
+                                dr[i] = bool.TryParse(s, out var b2) ? b2 : DBNull.Value;
+                            else if (colType == typeof(Guid))
+                                dr[i] = Guid.TryParse(s, out var g2) ? g2 : DBNull.Value;
+                            else if (colType == typeof(TimeSpan))
+                                dr[i] = TimeSpan.TryParse(s, out var ts2) ? ts2 : DBNull.Value;
+                            else
+                                dr[i] = val;
+                        }
+                        else if (val is System.Text.Json.JsonElement je)
+                        {
+                            // System.Text.Json 反序列化 object?[] 时所有值都是 JsonElement
+                            dr[i] = je.ValueKind switch
+                            {
+                                System.Text.Json.JsonValueKind.Null => DBNull.Value,
+                                System.Text.Json.JsonValueKind.String => ConvertFromJsonElement(je, colType),
+                                System.Text.Json.JsonValueKind.Number => ConvertFromJsonElement(je, colType),
+                                System.Text.Json.JsonValueKind.True => true,
+                                System.Text.Json.JsonValueKind.False => false,
+                                _ => je.ToString()
+                            };
+                        }
+                        else
+                        {
+                            dr[i] = val;
+                        }
+                    }
                     dt.Rows.Add(dr);
                 }
 
@@ -588,6 +646,33 @@ public partial class SqlQueryTabPage : UserControl
             btnExecuteSelected.Enabled = true;
             btnStop.Enabled = false;
         }
+    }
+
+    /// <summary>
+    /// 把 JsonElement 转换为目标列类型（DateTime/decimal/int/bool/Guid/TimeSpan 等）。
+    /// HttpDataAccess 用 System.Text.Json 反序列化时，所有值都是 JsonElement，
+    /// 直接赋值给 DataTable 的强类型列会报 InvalidCastException。
+    /// </summary>
+    private static object ConvertFromJsonElement(System.Text.Json.JsonElement je, Type colType)
+    {
+        if (colType == typeof(DateTime))
+            return je.TryGetDateTime(out var dt) ? dt : DateTime.TryParse(je.GetString(), out var dt2) ? dt2 : (object)DBNull.Value;
+        if (colType == typeof(decimal))
+            return je.TryGetDecimal(out var d) ? d : DBNull.Value;
+        if (colType == typeof(long))
+            return je.TryGetInt64(out var l) ? l : DBNull.Value;
+        if (colType == typeof(int))
+            return je.TryGetInt32(out var i) ? i : DBNull.Value;
+        if (colType == typeof(bool))
+            return je.ValueKind == System.Text.Json.JsonValueKind.True;
+        if (colType == typeof(Guid))
+            return Guid.TryParse(je.GetString(), out var g) ? g : DBNull.Value;
+        if (colType == typeof(TimeSpan))
+            return TimeSpan.TryParse(je.GetString(), out var ts) ? ts : DBNull.Value;
+        if (colType == typeof(string))
+            return je.GetString() ?? (object)DBNull.Value;
+        // 兜底
+        return je.ValueKind == System.Text.Json.JsonValueKind.String ? (object?)je.GetString() ?? DBNull.Value : je.ToString();
     }
 
     /// <summary>

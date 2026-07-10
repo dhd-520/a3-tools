@@ -119,6 +119,10 @@ public partial class SqlQueryForm : Form
         // 异步加载数据库列表
         _ = LoadDatabasesAsync();
 
+        // Http 模式：注入 IDataAccess 给 SchemaCache，让对象资源管理器/IntelliSense 走代理
+        SqlObjectSchemaCache.SetDataAccess(CurrentDataAccess);
+        SqlScriptLoader.SetDataAccess(CurrentDataAccess);
+
         // 后台预热当前库的 IntelliSense 缓存（不阻塞 UI；切库时也会再拉）
         // GetSuggestions 入口会同步 EnsureLoadedSync 保证后续读到了可用
         _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
@@ -222,6 +226,32 @@ public partial class SqlQueryForm : Form
         try
         {
             var dbs = new List<string>();
+            // 2026-07-10 Http 模式下走代理查 sys.databases
+            if (_account.ConnectionMode == A3Tools.Common.DataAccess.DataAccessMode.Http)
+            {
+                var dbResult = await CurrentDataAccess.ExecuteQueryAsync("SELECT name FROM sys.databases WHERE state = 0 ORDER BY name");
+                if (dbResult.Success && dbResult.Tables.Count > 0)
+                {
+                    foreach (var row in dbResult.Tables[0].Rows)
+                    {
+                        var dbName = row[0]?.ToString();
+                        if (!string.IsNullOrEmpty(dbName))
+                            dbs.Add(dbName);
+                    }
+                }
+
+                string? prevSelected2 = cmbDatabase.SelectedItem?.ToString();
+                cmbDatabase.Items.Clear();
+                cmbDatabase.Items.AddRange(dbs.ToArray());
+
+                string target2 = !string.IsNullOrEmpty(prevSelected2) && cmbDatabase.Items.Contains(prevSelected2)
+                    ? prevSelected2
+                    : _account.DatabaseName;
+                var idx2 = cmbDatabase.Items.IndexOf(target2);
+                if (idx2 >= 0) cmbDatabase.SelectedIndex = idx2;
+                else if (cmbDatabase.Items.Count > 0) cmbDatabase.SelectedIndex = 0;
+                return;
+            }
             using var conn = new SqlConnection(_baseConnStr);
             await conn.OpenAsync();
             using var cmd = new SqlCommand(

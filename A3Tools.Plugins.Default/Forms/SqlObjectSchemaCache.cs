@@ -7,14 +7,14 @@ namespace A3Tools.Plugins.Default.Forms;
 /// SQL Server 数据库对象 Schema 缓存 + IntelliSense 数据源：
 /// - 表 (TABLE)
 /// - 视图 (VIEW)
-/// - 表值函数 (IF = Inline TVF / TF = Multi-statement TVF)
+/// - 表值函数 (IF = Inline TVF / TF = Multi-stmt TVF)
 /// - 标量函数 (FN = Scalar Function)
 /// - 每个对象的列名（用于后续扩展列名联想）
 ///
 /// 缓存生命周期：进程内。按 (server, database) 维度隔离。
 /// - 后台预热（不卡 UI）
 /// - 切库时自动 invalidate 旧缓存（即使新库不存在也清空）
-/// - 用户切回原库 → 命中缓存 → 0 IO
+/// - 用户切回原库 -> 命中缓存 -> 0 IO
 ///
 /// 并发：每个 (server, database) 键只允许一个加载在跑（其他线程等结果）
 /// </summary>
@@ -53,9 +53,29 @@ public static class SqlObjectSchemaCache
     /// <summary>正在加载的 key（防止并发加载同一库）</summary>
     private static readonly ConcurrentDictionary<string, Task<List<DbObject>>> _loadingTasks = new();
 
+    /// <summary>
+    /// 可选的 IDataAccess 代理（Http 模式下由 SqlQueryForm 注入）。
+    /// null = 直连模式，用 SqlConnection。
+    /// </summary>
+    private static A3Tools.Common.DataAccess.IDataAccess? _dataAccess;
+
     // ============================================
     // 公共 API
     // ============================================
+
+    /// <summary>
+    /// 注入 IDataAccess（Http 模式下由 SqlQueryForm 调用）。
+    /// 设为 null 恢复直连模式。
+    /// </summary>
+    public static void SetDataAccess(A3Tools.Common.DataAccess.IDataAccess? dataAccess)
+    {
+        _dataAccess = dataAccess;
+    }
+
+    /// <summary>
+    /// 当前是否走 Http 代理
+    /// </summary>
+    public static bool IsHttpMode => _dataAccess != null && _dataAccess.Mode == A3Tools.Common.DataAccess.DataAccessMode.Http;
 
     /// <summary>
     /// 根据 connectionString 异步加载/获取缓存。
@@ -76,14 +96,14 @@ public static class SqlObjectSchemaCache
         }
         catch
         {
-            // 连接串解析失败（极端情况）→ 清空所有缓存兜底
+            // 连接串解析失败（极端情况）-> 清空所有缓存兜底
             _cache.Clear();
             return;
         }
 
         if (sd == null || string.IsNullOrEmpty(sd.Database))
         {
-            // 未指定库 → 清掉所有同 server 缓存
+            // 未指定库 -> 清掉所有同 server 缓存
             InvalidateServer(sd?.Server ?? "");
             return;
         }
@@ -91,7 +111,7 @@ public static class SqlObjectSchemaCache
         if (!forceReload && _cache.TryGetValue(key, out var hit) && !IsStale(hit))
             return;
 
-        // 同 key 已加载 → 等结果
+        // 同 key 已加载 -> 等结果
         var existing = _loadingTasks.GetOrAdd(key, _ => LoadFromDbAsync(connectionString));
         try
         {
@@ -106,7 +126,7 @@ public static class SqlObjectSchemaCache
 
     /// <summary>
     /// 同步等待缓存加载完成（供 IntelliSense 同步调用 GetSuggestions 使用）。
-    /// 陛下反馈 EXEC 弹不出存储过程 — 原因：WarmupAsync 是 fire-and-forget，
+    /// 陛下反馈 EXEC 弹不出存储过程 - 原因：WarmupAsync 是 fire-and-forget，
     /// 缓存未就绪时 GetObjectsByKind 返空。修复：GetSuggestions 内调本方法同步等。
     /// 注意：不能直接 Wait() 已有 _loadingTasks（会 UI context 死锁）。
     /// 严格走 Task.Run + ConfigureAwait(false) 避免 WinForms 同步上下文死锁。
@@ -116,12 +136,12 @@ public static class SqlObjectSchemaCache
         if (string.IsNullOrEmpty(connectionString)) return false;
         var key = KeyOf(connectionString);
 
-        // 已就绪 → 返 true
+        // 已就绪 -> 返 true
         if (_cache.ContainsKey(key)) return true;
 
         // 不管_loadingTasks 是否有进行中任务，统一起一个新 Task
         // 内部 WarmupAsync 会重用已有 loading task（GetOrAdd 逻辑）
-        // 关键：Task.Run 让所有 continuation 留在 ThreadPool，不回 UI context → 不死锁
+        // 关键：Task.Run 让所有 continuation 留在 ThreadPool，不回 UI context -> 不死锁
         var t = Task.Run(async () =>
         {
             try
@@ -143,8 +163,8 @@ public static class SqlObjectSchemaCache
     /// <summary>
     /// 从缓存拿前缀匹配的对象名候选（用于 IntelliSense 弹窗）。
     /// 自动按 Schema 限定：
-    /// - 输入 "SELECT * FROM dbo." → 只返 dbo 下
-    /// - 输入 "SELECT * FROM " → 返所有 schema 下的对象
+    /// - 输入 "SELECT * FROM dbo." -> 只返 dbo 下
+    /// - 输入 "SELECT * FROM " -> 返所有 schema 下的对象
     /// </summary>
     /// <param name="connectionString">当前连接的 connectionString（决定用哪个 (server,db) 的缓存）</param>
     /// <param name="word">光标前的单词（已含 schema. 前缀时传入完整字符串；否则纯名字）</param>
@@ -270,6 +290,12 @@ public static class SqlObjectSchemaCache
     /// <summary>从数据库拉"用户可见的所有 schema-bounded 对象"（含存储过程/触发器）</summary>
     private static async Task<List<DbObject>> LoadFromDbAsync(string connStr)
     {
+        // Http 代理模式：走 IDataAccess.ExecuteQueryAsync
+        if (_dataAccess != null && _dataAccess.Mode == A3Tools.Common.DataAccess.DataAccessMode.Http)
+        {
+            return await LoadFromDbViaHttpAsync();
+        }
+
         var list = new List<DbObject>();
         try
         {
@@ -322,7 +348,66 @@ ORDER BY s.name, o.name";
         }
         catch
         {
-            // 加载失败（无权限/网络抖）→ 返回空列表，让 UI 退化为只显示关键字
+            // 加载失败（无权限/网络抖）-> 返回空列表，让 UI 退化为只显示关键字
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Http 代理模式下通过 IDataAccess 查对象列表
+    /// </summary>
+    private static async Task<List<DbObject>> LoadFromDbViaHttpAsync()
+    {
+        var list = new List<DbObject>();
+        try
+        {
+            const string sql = @"
+SELECT
+    s.name           AS SchemaName,
+    o.name           AS ObjectName,
+    o.type           AS ObjectType,
+    OBJECT_SCHEMA_NAME(o.object_id) AS SchemaName2,
+    CASE WHEN o.type IN ('U','V','IF','TF','FN') THEN
+        (
+            SELECT STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY c.column_id)
+            FROM sys.columns c
+            WHERE c.object_id = o.object_id
+        )
+    END AS ColumnsCsv
+FROM sys.objects o
+INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+WHERE o.type IN ('U','V','IF','TF','FN','P','TR')
+  AND o.is_ms_shipped = 0
+  AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest')
+ORDER BY s.name, o.name";
+
+            var result = await _dataAccess!.ExecuteQueryAsync(sql);
+            if (!result.Success || result.Tables.Count == 0) return list;
+
+            var table = result.Tables[0];
+            foreach (var row in table.Rows)
+            {
+                var schema = row[0]?.ToString() ?? "";
+                var name = row[1]?.ToString() ?? "";
+                var type = (row[2]?.ToString() ?? "").Trim();
+                var cols = row[4]?.ToString();
+
+                var kind = type switch
+                {
+                    "U" => ObjectKind.Table,
+                    "V" => ObjectKind.View,
+                    "IF" or "TF" => ObjectKind.TableValuedFunction,
+                    "FN" => ObjectKind.ScalarFunction,
+                    "P" => ObjectKind.StoredProcedure,
+                    "TR" => ObjectKind.Trigger,
+                    _ => ObjectKind.Table
+                };
+                list.Add(new DbObject(schema, name, kind, cols));
+            }
+        }
+        catch
+        {
+            // 加载失败 -> 返回空列表
         }
         return list;
     }
