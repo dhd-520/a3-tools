@@ -752,12 +752,38 @@ WHERE o.type = @objType
             return;
         }
 
-        // 5. 弹出对比窗体
-        var compareForm = new CompareTablesForm(
-            txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
-            txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
-            selectedTables);
+        // 5. 构造临时账套并弹出对比窗体（Http 模式下从源/目标账套继承代理配置）
+        var srcCompareAccount = BuildTempAccount(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text, true);
+        var tgtCompareAccount = BuildTempAccount(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text, false);
+        var compareForm = new CompareTablesForm(srcCompareAccount, tgtCompareAccount, selectedTables);
         compareForm.ShowDialog();
+    }
+
+    /// <summary>
+    /// 输入框内容 + Http 配置继承 → 临时 Account。
+    /// isSource=true 用 _srcAccount 匹配，false 用 _tgtAccount 匹配。
+    /// 手动修改过字段（与已加载账套不一致）时回退为直连模式（安全默认）。
+    /// </summary>
+    private Account BuildTempAccount(string server, string dbName, string user, string password, bool isSource)
+    {
+        var account = new Account
+        {
+            Database = server,
+            DatabaseName = dbName,
+            DbUser = user,
+            DbPassword = password,
+            ConnectionMode = DataAccessMode.Direct
+        };
+        var refAccount = isSource ? _srcAccount : _tgtAccount;
+        if (refAccount != null && refAccount.ConnectionMode == DataAccessMode.Http &&
+            server == refAccount.Database && dbName == refAccount.DatabaseName)
+        {
+            account.ConnectionMode = DataAccessMode.Http;
+            account.HttpEndpoint = refAccount.HttpEndpoint;
+            account.HttpSecretKey = refAccount.HttpSecretKey;
+            account.HttpServerPublicKey = refAccount.HttpServerPublicKey;
+        }
+        return account;
     }
 
     private void LoadCurrentAccount()

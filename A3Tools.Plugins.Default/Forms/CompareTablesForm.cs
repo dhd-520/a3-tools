@@ -1,36 +1,25 @@
 using System.Data;
 using System.Diagnostics;
 using System.Windows.Forms;
+using A3Tools.Common.DataAccess;
+using A3Tools.Models;
 using A3Tools.Services;
-using Microsoft.Data.SqlClient;
 
 namespace A3Tools.Plugins.Default.Forms;
 
 public partial class CompareTablesForm : Form
 {
-    private readonly string _srcServer;
-    private readonly string _srcDbName;
-    private readonly string _srcUser;
-    private readonly string _srcPassword;
-    private readonly string _tgtServer;
-    private readonly string _tgtDbName;
-    private readonly string _tgtUser;
-    private readonly string _tgtPassword;
+    private readonly Account? _srcAccount;
+    private readonly Account? _tgtAccount;
     private readonly List<string> _tables;
 
     public CompareTablesForm(
-        string srcServer, string srcDbName, string srcUser, string srcPassword,
-        string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
+        Account? srcAccount,
+        Account? tgtAccount,
         List<string> tables)
     {
-        _srcServer = srcServer;
-        _srcDbName = srcDbName;
-        _srcUser = srcUser;
-        _srcPassword = srcPassword;
-        _tgtServer = tgtServer;
-        _tgtDbName = tgtDbName;
-        _tgtUser = tgtUser;
-        _tgtPassword = tgtPassword;
+        _srcAccount = srcAccount;
+        _tgtAccount = tgtAccount;
         _tables = tables;
         InitializeComponent();
 
@@ -97,7 +86,7 @@ public partial class CompareTablesForm : Form
     /// <summary>
     /// 异步开始对比
     /// </summary>
-    private void StartCompare()
+    private async void StartCompare()
     {
         dgvDifferences.DataSource = null;
         dgvDifferences.Rows.Clear();
@@ -110,95 +99,91 @@ public partial class CompareTablesForm : Form
         btnCopyScript.Enabled = false;
         btnRefresh.Enabled = false;
 
-        Task.Run(() =>
+        try
         {
-            try
+            var srcDA = ProxyHelper.CreateDataAccess(_srcAccount);
+            var tgtDA = ProxyHelper.CreateDataAccess(_tgtAccount);
+            if (srcDA == null || tgtDA == null)
             {
-                var srcConnStr = BuildConnString(_srcServer, _srcDbName, _srcUser, _srcPassword);
-                var tgtConnStr = BuildConnString(_tgtServer, _tgtDbName, _tgtUser, _tgtPassword);
+                MessageBox.Show("创建数据访问失败！源/目标账套配置无效。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
-                using var srcConn = new SqlConnection(srcConnStr);
-                using var tgtConn = new SqlConnection(tgtConnStr);
-                srcConn.Open();
-                tgtConn.Open();
+            var differences = new List<DifferenceRow>();
+            int total = _tables.Count;
+            int current = 0;
 
-                var differences = new List<DifferenceRow>();
-                int total = _tables.Count;
-                int current = 0;
-
-                foreach (var tableName in _tables)
+            foreach (var tableName in _tables)
+            {
+                current++;
+                var percent = (int)((double)current / total * 100);
+                this.Invoke(new Action(() =>
                 {
-                    current++;
-                    var percent = (int)((double)current / total * 100);
-                    this.Invoke(new Action(() =>
+                    progressBar.Value = percent;
+                    lblProgress.Text = $"对比中：{tableName} ({current}/{total})";
+                }));
+
+                try
+                {
+                    var srcCols = await GetTableColumnsAsync(srcDA, tableName);
+                    var tgtCols = await GetTableColumnsAsync(tgtDA, tableName);
+
+                    if (srcCols == null || srcCols.Count == 0)
                     {
-                        progressBar.Value = percent;
-                        lblProgress.Text = $"对比中：{tableName} ({current}/{total})";
-                    }));
-
-                    try
-                    {
-                        var srcCols = GetTableColumns(srcConn, tableName);
-                        var tgtCols = GetTableColumns(tgtConn, tableName);
-
-                        if (srcCols == null || srcCols.Count == 0)
-                        {
-                            // 源库表不存在，跳过
-                            continue;
-                        }
-
-                        if (tgtCols == null || tgtCols.Count == 0)
-                        {
-                            // 目标库表不存在 → 整表 CREATE
-                            var createScript = GenerateCreateTableScript(srcCols, tableName);
-                            differences.Add(new DifferenceRow
-                            {
-                                TableName = tableName,
-                                DiffType = "缺表",
-                                ColumnName = "",
-                                SrcType = "",
-                                TgtType = "",
-                                Script = createScript
-                            });
-                        }
-                        else
-                        {
-                            // 两边都存在，对比字段
-                            CompareColumns(srcCols, tgtCols, tableName, differences);
-                        }
+                        // 源库表不存在，跳过
+                        continue;
                     }
-                    catch (Exception ex)
+
+                    if (tgtCols == null || tgtCols.Count == 0)
                     {
-                        Debug.WriteLine($"对比表 {tableName} 失败: {ex.Message}");
+                        // 目标库表不存在 → 整表 CREATE
+                        var createScript = GenerateCreateTableScript(srcCols, tableName);
+                        differences.Add(new DifferenceRow
+                        {
+                            TableName = tableName,
+                            DiffType = "缺表",
+                            ColumnName = "",
+                            SrcType = "",
+                            TgtType = "",
+                            Script = createScript
+                        });
+                    }
+                    else
+                    {
+                        // 两边都存在，对比字段
+                        CompareColumns(srcCols, tgtCols, tableName, differences);
                     }
                 }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"对比表 {tableName} 失败: {ex.Message}");
+                }
+            }
 
-                this.Invoke(new Action(() =>
-                {
-                    RenderDifferences(differences);
-                }));
-            }
-            catch (Exception ex)
+            this.Invoke(new Action(() =>
             {
-                this.Invoke(new Action(() =>
-                {
-                    lblSummary.Text = "对比失败";
-                    lblSummary.ForeColor = Color.Red;
-                    lblProgress.Text = ex.Message;
-                    MessageBox.Show($"对比失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }));
-            }
-            finally
+                RenderDifferences(differences);
+            }));
+        }
+        catch (Exception ex)
+        {
+            this.Invoke(new Action(() =>
             {
-                this.Invoke(new Action(() =>
-                {
-                    btnRefresh.Enabled = true;
-                }));
-            }
-        });
+                lblSummary.Text = "对比失败";
+                lblSummary.ForeColor = Color.Red;
+                lblProgress.Text = ex.Message;
+                MessageBox.Show($"对比失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }));
+        }
+        finally
+        {
+            this.Invoke(new Action(() =>
+            {
+                btnRefresh.Enabled = true;
+            }));
+        }
     }
 
-    /// <summary>
     /// <summary>
     /// 差异全量数据，供筛选使用。
     /// </summary>
@@ -395,23 +380,20 @@ public partial class CompareTablesForm : Form
     }
 
     /// <summary>
-    /// 获取表的列信息（不存在返回 null）
+    /// 获取表的列信息（不存在返回 null）。
+    /// 直连和 Http 模式统一通过 IDataAccess + ProxyHelper 执行。
     /// </summary>
-    private List<ColumnInfo>? GetTableColumns(SqlConnection conn, string tableName)
+    private async Task<List<ColumnInfo>?> GetTableColumnsAsync(IDataAccess da, string tableName)
     {
         try
         {
             // 先检查表是否存在
-            var existsSql = "SELECT 1 FROM sys.objects WHERE name = @name AND type = 'U'";
-            using (var existsCmd = new SqlCommand(existsSql, conn))
-            {
-                existsCmd.Parameters.AddWithValue("@name", tableName);
-                using var reader = existsCmd.ExecuteReader();
-                if (!reader.Read()) return null;
-            }
+            var existsSql = $"SELECT 1 FROM sys.objects WHERE name = '{ProxyHelper.EscapeSql(tableName)}' AND type = 'U'";
+            var existsDt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, existsSql);
+            if (existsDt.Rows.Count == 0) return null;
 
             // 查询列信息
-            var sql = @"
+            var sql = $@"
 SELECT c.name,
        t.name AS data_type,
        c.max_length,
@@ -422,23 +404,21 @@ SELECT c.name,
 FROM sys.columns c
 JOIN sys.types t ON c.user_type_id = t.user_type_id
 LEFT JOIN sys.default_constraints dc ON c.default_object_id = dc.object_id
-WHERE c.object_id = OBJECT_ID(@tableName)
+WHERE c.object_id = OBJECT_ID('{ProxyHelper.EscapeSql(tableName)}')
 ORDER BY c.column_id";
 
-            using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@tableName", tableName);
-            using var colReader = cmd.ExecuteReader();
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
 
             var cols = new List<ColumnInfo>();
-            while (colReader.Read())
+            foreach (DataRow row in dt.Rows)
             {
-                var colName = colReader["name"]?.ToString() ?? "";
-                var dataType = colReader["data_type"]?.ToString() ?? "";
-                var maxLen = Convert.ToInt32(colReader["max_length"]);
-                var precision = Convert.ToInt32(colReader["precision"]);
-                var scale = Convert.ToInt32(colReader["scale"]);
-                var isNullable = Convert.ToBoolean(colReader["is_nullable"]);
-                var defaultValue = colReader["default_value"]?.ToString() ?? "";
+                var colName = row["name"]?.ToString() ?? "";
+                var dataType = row["data_type"]?.ToString() ?? "";
+                var maxLen = Convert.ToInt32(row["max_length"]);
+                var precision = Convert.ToInt32(row["precision"]);
+                var scale = Convert.ToInt32(row["scale"]);
+                var isNullable = Convert.ToBoolean(row["is_nullable"]);
+                var defaultValue = row["default_value"]?.ToString() ?? "";
 
                 var typeDecl = SqlDataTypeFormatter.Format(dataType, maxLen, precision, scale);
 
@@ -493,8 +473,12 @@ ORDER BY c.column_id";
             return;
         }
 
+        var tgtDesc = _tgtAccount != null
+            ? $"{_tgtAccount.Database} / {_tgtAccount.DatabaseName}"
+            : "未配置";
+        var modeDesc = _tgtAccount?.ConnectionMode == DataAccessMode.Http ? "（Http 代理）" : "（直连）";
         var confirm = MessageBox.Show(
-            $"即将在目标库执行 {selectedScripts.Count} 条脚本，确定吗？\n\n目标库：{_tgtServer} / {_tgtDbName}",
+            $"即将在目标库执行 {selectedScripts.Count} 条脚本，确定吗？\n\n目标库：{tgtDesc} {modeDesc}",
             "确认执行", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (confirm != DialogResult.Yes) return;
 
@@ -504,7 +488,7 @@ ORDER BY c.column_id";
         progressBar.Value = 0;
         lblProgress.Text = "开始执行脚本...";
 
-        var (successCount, failCount, errorMsg) = await Task.Run(() => ExecuteScripts(selectedScripts));
+        var (successCount, failCount, errorMsg) = await ExecuteScriptsAsync(selectedScripts);
 
         progressBar.Value = 100;
         if (failCount == 0)
@@ -526,18 +510,21 @@ ORDER BY c.column_id";
     }
 
     /// <summary>
-    /// 同步执行多条脚本，返回 (成功数, 失败数, 错误信息)
+    /// 异步执行多条脚本，返回 (成功数, 失败数, 错误信息)。
+    /// 直连和 Http 模式统一通过 IDataAccess + ProxyHelper 执行。
     /// </summary>
-    private (int success, int fail, string error) ExecuteScripts(List<string> scripts)
+    private async Task<(int success, int fail, string error)> ExecuteScriptsAsync(List<string> scripts)
     {
         int success = 0, fail = 0;
         string lastError = "";
 
         try
         {
-            var connStr = BuildConnString(_tgtServer, _tgtDbName, _tgtUser, _tgtPassword);
-            using var conn = new SqlConnection(connStr);
-            conn.Open();
+            var tgtDA = ProxyHelper.CreateDataAccess(_tgtAccount);
+            if (tgtDA == null)
+            {
+                return (0, scripts.Count, "目标账套配置无效，无法创建数据访问");
+            }
 
             int total = scripts.Count;
             for (int i = 0; i < scripts.Count; i++)
@@ -552,8 +539,7 @@ ORDER BY c.column_id";
 
                 try
                 {
-                    using var cmd = new SqlCommand(script, conn);
-                    cmd.ExecuteNonQuery();
+                    await tgtDA.ExecuteNonQueryAsync(script);
                     success++;
                 }
                 catch (Exception ex)
@@ -638,16 +624,6 @@ ORDER BY c.column_id";
             }
         }
         return scripts;
-    }
-
-    private string BuildConnString(string server, string dbName, string user, string password)
-    {
-        if (string.IsNullOrEmpty(user))
-        {
-            return $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;";
-        }
-        var decrypted = EncryptionService.Decrypt(password);
-        return $"Server={server};Database={dbName};User Id={user};Password={decrypted};TrustServerCertificate=True;";
     }
 
     /// <summary>
