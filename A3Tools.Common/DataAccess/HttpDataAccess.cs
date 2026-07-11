@@ -225,5 +225,59 @@ namespace A3Tools.Common.DataAccess
             }
             return null;
         }
+
+        /// <summary>
+        /// Http 代理模式 BulkCopy：每 BATCH_SIZE 行一条 INSERT INTO ... VALUES (...),(...),...
+        /// 一次 HTTP roundtrip 插 BATCH_SIZE 行（默认 500），几万行只要 100 次 roundtrip（10 秒级别）。
+        /// 如果一行 INSERT 失败（字符串超长/类型转换），整批回滚，调用方应捕获并定位数据。
+        /// </summary>
+        public async Task<int> BulkCopyAsync(ResultTable table, string tableName, CancellationToken ct = default)
+        {
+            if (table.Rows.Count == 0) return 0;
+
+            const int BATCH_SIZE = 500;
+            var colNames = string.Join(", ", table.Columns.Select(c => $"[{c.Name}]"));
+            int totalCopied = 0;
+
+            for (int offset = 0; offset < table.Rows.Count; offset += BATCH_SIZE)
+            {
+                ct.ThrowIfCancellationRequested();
+                int take = Math.Min(BATCH_SIZE, table.Rows.Count - offset);
+
+                var valuesList = new List<string>(take);
+                for (int i = 0; i < take; i++)
+                {
+                    var row = table.Rows[offset + i];
+                    valuesList.Add("(" + string.Join(", ", row.Select(FormatSqlValueForBulk)) + ")");
+                }
+
+                var sql = $"INSERT INTO dbo.[{tableName}] ({colNames}) VALUES {string.Join(", ", valuesList)}";
+                await ExecuteNonQueryAsync(sql, ct);
+                totalCopied += take;
+            }
+
+            return totalCopied;
+        }
+
+        /// <summary>
+        /// 把 .NET 值格式化为 SQL 字面量（与 ProxyHelper.FormatSqlValue 同款，BulkCopy 专用内联避免跨包调用）
+        /// </summary>
+        private static string FormatSqlValueForBulk(object? val)
+        {
+            if (val == null || val == DBNull.Value)
+                return "NULL";
+            if (val is bool b)
+                return b ? "1" : "0";
+            if (val is DateTime dt)
+                return $"'{dt:yyyy-MM-dd HH:mm:ss.fff}'";
+            if (val is decimal || val is double || val is float || val is int || val is long || val is short || val is byte || val is sbyte || val is uint || val is ulong || val is ushort)
+                return Convert.ToString(val, System.Globalization.CultureInfo.InvariantCulture)!;
+            if (val is Guid g)
+                return $"'{g}'";
+            if (val is byte[] bytes)
+                return "0x" + Convert.ToHexString(bytes);
+            // 默认按字符串处理（转义单引号）
+            return $"'{val.ToString()!.Replace("'", "''")}'";
+        }
     }
 }

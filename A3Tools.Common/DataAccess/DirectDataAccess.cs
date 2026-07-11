@@ -284,5 +284,33 @@ namespace A3Tools.Common.DataAccess
             }
             return columns;
         }
+
+        /// <summary>
+        /// 直连模式 BulkCopy：直接 SqlBulkCopy.WriteToServerAsync。
+        /// 性能等价于老的 TableCopyService.CopyTableData 路径，几万行 1-2 秒搞定。
+        /// </summary>
+        public async Task<int> BulkCopyAsync(ResultTable table, string tableName, CancellationToken ct = default)
+        {
+            if (table.Rows.Count == 0) return 0;
+
+            // ResultTable 转 DataTable（SqlBulkCopy 只吃 DataTable/DataReader）
+            var dt = new DataTable();
+            foreach (var col in table.Columns)
+                dt.Columns.Add(col.Name, typeof(object));
+            foreach (var row in table.Rows)
+                dt.Rows.Add(row.Select(v => v ?? DBNull.Value).ToArray());
+
+            using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync(ct);
+            using var bulk = new SqlBulkCopy(conn)
+            {
+                DestinationTableName = $"dbo.[{tableName}]"
+            };
+            foreach (var col in table.Columns)
+                bulk.ColumnMappings.Add(col.Name, col.Name);
+
+            await bulk.WriteToServerAsync(dt, ct);
+            return dt.Rows.Count;
+        }
     }
 }

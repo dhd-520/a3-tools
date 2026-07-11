@@ -1,6 +1,7 @@
-﻿using System.Data;
+using System.Data;
 using System.Diagnostics;
 using System.Windows.Forms;
+using A3Tools.Common.DataAccess;
 using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
@@ -12,6 +13,10 @@ public partial class CrossDbCopyTableForm : Form
 {
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
+
+    // 源/目标账套引用（用于判断 Http 模式和创建 IDataAccess）
+    private Account? _srcAccount;
+    private Account? _tgtAccount;
 
     // 对象类型常量
     private static readonly Dictionary<string, string> ObjectTypeMap = new()
@@ -94,6 +99,34 @@ public partial class CrossDbCopyTableForm : Form
         };
     }
 
+    // ==================== IDataAccess 辅助方法 ====================
+
+    /// <summary>
+    /// 根据源库账套创建 IDataAccess（Http 代理或直连）。无账套时返回 null。
+    /// </summary>
+    private IDataAccess? GetSourceDA()
+    {
+        return ProxyHelper.CreateDataAccess(_srcAccount);
+    }
+
+    /// <summary>
+    /// 根据目标库账套创建 IDataAccess（Http 代理或直连）。无账套时返回 null。
+    /// </summary>
+    private IDataAccess? GetTargetDA()
+    {
+        return ProxyHelper.CreateDataAccess(_tgtAccount);
+    }
+
+    /// <summary>
+    /// 判断源库是否走 Http 代理
+    /// </summary>
+    private bool IsSourceHttp() => ProxyHelper.IsHttp(_srcAccount);
+
+    /// <summary>
+    /// 判断目标库是否走 Http 代理
+    /// </summary>
+    private bool IsTargetHttp() => ProxyHelper.IsHttp(_tgtAccount);
+
     private void InitObjectTypeCombo()
     {
         cboObjectType.Items.Clear();
@@ -161,7 +194,10 @@ public partial class CrossDbCopyTableForm : Form
         dgvSearchResults.DataSource = null;
         btnSearch.Enabled = false;
 
-        Task.Run(() =>
+        var srcDA = GetSourceDA();
+        var isHttp = IsSourceHttp();
+
+        Task.Run(async () =>
         {
             try
             {
@@ -170,12 +206,31 @@ public partial class CrossDbCopyTableForm : Form
                 var user = txtSourceUser.Text.Trim();
                 var password = txtSourcePassword.Text;
 
-                var connString = string.IsNullOrEmpty(user)
-                    ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
-                    : $"Server={server};Database={dbName};User Id={user};Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
+                DataTable dt;
 
-                // 按对象类型查询 sys.objects（过滤系统对象）
-                var sql = @"
+                if (isHttp && srcDA != null)
+                {
+                    // Http 代理模式：用 IDataAccess 执行查询，SQL 用字符串拼接
+                    var sql = $@"
+SELECT o.name AS 对象名称,
+       o.type_desc AS 类型描述,
+       o.create_date AS 创建时间,
+       o.modify_date AS 修改时间
+FROM sys.objects o
+WHERE o.type = '{ProxyHelper.EscapeSql(objectType)}'
+  AND o.is_ms_shipped = 0
+  AND o.name LIKE '%{ProxyHelper.EscapeSql(keyword)}%'
+ORDER BY o.name";
+                    dt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+                }
+                else
+                {
+                    // 直连模式：原逻辑
+                    var connString = string.IsNullOrEmpty(user)
+                        ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
+                        : $"Server={server};Database={dbName};User Id={user};Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
+
+                    var sql = @"
 SELECT o.name AS 对象名称,
        o.type_desc AS 类型描述,
        o.create_date AS 创建时间,
@@ -186,13 +241,14 @@ WHERE o.type = @objType
   AND o.name LIKE @keyword
 ORDER BY o.name";
 
-                using var conn = new Microsoft.Data.SqlClient.SqlConnection(connString);
-                using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@objType", objectType);
-                cmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
-                using var adapter = new Microsoft.Data.SqlClient.SqlDataAdapter(cmd);
-                var dt = new DataTable();
-                adapter.Fill(dt);
+                    using var conn = new Microsoft.Data.SqlClient.SqlConnection(connString);
+                    using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
+                    cmd.Parameters.AddWithValue("@objType", objectType);
+                    cmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
+                    using var adapter = new Microsoft.Data.SqlClient.SqlDataAdapter(cmd);
+                    dt = new DataTable();
+                    adapter.Fill(dt);
+                }
 
                 this.Invoke(new Action(() =>
                 {
@@ -293,7 +349,12 @@ ORDER BY o.name";
         btnFindMissing.Enabled = false;
         btnSearch.Enabled = false;
 
-        Task.Run(() =>
+        var srcDA = GetSourceDA();
+        var tgtDA = GetTargetDA();
+        var srcIsHttp = IsSourceHttp();
+        var tgtIsHttp = IsTargetHttp();
+
+        Task.Run(async () =>
         {
             try
             {
@@ -307,12 +368,32 @@ ORDER BY o.name";
                 var tgtUser = txtTargetUser.Text.Trim();
                 var tgtPassword = txtTargetPassword.Text;
 
-                var srcConnStr = BuildConnString(srcServer, srcDbName, srcUser, srcPassword);
-                var tgtConnStr = BuildConnString(tgtServer, tgtDbName, tgtUser, tgtPassword);
-
-                // 1. 取源库当前类型全部对象（含元数据，筛选 is_ms_shipped=0）
                 var hasKeyword = !string.IsNullOrWhiteSpace(keyword);
-                var srcSql = @"
+
+                DataTable srcData;
+                int srcTotal;
+                HashSet<string> tgtNames;
+
+                if (srcIsHttp && srcDA != null)
+                {
+                    // Http 代理模式 - 源库
+                    var srcSql = $@"
+SELECT o.name AS 对象名称,
+       o.type_desc AS 类型描述,
+       o.create_date AS 创建时间,
+       o.modify_date AS 修改时间
+FROM sys.objects o
+WHERE o.type = '{ProxyHelper.EscapeSql(objectType)}'
+  AND o.is_ms_shipped = 0" + (hasKeyword ? $"  AND o.name LIKE '%{ProxyHelper.EscapeSql(keyword)}%'" : "") + @"
+ORDER BY o.name";
+                    srcData = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, srcSql);
+                    srcTotal = srcData.Rows.Count;
+                }
+                else
+                {
+                    // 直连模式 - 源库
+                    var srcConnStr = BuildConnString(srcServer, srcDbName, srcUser, srcPassword);
+                    var srcSql = @"
 SELECT o.name AS 对象名称,
        o.type_desc AS 类型描述,
        o.create_date AS 创建时间,
@@ -322,36 +403,56 @@ WHERE o.type = @objType
   AND o.is_ms_shipped = 0" + (hasKeyword ? "  AND o.name LIKE @keyword" : "") + @"
 ORDER BY o.name";
 
-                var srcData = new DataTable();
-                int srcTotal = 0;
-                using (var conn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr))
-                {
-                    conn.Open();
-                    using var cmd = new Microsoft.Data.SqlClient.SqlCommand(srcSql, conn);
-                    cmd.Parameters.AddWithValue("@objType", objectType);
-                    if (hasKeyword) cmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
-                    using var adapter = new Microsoft.Data.SqlClient.SqlDataAdapter(cmd);
-                    adapter.Fill(srcData);
-                    srcTotal = srcData.Rows.Count;
+                    srcData = new DataTable();
+                    using (var conn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr))
+                    {
+                        conn.Open();
+                        using var cmd = new Microsoft.Data.SqlClient.SqlCommand(srcSql, conn);
+                        cmd.Parameters.AddWithValue("@objType", objectType);
+                        if (hasKeyword) cmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
+                        using var adapter = new Microsoft.Data.SqlClient.SqlDataAdapter(cmd);
+                        adapter.Fill(srcData);
+                        srcTotal = srcData.Rows.Count;
+                    }
                 }
 
-                // 2. 取目标库当前类型全部对象名（仅 name）
-                var tgtSql = @"
+                if (tgtIsHttp && tgtDA != null)
+                {
+                    // Http 代理模式 - 目标库
+                    var tgtSql = $@"
+SELECT o.name
+FROM sys.objects o
+WHERE o.type = '{ProxyHelper.EscapeSql(objectType)}'
+  AND o.is_ms_shipped = 0";
+                    var tgtDt = await ProxyHelper.ExecuteQueryToDataTableAsync(tgtDA, tgtSql);
+                    tgtNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (DataRow row in tgtDt.Rows)
+                    {
+                        var n = row["name"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(n)) tgtNames.Add(n);
+                    }
+                }
+                else
+                {
+                    // 直连模式 - 目标库
+                    var tgtConnStr = BuildConnString(tgtServer, tgtDbName, tgtUser, tgtPassword);
+                    var tgtSql = @"
 SELECT o.name
 FROM sys.objects o
 WHERE o.type = @objType
   AND o.is_ms_shipped = 0";
-                var tgtNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                using (var conn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr))
-                {
-                    conn.Open();
-                    using var cmd = new Microsoft.Data.SqlClient.SqlCommand(tgtSql, conn);
-                    cmd.Parameters.AddWithValue("@objType", objectType);
-                    using var reader = cmd.ExecuteReader();
-                    while (reader.Read())
+                    tgtNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var conn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr))
                     {
-                        var n = reader["name"]?.ToString();
-                        if (!string.IsNullOrWhiteSpace(n)) tgtNames.Add(n);
+                        conn.Open();
+                        using var cmd = new Microsoft.Data.SqlClient.SqlCommand(tgtSql, conn);
+                        cmd.Parameters.AddWithValue("@objType", objectType);
+                        using var reader = cmd.ExecuteReader();
+                        while (reader.Read())
+                        {
+                            var n = reader["name"]?.ToString();
+                            if (!string.IsNullOrWhiteSpace(n)) tgtNames.Add(n);
+                        }
                     }
                 }
 
@@ -453,7 +554,7 @@ WHERE o.type = @objType
     }
 
     /// <summary>
-    /// 对象类型代码 → 中文显示名
+    /// 对象类型代码 -> 中文显示名
     /// </summary>
     private string GetTypeDisplay(string objectType)
     {
@@ -667,6 +768,7 @@ WHERE o.type = @objType
             txtSourceDbName.Text = _currentAccount.DatabaseName ?? "";
             txtSourceUser.Text = _currentAccount.DbUser ?? "";
             txtSourcePassword.Text = _currentAccount.DbPassword ?? "";
+            _srcAccount = _currentAccount;
         }
     }
 
@@ -678,6 +780,8 @@ WHERE o.type = @objType
     private void LoadPresetAccounts()
     {
         var preset = _context.GetToolDatabasePreset();
+        _srcAccount = preset.SourceAccount;
+        _tgtAccount = preset.TargetAccount;
         ApplyAccountToDatabaseFields(preset.SourceAccount, true);
         ApplyAccountToDatabaseFields(preset.TargetAccount, false);
     }
@@ -799,6 +903,7 @@ WHERE o.type = @objType
                         txtSourceDbName.Text = selectedAcc.DatabaseName ?? "";
                         txtSourceUser.Text = selectedAcc.DbUser ?? "";
                         txtSourcePassword.Text = selectedAcc.DbPassword ?? "";
+                        _srcAccount = selectedAcc;
                     }
                     else
                     {
@@ -806,6 +911,7 @@ WHERE o.type = @objType
                         txtTargetDbName.Text = selectedAcc.DatabaseName ?? "";
                         txtTargetUser.Text = selectedAcc.DbUser ?? "";
                         txtTargetPassword.Text = selectedAcc.DbPassword ?? "";
+                        _tgtAccount = selectedAcc;
                     }
                     dialog.Close();
                 }
@@ -852,7 +958,7 @@ WHERE o.type = @objType
         lblProgress.Text = "正在连接源数据库...";
         progressBar.Value = 10;
 
-        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text))
+        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text, isSource: true))
         {
             MessageBox.Show("源数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -863,7 +969,7 @@ WHERE o.type = @objType
         lblProgress.Text = "正在连接目标数据库...";
         progressBar.Value = 30;
 
-        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text))
+        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text, isSource: false))
         {
             MessageBox.Show("目标数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -893,8 +999,17 @@ WHERE o.type = @objType
         }
     }
 
-    private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password)
+    private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password, bool isSource)
     {
+        // 判断是否走 Http 代理
+        var isHttp = isSource ? IsSourceHttp() : IsTargetHttp();
+        if (isHttp)
+        {
+            var da = isSource ? GetSourceDA() : GetTargetDA();
+            return await ProxyHelper.TestConnectionAsync(da);
+        }
+
+        // 直连模式
         return await Task.Run(() =>
         {
             try
@@ -917,115 +1032,177 @@ WHERE o.type = @objType
         string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
         List<string> objectNames, string objectType, bool deleteIfExists)
     {
-        return await Task.Run(() =>
+        var srcDA = GetSourceDA();
+        var tgtDA = GetTargetDA();
+        var srcIsHttp = IsSourceHttp();
+        var tgtIsHttp = IsTargetHttp();
+
+        // 直连模式的连接对象（Http 模式下为 null）
+        Microsoft.Data.SqlClient.SqlConnection? srcConn = null;
+        Microsoft.Data.SqlClient.SqlConnection? tgtConn = null;
+
+        try
         {
-            try
+            if (srcIsHttp && srcDA != null)
             {
+                // Http 模式 - 无需 SqlConnection
+            }
+            else
+            {
+                // 直连模式
                 var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.Decrypt(srcPassword) + ";TrustServerCertificate=True;";
-                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
-
-                using var srcConn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr);
-                using var tgtConn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr);
+                srcConn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr);
                 srcConn.Open();
+            }
+
+            if (tgtIsHttp && tgtDA != null)
+            {
+                // Http 模式 - 无需 SqlConnection
+            }
+            else
+            {
+                // 直连模式
+                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
+                tgtConn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr);
                 tgtConn.Open();
+            }
 
-                int total = objectNames.Count;
-                int current = 0;
+            int total = objectNames.Count;
+            int current = 0;
 
-                foreach (var objectName in objectNames)
+            foreach (var objectName in objectNames)
+            {
+                current++;
+                var progress = 50 + (current * 50 / total);
+                this.Invoke(new Action(() =>
                 {
-                    current++;
-                    var progress = 50 + (current * 50 / total);
+                    progressBar.Value = progress;
+                    lblProgress.Text = "正在复制：" + objectName + " (" + current + "/" + total + ")";
+                }));
+
+                string? script = objectType switch
+                {
+                    "U" => await GenerateCreateTableScriptAsync(srcDA, srcConn, objectName, srcIsHttp),
+                    "V" => await GenerateCreateViewScriptAsync(srcDA, srcConn, objectName, srcIsHttp),
+                    "TF" => await GenerateCreateFunctionScriptAsync(srcDA, srcConn, objectName, srcIsHttp),
+                    "FN" => await GenerateCreateFunctionScriptAsync(srcDA, srcConn, objectName, srcIsHttp),
+                    "P" => await GenerateCreateProcScriptAsync(srcDA, srcConn, objectName, srcIsHttp),
+                    _ => null
+                };
+
+                if (string.IsNullOrEmpty(script))
+                {
                     this.Invoke(new Action(() =>
                     {
-                        progressBar.Value = progress;
-                        lblProgress.Text = "正在复制：" + objectName + " (" + current + "/" + total + ")";
+                        MessageBox.Show("无法获取 " + objectName + " 的定义（对象不存在或无权访问）。", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }));
+                    continue;
+                }
 
-                    string? script = objectType switch
+                // 删除目标已存在对象
+                if (deleteIfExists)
+                {
+                    var dropScript = GetDropScript(objectName, objectType);
+                    if (tgtIsHttp && tgtDA != null)
                     {
-                        "U" => GenerateCreateTableScript(srcConn, objectName),
-                        "V" => GenerateCreateViewScript(srcConn, objectName),
-                        "TF" => GenerateCreateFunctionScript(srcConn, objectName),
-                        "FN" => GenerateCreateFunctionScript(srcConn, objectName),
-                        "P" => GenerateCreateProcScript(srcConn, objectName),
-                        _ => null
-                    };
-
-                    if (string.IsNullOrEmpty(script))
-                    {
-                        this.Invoke(new Action(() =>
-                        {
-                            MessageBox.Show("无法获取 " + objectName + " 的定义（对象不存在或无权访问）。", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        }));
-                        continue;
+                        await ProxyHelper.ExecuteNonQueryAsync(tgtDA, dropScript);
                     }
-
-                    // 删除目标已存在对象
-                    if (deleteIfExists)
+                    else if (tgtConn != null)
                     {
-                        var dropScript = GetDropScript(objectName, objectType);
                         using var dropCmd = new Microsoft.Data.SqlClient.SqlCommand(dropScript, tgtConn);
                         dropCmd.ExecuteNonQuery();
                     }
+                }
+                else
+                {
+                    // 检查是否存在
+                    bool exists;
+                    if (tgtIsHttp && tgtDA != null)
+                    {
+                        exists = await ObjectExistsAsync(tgtDA, objectName, objectType);
+                    }
+                    else if (tgtConn != null)
+                    {
+                        exists = ObjectExists(tgtConn, objectName, objectType);
+                    }
                     else
                     {
-                        // 检查是否存在
-                        if (ObjectExists(tgtConn, objectName, objectType))
-                        {
-                            Debug.WriteLine($"跳过已存在的对象: {objectName}");
-                            continue;
-                        }
+                        exists = false;
                     }
 
-                    // 创建目标对象
-                    using var createCmd = new Microsoft.Data.SqlClient.SqlCommand(script, tgtConn);
-                    createCmd.ExecuteNonQuery();
-
-                    // 如果是表结构，同时复制触发器
-                    if (objectType == "U")
+                    if (exists)
                     {
-                        this.Invoke(new Action(() =>
-                        {
-                            lblProgress.Text = $"正在复制触发器... ({objectName})";
-                        }));
-
-                        var triggers = GetTriggersForTable(srcConn, objectName);
-                        Debug.WriteLine($"表 {objectName} 有 {triggers.Count} 个触发器");
-
-                        if (triggers.Count == 0)
-                        {
-                            Debug.WriteLine($"警告: 表 {objectName} 没有找到触发器（或查询失败）");
-                        }
-
-                        foreach (var triggerScript in triggers)
-                        {
-                            try
-                            {
-                                Debug.WriteLine($"完整触发器脚本:\n{triggerScript}\n=========");
-                                using var triggerCmd = new Microsoft.Data.SqlClient.SqlCommand(triggerScript, tgtConn);
-                                triggerCmd.ExecuteNonQuery();
-                                Debug.WriteLine("触发器执行成功");
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"复制触发器失败: {ex.Message}");
-                            }
-                        }
+                        Debug.WriteLine($"跳过已存在的对象: {objectName}");
+                        continue;
                     }
                 }
 
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.Invoke(new Action(() =>
+                // 创建目标对象
+                if (tgtIsHttp && tgtDA != null)
                 {
-                    MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }));
-                return false;
+                    await ProxyHelper.ExecuteNonQueryAsync(tgtDA, script);
+                }
+                else if (tgtConn != null)
+                {
+                    using var createCmd = new Microsoft.Data.SqlClient.SqlCommand(script, tgtConn);
+                    createCmd.ExecuteNonQuery();
+                }
+
+                // 如果是表结构，同时复制触发器
+                if (objectType == "U")
+                {
+                    this.Invoke(new Action(() =>
+                    {
+                        lblProgress.Text = $"正在复制触发器... ({objectName})";
+                    }));
+
+                    var triggers = await GetTriggersForTableAsync(srcDA, srcConn, objectName, srcIsHttp);
+                    Debug.WriteLine($"表 {objectName} 有 {triggers.Count} 个触发器");
+
+                    if (triggers.Count == 0)
+                    {
+                        Debug.WriteLine($"警告: 表 {objectName} 没有找到触发器（或查询失败）");
+                    }
+
+                    foreach (var triggerScript in triggers)
+                    {
+                        try
+                        {
+                            Debug.WriteLine($"完整触发器脚本:\n{triggerScript}\n=========");
+                            if (tgtIsHttp && tgtDA != null)
+                            {
+                                await ProxyHelper.ExecuteNonQueryAsync(tgtDA, triggerScript);
+                            }
+                            else if (tgtConn != null)
+                            {
+                                using var triggerCmd = new Microsoft.Data.SqlClient.SqlCommand(triggerScript, tgtConn);
+                                triggerCmd.ExecuteNonQuery();
+                            }
+                            Debug.WriteLine("触发器执行成功");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"复制触发器失败: {ex.Message}");
+                        }
+                    }
+                }
             }
-        });
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            this.Invoke(new Action(() =>
+            {
+                MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }));
+            return false;
+        }
+        finally
+        {
+            srcConn?.Dispose();
+            tgtConn?.Dispose();
+        }
     }
 
     private bool ObjectExists(Microsoft.Data.SqlClient.SqlConnection conn, string objectName, string type)
@@ -1036,6 +1213,16 @@ WHERE o.type = @objType
         cmd.Parameters.AddWithValue("@type", type);
         using var reader = cmd.ExecuteReader();
         return reader.Read();
+    }
+
+    /// <summary>
+    /// Http 模式：通过 IDataAccess 检查对象是否存在
+    /// </summary>
+    private async Task<bool> ObjectExistsAsync(IDataAccess da, string objectName, string type)
+    {
+        var sql = $"SELECT 1 FROM sys.objects WHERE name = '{ProxyHelper.EscapeSql(objectName)}' AND type = '{ProxyHelper.EscapeSql(type)}'";
+        var result = await ProxyHelper.ExecuteScalarAsync(da, sql);
+        return result != null && result != DBNull.Value;
     }
 
     private string GetDropScript(string objectName, string type)
@@ -1104,6 +1291,74 @@ WHERE o.type = @objType
         }
     }
 
+    /// <summary>
+    /// 统一入口：根据模式选择直连或 Http 代理生成建表脚本
+    /// </summary>
+    private async Task<string?> GenerateCreateTableScriptAsync(IDataAccess? da, Microsoft.Data.SqlClient.SqlConnection? conn, string tableName, bool isHttp)
+    {
+        if (isHttp && da != null)
+        {
+            return await GenerateCreateTableScriptHttpAsync(da, tableName);
+        }
+        if (conn != null)
+        {
+            return GenerateCreateTableScript(conn, tableName);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Http 模式：通过 IDataAccess 生成建表脚本
+    /// </summary>
+    private async Task<string?> GenerateCreateTableScriptHttpAsync(IDataAccess da, string tableName)
+    {
+        try
+        {
+            var columnsSql = $@"
+                SELECT c.name, t.name AS data_type, c.max_length, c.precision, c.scale, c.is_nullable,
+                       CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key,
+                       dc.definition AS default_value
+                FROM sys.columns c
+                JOIN sys.types t ON c.user_type_id = t.user_type_id
+                LEFT JOIN (SELECT ic.column_id, ic.object_id FROM sys.index_columns ic JOIN sys.indexes i ON ic.index_id = i.index_id AND ic.object_id = i.object_id WHERE i.is_primary_key = 1) pk
+                       ON c.column_id = pk.column_id AND c.object_id = pk.object_id
+                LEFT JOIN sys.default_constraints dc ON c.default_object_id = dc.object_id
+                WHERE c.object_id = OBJECT_ID('{ProxyHelper.EscapeSql(tableName)}')
+                ORDER BY c.column_id";
+
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, columnsSql);
+
+            var columnDefs = new List<string>();
+            foreach (DataRow row in dt.Rows)
+            {
+                var colName = row["name"]?.ToString() ?? "";
+                var dataType = row["data_type"]?.ToString() ?? "";
+                var maxLen = Convert.ToInt32(row["max_length"]);
+                var precision = Convert.ToInt32(row["precision"]);
+                var scale = Convert.ToInt32(row["scale"]);
+                var isNullable = Convert.ToBoolean(row["is_nullable"]);
+                var isPk = Convert.ToInt32(row["is_primary_key"]) == 1;
+                var defaultValue = row["default_value"]?.ToString();
+
+                var colDef = "[" + colName + "] " + SqlDataTypeFormatter.Format(dataType, maxLen, precision, scale);
+                if (!isNullable) colDef += " NOT NULL";
+                else colDef += " NULL";
+                if (!string.IsNullOrEmpty(defaultValue)) colDef += " DEFAULT " + defaultValue;
+                if (isPk) colDef += " PRIMARY KEY";
+                columnDefs.Add(colDef);
+            }
+
+            if (columnDefs.Count == 0) return null;
+
+            return "CREATE TABLE [" + tableName + "] (" + string.Join(", ", columnDefs) + ")";
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("生成建表脚本失败(Http): " + ex.Message);
+            return null;
+        }
+    }
+
     // ========== 触发器 ==========
     private List<string> GetTriggersForTable(Microsoft.Data.SqlClient.SqlConnection conn, string tableName)
     {
@@ -1119,8 +1374,7 @@ WHERE o.type = @objType
                 FROM sys.triggers t
                 JOIN sys.sql_modules m ON t.object_id = m.object_id
                 JOIN sys.objects o ON t.object_id = o.object_id
-                WHERE t.parent_id = OBJECT_ID(@tableName)"
-;
+                WHERE t.parent_id = OBJECT_ID(@tableName)";
             using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@tableName", tableName);
             using var reader = cmd.ExecuteReader();
@@ -1150,8 +1404,7 @@ WHERE o.type = @objType
                         // 没有CREATE TRIGGER，说明definition只有AS之后的部分，需要手动构建
                         var eventSql = @"
                             SELECT te.type_desc FROM sys.trigger_events te
-                            WHERE te.object_id = OBJECT_ID(@triggerName)"
-;
+                            WHERE te.object_id = OBJECT_ID(@triggerName)";
                         using var evtCmd = new Microsoft.Data.SqlClient.SqlCommand(eventSql, conn);
                         evtCmd.Parameters.AddWithValue("@triggerName", triggerName);
                         var events = new List<string>();
@@ -1169,6 +1422,7 @@ WHERE o.type = @objType
                             Debug.WriteLine($"查触发器事件失败: {ex.Message}");
                         }
 
+
                         var eventClause = events.Count > 0
                             ? string.Join(", ", events.Select(e => e.Replace("SQL_TRIGGER_EVENT_", "").Replace("_", " ")).ToArray())
                             : "INSERT";
@@ -1183,6 +1437,89 @@ WHERE o.type = @objType
         catch (Exception ex)
         {
             Debug.WriteLine($"获取触发器失败: {ex.Message}");
+        }
+        return triggers;
+    }
+
+    /// <summary>
+    /// 统一入口：根据模式选择直连或 Http 代理获取触发器
+    /// </summary>
+    private async Task<List<string>> GetTriggersForTableAsync(IDataAccess? da, Microsoft.Data.SqlClient.SqlConnection? conn, string tableName, bool isHttp)
+    {
+        if (isHttp && da != null)
+        {
+            return await GetTriggersForTableHttpAsync(da, tableName);
+        }
+        if (conn != null)
+        {
+            return GetTriggersForTable(conn, tableName);
+        }
+        return new List<string>();
+    }
+
+    /// <summary>
+    /// Http 模式：通过 IDataAccess 获取触发器
+    /// </summary>
+    private async Task<List<string>> GetTriggersForTableHttpAsync(IDataAccess da, string tableName)
+    {
+        var triggers = new List<string>();
+        try
+        {
+            var sql = $@"
+                SELECT 
+                    t.name AS trigger_name,
+                    o.type_desc AS trigger_type,
+                    m.definition
+                FROM sys.triggers t
+                JOIN sys.sql_modules m ON t.object_id = m.object_id
+                JOIN sys.objects o ON t.object_id = o.object_id
+                WHERE t.parent_id = OBJECT_ID('{ProxyHelper.EscapeSql(tableName)}')";
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+
+            foreach (DataRow row in dt.Rows)
+            {
+                var triggerName = row["trigger_name"]?.ToString() ?? "";
+                var triggerType = row["trigger_type"]?.ToString() ?? "SQL_TRIGGER";
+                var triggerDef = row["definition"]?.ToString();
+
+                Debug.WriteLine($"触发器名称: {triggerName}, 类型: {triggerType}");
+
+                if (!string.IsNullOrEmpty(triggerDef))
+                {
+                    var trimmed = triggerDef.Trim();
+
+                    var createIdx = trimmed.ToUpperInvariant().IndexOf("CREATE TRIGGER");
+                    if (createIdx >= 0)
+                    {
+                        var actualScript = trimmed.Substring(createIdx).Trim();
+                        triggers.Add(actualScript);
+                    }
+                    else
+                    {
+                        // 查触发器事件
+                        var eventSql = $@"
+                            SELECT te.type_desc FROM sys.trigger_events te
+                            WHERE te.object_id = OBJECT_ID('{ProxyHelper.EscapeSql(triggerName)}')";
+                        var evtDt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, eventSql);
+                        var events = new List<string>();
+                        foreach (DataRow evtRow in evtDt.Rows)
+                        {
+                            events.Add(evtRow["type_desc"]?.ToString() ?? "");
+                        }
+
+                        var eventClause = events.Count > 0
+                            ? string.Join(", ", events.Select(e => e.Replace("SQL_TRIGGER_EVENT_", "").Replace("_", " ")).ToArray())
+                            : "INSERT";
+
+                        triggers.Add($"CREATE TRIGGER [{triggerName}] ON [{tableName}] FOR {eventClause} AS{trimmed}");
+                    }
+                }
+            }
+            Debug.WriteLine($"找到 {triggers.Count} 个触发器 for {tableName} (Http)");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"获取触发器失败(Http): {ex.Message}");
         }
         return triggers;
     }
@@ -1205,6 +1542,24 @@ WHERE o.type = @objType
         }
     }
 
+    /// <summary>
+    /// 统一入口：根据模式选择直连或 Http 代理生成视图脚本
+    /// </summary>
+    private async Task<string?> GenerateCreateViewScriptAsync(IDataAccess? da, Microsoft.Data.SqlClient.SqlConnection? conn, string viewName, bool isHttp)
+    {
+        if (isHttp && da != null)
+        {
+            var sql = $"SELECT definition FROM sys.sql_modules WHERE object_id = OBJECT_ID('{ProxyHelper.EscapeSql(viewName)}')";
+            var result = await ProxyHelper.ExecuteScalarAsync(da, sql);
+            return result?.ToString();
+        }
+        if (conn != null)
+        {
+            return GenerateCreateViewScript(conn, viewName);
+        }
+        return null;
+    }
+
     // ========== 函数（表值/标量值） ==========
     private string? GenerateCreateFunctionScript(Microsoft.Data.SqlClient.SqlConnection conn, string funcName)
     {
@@ -1223,6 +1578,24 @@ WHERE o.type = @objType
         }
     }
 
+    /// <summary>
+    /// 统一入口：根据模式选择直连或 Http 代理生成函数脚本
+    /// </summary>
+    private async Task<string?> GenerateCreateFunctionScriptAsync(IDataAccess? da, Microsoft.Data.SqlClient.SqlConnection? conn, string funcName, bool isHttp)
+    {
+        if (isHttp && da != null)
+        {
+            var sql = $"SELECT definition FROM sys.sql_modules WHERE object_id = OBJECT_ID('{ProxyHelper.EscapeSql(funcName)}')";
+            var result = await ProxyHelper.ExecuteScalarAsync(da, sql);
+            return result?.ToString();
+        }
+        if (conn != null)
+        {
+            return GenerateCreateFunctionScript(conn, funcName);
+        }
+        return null;
+    }
+
     // ========== 存储过程 ==========
     private string? GenerateCreateProcScript(Microsoft.Data.SqlClient.SqlConnection conn, string procName)
     {
@@ -1239,6 +1612,24 @@ WHERE o.type = @objType
             Debug.WriteLine("生成存储过程脚本失败: " + ex.Message);
             return null;
         }
+    }
+
+    /// <summary>
+    /// 统一入口：根据模式选择直连或 Http 代理生成存储过程脚本
+    /// </summary>
+    private async Task<string?> GenerateCreateProcScriptAsync(IDataAccess? da, Microsoft.Data.SqlClient.SqlConnection? conn, string procName, bool isHttp)
+    {
+        if (isHttp && da != null)
+        {
+            var sql = $"SELECT definition FROM sys.sql_modules WHERE object_id = OBJECT_ID('{ProxyHelper.EscapeSql(procName)}')";
+            var result = await ProxyHelper.ExecuteScalarAsync(da, sql);
+            return result?.ToString();
+        }
+        if (conn != null)
+        {
+            return GenerateCreateProcScript(conn, procName);
+        }
+        return null;
     }
 
     private class ObjectTypeItem

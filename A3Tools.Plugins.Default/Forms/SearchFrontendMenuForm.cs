@@ -430,7 +430,7 @@ public partial class SearchFrontendMenuForm : Form
         dialog.ShowDialog();
     }
 
-    private void BtnSearch_Click(object? sender, EventArgs e)
+    private async void BtnSearch_Click(object? sender, EventArgs e)
     {
         if (_selectedAccount == null)
         {
@@ -475,16 +475,29 @@ SELECT CODE 代码,
 FROM S_MENU
 WHERE FULLNAME LIKE '%{txtSearch.Text.Trim()}%'";
 
+            // Http 代理模式
+            if (ProxyHelper.IsHttp(_selectedAccount))
+            {
+                var da = ProxyHelper.CreateDataAccess(_selectedAccount)!;
+                var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+                dgvResults.DataSource = dt;
+                dgvResults.AutoResizeColumns();
+                lblProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
+                lblProgress.ForeColor = Color.Green;
+                return;
+            }
+
+            // 直连模式
             using var conn = new SqlConnection(connString);
             using var cmd = new SqlCommand(sql, conn);
             using var adapter = new SqlDataAdapter(cmd);
-            var dt = new DataTable();
-            adapter.Fill(dt);
+            var dtDirect = new DataTable();
+            adapter.Fill(dtDirect);
 
-            dgvResults.DataSource = dt;
+            dgvResults.DataSource = dtDirect;
             dgvResults.AutoResizeColumns();
 
-            lblProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
+            lblProgress.Text = $"查询完成，共 {dtDirect.Rows.Count} 条记录";
             lblProgress.ForeColor = Color.Green;
         }
         catch (Exception ex)

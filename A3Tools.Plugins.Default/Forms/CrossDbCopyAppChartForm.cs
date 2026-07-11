@@ -7,6 +7,7 @@ using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
 using Microsoft.Data.SqlClient;
+using A3Tools.Common.DataAccess;
 
 namespace A3Tools.Plugins.Default.Forms;
 
@@ -14,6 +15,8 @@ public partial class CrossDbCopyAppChartForm : Form
 {
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
+    private Account? _srcAccount;
+    private Account? _tgtAccount;
     private System.Data.DataTable? _searchResults;
 
     public CrossDbCopyAppChartForm(IToolContext context, Account? currentAccount)
@@ -96,6 +99,8 @@ public partial class CrossDbCopyAppChartForm : Form
     private void LoadPresetAccounts()
     {
         var preset = _context.GetToolDatabasePreset();
+        _srcAccount = preset.SourceAccount;
+        _tgtAccount = preset.TargetAccount;
         ApplyAccountToDatabaseFields(preset.SourceAccount, true);
         ApplyAccountToDatabaseFields(preset.TargetAccount, false);
     }
@@ -294,21 +299,10 @@ public partial class CrossDbCopyAppChartForm : Form
 
     private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password)
     {
-        return await Task.Run(() =>
-        {
-            try
-            {
-                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
-                using var conn = new SqlConnection(connStr);
-                conn.Open();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("连接测试失败: " + ex.Message);
-                return false;
-            }
-        });
+        // 构造临时账套统一走 ProxyHelper（兼容直连和 Http）
+        var tempAccount = BuildTempAccount(server, dbName, user, password);
+        var da = ProxyHelper.CreateDataAccess(tempAccount);
+        return await ProxyHelper.TestConnectionAsync(da);
     }
 
     private async Task<bool> CopyAppChartAsync(
@@ -316,77 +310,95 @@ public partial class CrossDbCopyAppChartForm : Form
         string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
         string[] codes, bool deleteFirst)
     {
-        return await Task.Run(() =>
+        try
         {
-            try
+            var srcAccount = BuildTempAccount(srcServer, srcDbName, srcUser, srcPassword);
+            var tgtAccount = BuildTempAccount(tgtServer, tgtDbName, tgtUser, tgtPassword);
+            var srcDA = ProxyHelper.CreateDataAccess(srcAccount);
+            var tgtDA = ProxyHelper.CreateDataAccess(tgtAccount);
+            if (srcDA == null || tgtDA == null)
             {
-                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.Decrypt(srcPassword) + ";TrustServerCertificate=True;";
-                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
-
-                using var srcConn = new SqlConnection(srcConnStr);
-                using var tgtConn = new SqlConnection(tgtConnStr);
-                srcConn.Open();
-                tgtConn.Open();
-
-                var total = codes.Length;
-                var successCount = 0;
-                var failCodes = new List<string>();
-
-                for (int i = 0; i < codes.Length; i++)
-                {
-                    var code = codes[i];
-                    var current = i + 1;
-                    lblProgress.Invoke(new Action(() => lblProgress.Text = $"正在处理：{code} ({current}/{total})"));
-                    progressBar.Invoke(new Action(() => progressBar.Value = current * 100 / total));
-
-                    var guid = GetAppChartGuid(srcConn, code);
-                    if (string.IsNullOrEmpty(guid))
-                    {
-                        failCodes.Add(code + "(未找到)");
-                        continue;
-                    }
-
-                    TableCopyService.CopyTableData(srcConn, tgtConn, "S_APP_CHART", "GUID", guid, deleteFirst, "[移动看板]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTDETAIL", "CHARTGUID", guid, deleteFirst, "[移动看板]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTDATASOURCE", "CHARTGUID", guid, deleteFirst, "[移动看板]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTROLE", "CHARTGUID", guid, deleteFirst, "[移动看板]");
-                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, "S_APP_CHARTCMD", "CHARTGUID", guid, deleteFirst, "[移动看板]");
-                    successCount++;
-                }
-
-                progressBar.Invoke(new Action(() => progressBar.Value = 100));
-                this.Invoke(new Action(() =>
-                {
-                    if (failCodes.Count > 0)
-                    {
-                        MessageBox.Show($"完成！成功 {successCount} 个，失败 {failCodes.Count} 个：\n{string.Join("\n", failCodes)}", "部分成功", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                    else
-                    {
-                        MessageBox.Show($"移动看板复制完成！共 {successCount} 个。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    // 不自动关闭，方便继续操作
-                }));
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.Invoke(new Action(() =>
-                {
-                    MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }));
+                MessageBox.Show("创建数据访问失败！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
-        });
+
+            var total = codes.Length;
+            var successCount = 0;
+            var failCodes = new List<string>();
+
+            for (int i = 0; i < codes.Length; i++)
+            {
+                var code = codes[i];
+                var current = i + 1;
+                lblProgress.Text = $"正在处理：{code} ({current}/{total})";
+                progressBar.Value = current * 100 / total;
+                Application.DoEvents();
+
+                var guidObj = await ProxyHelper.ExecuteScalarAsync(srcDA, $"SELECT GUID FROM dbo.S_APP_CHART WHERE CODE = '{ProxyHelper.EscapeSql(code)}'");
+                var guid = guidObj?.ToString();
+                if (string.IsNullOrEmpty(guid))
+                {
+                    failCodes.Add(code + "(未找到)");
+                    continue;
+                }
+
+                await ProxyHelper.CopyTableDataAsync(srcDA, tgtDA, "S_APP_CHART", "GUID", guid, deleteFirst, "[移动看板]");
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_APP_CHARTDETAIL", "CHARTGUID", guid, deleteFirst, "[移动看板]");
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_APP_CHARTDATASOURCE", "CHARTGUID", guid, deleteFirst, "[移动看板]");
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_APP_CHARTROLE", "CHARTGUID", guid, deleteFirst, "[移动看板]");
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_APP_CHARTCMD", "CHARTGUID", guid, deleteFirst, "[移动看板]");
+                successCount++;
+            }
+
+            progressBar.Value = 100;
+            if (failCodes.Count > 0)
+            {
+                MessageBox.Show($"完成！成功 {successCount} 个，失败 {failCodes.Count} 个：\n{string.Join("\n", failCodes)}", "部分成功", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show($"移动看板复制完成！共 {successCount} 个。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
+        }
     }
 
-    private string? GetAppChartGuid(SqlConnection conn, string code)
+    /// <summary>
+    /// 输入框内容构造成临时 Account（Http 模式下从 _srcAccount/_tgtAccount 拷贝代理配置）
+    /// </summary>
+    private Account BuildTempAccount(string server, string dbName, string user, string password)
     {
-        var sql = "SELECT GUID FROM dbo.S_APP_CHART WHERE CODE = @code";
-        using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@code", code);
-        var result = cmd.ExecuteScalar();
-        return result?.ToString();
+        var account = new Account
+        {
+            Database = server,
+            DatabaseName = dbName,
+            DbUser = user,
+            DbPassword = password,
+            ConnectionMode = DataAccessMode.Direct
+        };
+        // 如果当前账套是 Http 模式，则从源/目标账套继承代理配置
+        if (_srcAccount != null && _srcAccount.ConnectionMode == DataAccessMode.Http &&
+            server == _srcAccount.Database && dbName == _srcAccount.DatabaseName)
+        {
+            account.ConnectionMode = DataAccessMode.Http;
+            account.HttpEndpoint = _srcAccount.HttpEndpoint;
+            account.HttpSecretKey = _srcAccount.HttpSecretKey;
+            account.HttpServerPublicKey = _srcAccount.HttpServerPublicKey;
+        }
+        else if (_tgtAccount != null && _tgtAccount.ConnectionMode == DataAccessMode.Http &&
+                 server == _tgtAccount.Database && dbName == _tgtAccount.DatabaseName)
+        {
+            account.ConnectionMode = DataAccessMode.Http;
+            account.HttpEndpoint = _tgtAccount.HttpEndpoint;
+            account.HttpSecretKey = _tgtAccount.HttpSecretKey;
+            account.HttpServerPublicKey = _tgtAccount.HttpServerPublicKey;
+        }
+        return account;
     }
 
     private void BtnSearch_Click(object? sender, EventArgs e)

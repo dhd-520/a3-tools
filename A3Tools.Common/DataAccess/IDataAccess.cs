@@ -51,6 +51,17 @@ namespace A3Tools.Common.DataAccess
         /// 获取表结构（列信息）
         /// </summary>
         Task<List<ColumnInfo>> GetTableSchemaAsync(string tableName, CancellationToken ct = default);
+
+        /// <summary>
+        /// 高效批量复制数据到指定表（替代 SqlBulkCopy）。
+        /// Direct 实现：走 SqlBulkCopy（直连最快路径）
+        /// Http 实现：每批 ~500 行一条 INSERT INTO ... VALUES (...),(...),...，走 ExecuteNonQueryAsync
+        /// 设计目的：跨库复制工具在 Http 代理模式下也能保持高效，避免逐行 INSERT 的灾难。
+        /// </summary>
+        /// <param name="table">源数据（列定义 + 行集合，object?[] 数组）</param>
+        /// <param name="tableName">目标表名</param>
+        /// <returns>实际写入行数</returns>
+        Task<int> BulkCopyAsync(ResultTable table, string tableName, CancellationToken ct = default);
     }
 
     /// <summary>

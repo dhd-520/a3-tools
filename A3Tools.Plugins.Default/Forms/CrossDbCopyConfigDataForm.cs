@@ -6,6 +6,7 @@ using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
 using Microsoft.Data.SqlClient;
+using A3Tools.Common.DataAccess;
 
 namespace A3Tools.Plugins.Default.Forms;
 
@@ -18,6 +19,8 @@ public partial class CrossDbCopyConfigDataForm : Form
 {
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
+    private Account? _srcAccount;
+    private Account? _tgtAccount;
 
     /// <summary>
     /// 复合主键分隔符：用于在内存中拼接/拆分多列主键
@@ -659,6 +662,8 @@ public partial class CrossDbCopyConfigDataForm : Form
     private void LoadPresetAccounts()
     {
         var preset = _context.GetToolDatabasePreset();
+        _srcAccount = preset.SourceAccount;
+        _tgtAccount = preset.TargetAccount;
         ApplyAccountToDatabaseFields(preset.SourceAccount, true);
         ApplyAccountToDatabaseFields(preset.TargetAccount, false);
     }
@@ -877,182 +882,120 @@ public partial class CrossDbCopyConfigDataForm : Form
 
     private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password)
     {
-        return await Task.Run(() =>
+        var tempAccount = BuildTempAccount(server, dbName, user, password);
+        var da = ProxyHelper.CreateDataAccess(tempAccount);
+        return await ProxyHelper.TestConnectionAsync(da);
+    }
+
+    private Account BuildTempAccount(string server, string dbName, string user, string password)
+    {
+        var account = new Account
         {
-            try
-            {
-                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
-                using var conn = new SqlConnection(connStr);
-                conn.Open();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("连接测试失败: " + ex.Message);
-                return false;
-            }
-        });
+            Database = server,
+            DatabaseName = dbName,
+            DbUser = user,
+            DbPassword = password,
+            ConnectionMode = DataAccessMode.Direct
+        };
+        if (_srcAccount != null && _srcAccount.ConnectionMode == DataAccessMode.Http &&
+            server == _srcAccount.Database && dbName == _srcAccount.DatabaseName)
+        {
+            account.ConnectionMode = DataAccessMode.Http;
+            account.HttpEndpoint = _srcAccount.HttpEndpoint;
+            account.HttpSecretKey = _srcAccount.HttpSecretKey;
+            account.HttpServerPublicKey = _srcAccount.HttpServerPublicKey;
+        }
+        else if (_tgtAccount != null && _tgtAccount.ConnectionMode == DataAccessMode.Http &&
+                 server == _tgtAccount.Database && dbName == _tgtAccount.DatabaseName)
+        {
+            account.ConnectionMode = DataAccessMode.Http;
+            account.HttpEndpoint = _tgtAccount.HttpEndpoint;
+            account.HttpSecretKey = _tgtAccount.HttpSecretKey;
+            account.HttpServerPublicKey = _tgtAccount.HttpServerPublicKey;
+        }
+        return account;
     }
 
     /// <summary>
-    /// 复制配置数据主逻辑：参照 Win 表单复制 S_CONTROL/S_DATA 的方式，
-    /// 使用 TableCopyService.GetTableColumns + SqlBulkCopy 复制整行数据。
-    /// 目标库有的列才复制，避免源/目标库表结构字段差异导致失败。
+    /// 复制配置数据主逻辑：按数据类型对应的主键从源库取整行数据写入目标库。
+    /// 走 ProxyHelper.CopyTableDataByKeysAsync，直连模式 SqlBulkCopy 保效率，Http 模式批量 INSERT 保效率。
     /// </summary>
     private async Task<bool> CopyConfigDataAsync(
         string srcServer, string srcDbName, string srcUser, string srcPassword,
         string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
         ConfigDataType type, List<string> rawKeys, bool deleteIfExists)
     {
-        return await Task.Run(() =>
+        try
         {
-            try
+            var srcAccount = BuildTempAccount(srcServer, srcDbName, srcUser, srcPassword);
+            var tgtAccount = BuildTempAccount(tgtServer, tgtDbName, tgtUser, tgtPassword);
+            var srcDA = ProxyHelper.CreateDataAccess(srcAccount);
+            var tgtDA = ProxyHelper.CreateDataAccess(tgtAccount);
+            if (srcDA == null || tgtDA == null)
             {
-                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.Decrypt(srcPassword) + ";TrustServerCertificate=True;";
-                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
-
-                using var srcConn = new SqlConnection(srcConnStr);
-                using var tgtConn = new SqlConnection(tgtConnStr);
-                srcConn.Open();
-                tgtConn.Open();
-
-                int total = rawKeys.Count;
-                int current = 0;
-                int copiedCount = 0;
-                int skippedCount = 0;
-                int notFoundCount = 0;
-                var failKeys = new List<string>();
-
-                foreach (var rawKey in rawKeys)
-                {
-                    current++;
-                    var progress = 50 + (current * 50 / Math.Max(total, 1));
-                    this.Invoke(new Action(() =>
-                    {
-                        progressBar.Value = progress;
-                        lblProgress.Text = $"正在复制：{rawKey} ({current}/{total})";
-                    }));
-
-                    var keyValues = rawKey.Split(new[] { KEY_SEPARATOR }, StringSplitOptions.None);
-                    if (keyValues.Length != type.KeyColumns.Length)
-                    {
-                        failKeys.Add($"{rawKey}(主键字段数不匹配，期望 {type.KeyColumns.Length} 个)");
-                        continue;
-                    }
-
-                    try
-                    {
-                        var result = CopyTableDataByKeys(srcConn, tgtConn, type.TableName, type.KeyColumns, keyValues, deleteIfExists, $"[{type.Display}]");
-                        if (result == CopyResult.Copied) copiedCount++;
-                        else if (result == CopyResult.Skipped) skippedCount++;
-                        else if (result == CopyResult.NotFound) notFoundCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"复制 {rawKey} 失败: {ex.Message}");
-                        failKeys.Add($"{rawKey}({ex.Message})");
-                    }
-                }
-
-                this.Invoke(new Action(() =>
-                {
-                    if (failKeys.Count > 0 || notFoundCount > 0)
-                    {
-                        var failPreview = string.Join("\n", failKeys.Take(20));
-                        if (failKeys.Count > 20) failPreview += $"\n... 还有 {failKeys.Count - 20} 条";
-                        MessageBox.Show(
-                            $"复制完成！\n成功 {copiedCount} 条，跳过 {skippedCount} 条，源库未找到 {notFoundCount} 条，失败 {failKeys.Count} 条" +
-                            (failKeys.Count > 0 ? $"\n\n失败明细：\n{failPreview}" : ""),
-                            "部分成功", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                    else
-                    {
-                        MessageBox.Show(
-                            $"复制完成！\n成功 {copiedCount} 条" + (skippedCount > 0 ? $"，跳过 {skippedCount} 条" : ""),
-                            "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                }));
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.Invoke(new Action(() =>
-                {
-                    MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }));
+                MessageBox.Show("创建数据访问失败！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
-        });
-    }
 
-    private enum CopyResult
-    {
-        Copied,
-        Skipped,
-        NotFound
-    }
+            int total = rawKeys.Count;
+            int current = 0;
+            int copiedCount = 0;
+            int skippedCount = 0;
+            int notFoundCount = 0;
+            var failKeys = new List<string>();
 
-    /// <summary>
-    /// 按一个或多个主键复制表数据。
-    /// 实现方式与 TableCopyService.CopyTableData 一致：
-    /// 目标库列名 -> 源库 SELECT -> SqlBulkCopy 写入。
-    /// 单主键/复合主键统一支持。
-    /// </summary>
-    private static CopyResult CopyTableDataByKeys(
-        SqlConnection srcConn,
-        SqlConnection tgtConn,
-        string tableName,
-        string[] keyColumns,
-        string[] keyValues,
-        bool deleteFirst,
-        string tag = "")
-    {
-        var columns = TableCopyService.GetTableColumns(tgtConn, tableName);
-        if (columns.Count == 0)
-            throw new Exception($"目标表 {tableName} 不存在或没有列");
-
-        var whereClause = string.Join(" AND ", keyColumns.Select((c, i) => $"[{c}] = @key{i}"));
-
-        if (deleteFirst)
-        {
-            using var delCmd = new SqlCommand($"DELETE FROM dbo.[{tableName}] WHERE {whereClause}", tgtConn);
-            for (int i = 0; i < keyColumns.Length; i++)
-                delCmd.Parameters.AddWithValue($"@key{i}", keyValues[i]);
-            delCmd.ExecuteNonQuery();
-        }
-        else
-        {
-            using var chkCmd = new SqlCommand($"SELECT COUNT(*) FROM dbo.[{tableName}] WHERE {whereClause}", tgtConn);
-            for (int i = 0; i < keyColumns.Length; i++)
-                chkCmd.Parameters.AddWithValue($"@key{i}", keyValues[i]);
-            if (Convert.ToInt32(chkCmd.ExecuteScalar()) > 0)
+            foreach (var rawKey in rawKeys)
             {
-                Debug.WriteLine($"{tag}表{tableName}中{string.Join(",", keyColumns)}={string.Join(",", keyValues)}已存在，跳过");
-                return CopyResult.Skipped;
+                current++;
+                var progress = 50 + (current * 50 / Math.Max(total, 1));
+                progressBar.Value = progress;
+                lblProgress.Text = $"正在复制：{rawKey} ({current}/{total})";
+                Application.DoEvents();
+
+                var keyValues = rawKey.Split(new[] { KEY_SEPARATOR }, StringSplitOptions.None);
+                if (keyValues.Length != type.KeyColumns.Length)
+                {
+                    failKeys.Add($"{rawKey}(主键字段数不匹配，期望 {type.KeyColumns.Length} 个)");
+                    continue;
+                }
+
+                try
+                {
+                    var (copied, skipped, notFound) = await ProxyHelper.CopyTableDataByKeysAsync(
+                        srcDA, tgtDA, type.TableName, type.KeyColumns, keyValues, deleteIfExists, $"[{type.Display}]");
+                    if (copied > 0) copiedCount++;
+                    if (skipped > 0) skippedCount++;
+                    if (notFound > 0) notFoundCount++;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"复制 {rawKey} 失败: {ex.Message}");
+                    failKeys.Add($"{rawKey}({ex.Message})");
+                }
             }
+
+            if (failKeys.Count > 0 || notFoundCount > 0)
+            {
+                var failPreview = string.Join("\n", failKeys.Take(20));
+                if (failKeys.Count > 20) failPreview += $"\n... 还有 {failKeys.Count - 20} 条";
+                MessageBox.Show(
+                    $"复制完成！\n成功 {copiedCount} 条，跳过 {skippedCount} 条，源库未找到 {notFoundCount} 条，失败 {failKeys.Count} 条" +
+                    (failKeys.Count > 0 ? $"\n\n失败明细：\n{failPreview}" : ""),
+                    "部分成功", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show(
+                    $"复制完成！\n成功 {copiedCount} 条" + (skippedCount > 0 ? $"，跳过 {skippedCount} 条" : ""),
+                    "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            return true;
         }
-
-        var cols = string.Join(", ", columns.Select(c => "[" + c + "]"));
-        var selSql = $"SELECT {cols} FROM dbo.[{tableName}] WHERE {whereClause}";
-        using var selCmd = new SqlCommand(selSql, srcConn);
-        for (int i = 0; i < keyColumns.Length; i++)
-            selCmd.Parameters.AddWithValue($"@key{i}", keyValues[i]);
-
-        var dt = new DataTable();
-        using (var adapter = new SqlDataAdapter(selCmd))
+        catch (Exception ex)
         {
-            adapter.Fill(dt);
+            MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
         }
-        if (dt.Rows.Count == 0)
-            return CopyResult.NotFound;
-
-        using var bulk = new SqlBulkCopy(tgtConn);
-        bulk.DestinationTableName = $"dbo.[{tableName}]";
-        foreach (var col in columns)
-            bulk.ColumnMappings.Add(col, col);
-        bulk.WriteToServer(dt);
-
-        return CopyResult.Copied;
     }
 }
 

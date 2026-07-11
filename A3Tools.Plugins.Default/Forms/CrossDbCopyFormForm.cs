@@ -1,5 +1,6 @@
-﻿using System.Data;
+using System.Data;
 using System.Windows.Forms;
+using A3Tools.Common.DataAccess;
 using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
@@ -11,6 +12,8 @@ public partial class CrossDbCopyFormForm : Form
 {
     private readonly IToolContext _context;
     private readonly Account? _currentAccount;
+    private Account? _srcAccount;
+    private Account? _tgtAccount;
 
     // 用于存储搜索到的表单数据
     private DataTable? _searchResults;
@@ -20,6 +23,7 @@ public partial class CrossDbCopyFormForm : Form
         _context = context;
         _currentAccount = currentAccount;
         InitializeComponent();
+        // Http 代理模式已支持，不再拦截
         LoadPresetAccounts();
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
         this.KeyDown += (s, e) =>
@@ -72,6 +76,14 @@ public partial class CrossDbCopyFormForm : Form
         };
     }
 
+    // ==================== Http 代理模式辅助 ====================
+
+    private IDataAccess? GetSourceDA() => ProxyHelper.CreateDataAccess(_srcAccount);
+    private IDataAccess? GetTargetDA() => ProxyHelper.CreateDataAccess(_tgtAccount);
+    private bool IsSourceHttp => ProxyHelper.IsHttp(_srcAccount);
+    private bool IsTargetHttp => ProxyHelper.IsHttp(_tgtAccount);
+    private bool IsHttpMode => IsSourceHttp || IsTargetHttp;
+
     private void BtnSelectSource_Click(object? sender, EventArgs e)
     {
         SelectAccount(true);
@@ -95,6 +107,8 @@ public partial class CrossDbCopyFormForm : Form
     private void LoadPresetAccounts()
     {
         var preset = _context.GetToolDatabasePreset();
+        _srcAccount = preset.SourceAccount;
+        _tgtAccount = preset.TargetAccount;
         ApplyAccountToDatabaseFields(preset.SourceAccount, true);
         ApplyAccountToDatabaseFields(preset.TargetAccount, false);
     }
@@ -203,6 +217,7 @@ public partial class CrossDbCopyFormForm : Form
                 {
                     if (isSource)
                     {
+                        _srcAccount = selectedAcc;
                         txtSourceServer.Text = selectedAcc.Database ?? "";
                         txtSourceDbName.Text = selectedAcc.DatabaseName ?? "";
                         txtSourceUser.Text = selectedAcc.DbUser ?? "";
@@ -210,6 +225,7 @@ public partial class CrossDbCopyFormForm : Form
                     }
                     else
                     {
+                        _tgtAccount = selectedAcc;
                         txtTargetServer.Text = selectedAcc.Database ?? "";
                         txtTargetDbName.Text = selectedAcc.DatabaseName ?? "";
                         txtTargetUser.Text = selectedAcc.DbUser ?? "";
@@ -233,6 +249,7 @@ public partial class CrossDbCopyFormForm : Form
                 {
                     if (isSource)
                     {
+                        _srcAccount = selectedAcc;
                         txtSourceServer.Text = selectedAcc.Database ?? "";
                         txtSourceDbName.Text = selectedAcc.DatabaseName ?? "";
                         txtSourceUser.Text = selectedAcc.DbUser ?? "";
@@ -240,6 +257,7 @@ public partial class CrossDbCopyFormForm : Form
                     }
                     else
                     {
+                        _tgtAccount = selectedAcc;
                         txtTargetServer.Text = selectedAcc.Database ?? "";
                         txtTargetDbName.Text = selectedAcc.DatabaseName ?? "";
                         txtTargetUser.Text = selectedAcc.DbUser ?? "";
@@ -284,19 +302,11 @@ public partial class CrossDbCopyFormForm : Form
         dgvSearchResults.DataSource = null;
         btnSearch.Enabled = false;
 
-        Task.Run(() =>
+        Task.Run(async () =>
         {
             try
             {
-                var server = txtSourceServer.Text.Trim();
-                var dbName = txtSourceDbName.Text.Trim();
-                var user = txtSourceUser.Text.Trim();
-                var password = txtSourcePassword.Text;
-
-                var connString = string.IsNullOrEmpty(user)
-                    ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
-                    : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.Decrypt(password)};TrustServerCertificate=True;";
-
+                var escapedKeyword = ProxyHelper.EscapeSql(keyword);
                 var sql = $@"
 SELECT A.GUID AS OBJECTGUID,
        A.CODE AS 代码,
@@ -307,14 +317,33 @@ SELECT A.GUID AS OBJECTGUID,
 FROM S_OBJECT A
 LEFT JOIN S_SUBSYSTEM B ON A.SUBSYSTEMGUID = B.GUID
 LEFT JOIN S_BUSINESSTYPE F ON B.BUSINESSTYPEGUID = F.GUID
-WHERE A.NAME LIKE '%{keyword}%' OR A.CODE LIKE '%{keyword}%'
+WHERE A.NAME LIKE '%{escapedKeyword}%' OR A.CODE LIKE '%{escapedKeyword}%'
 ORDER BY A.NAME";
 
-                using var conn = new SqlConnection(connString);
-                using var cmd = new SqlCommand(sql, conn);
-                using var adapter = new SqlDataAdapter(cmd);
-                var dt = new DataTable();
-                adapter.Fill(dt);
+                DataTable dt;
+                if (IsSourceHttp)
+                {
+                    var da = GetSourceDA();
+                    if (da == null) throw new Exception("无法创建源数据访问对象，请确认源账套已选择");
+                    dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+                }
+                else
+                {
+                    var server = txtSourceServer.Text.Trim();
+                    var dbName = txtSourceDbName.Text.Trim();
+                    var user = txtSourceUser.Text.Trim();
+                    var password = txtSourcePassword.Text;
+
+                    var connString = string.IsNullOrEmpty(user)
+                        ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
+                        : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.Decrypt(password)};TrustServerCertificate=True;";
+
+                    using var conn = new SqlConnection(connString);
+                    using var cmd = new SqlCommand(sql, conn);
+                    using var adapter = new SqlDataAdapter(cmd);
+                    dt = new DataTable();
+                    adapter.Fill(dt);
+                }
 
                 this.Invoke(new Action(() =>
                 {
@@ -449,7 +478,7 @@ ORDER BY A.NAME";
         lblProgress.Text = "正在连接源数据库...";
         progressBar.Value = 10;
 
-        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text))
+        if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text, _srcAccount))
         {
             MessageBox.Show("源数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -460,7 +489,7 @@ ORDER BY A.NAME";
         lblProgress.Text = "正在连接目标数据库...";
         progressBar.Value = 30;
 
-        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text))
+        if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text, _tgtAccount))
         {
             MessageBox.Show("目标数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
@@ -490,8 +519,17 @@ ORDER BY A.NAME";
         }
     }
 
-    private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password)
+    private async Task<bool> TestConnectionAsync(string server, string dbName, string user, string password, Account? account = null)
     {
+        // Http 模式：通过 IDataAccess 测试连接
+        if (ProxyHelper.IsHttp(account))
+        {
+            var da = ProxyHelper.CreateDataAccess(account);
+            if (da == null) return false;
+            return await ProxyHelper.TestConnectionAsync(da);
+        }
+
+        // 直连模式：保持原逻辑
         return await Task.Run(() =>
         {
             try
@@ -514,6 +552,13 @@ ORDER BY A.NAME";
         string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
         string objectGuids, bool deleteFirst, bool copyStoredProcs)
     {
+        // Http 代理模式
+        if (IsHttpMode)
+        {
+            return await CopyFormsHttpAsync(objectGuids, deleteFirst, copyStoredProcs);
+        }
+
+        // 直连模式：保持原逻辑
         return await Task.Run(() =>
         {
             try
@@ -584,6 +629,76 @@ ORDER BY A.NAME";
             }
         });
     }
+
+    // ==================== Http 代理模式核心复制 ====================
+
+    private async Task<bool> CopyFormsHttpAsync(string objectGuids, bool deleteFirst, bool copyStoredProcs)
+    {
+        try
+        {
+            var srcDA = GetSourceDA();
+            var tgtDA = GetTargetDA();
+            if (srcDA == null || tgtDA == null)
+                throw new Exception("无法创建数据访问对象，请确认源/目标账套已选择");
+
+            var guidList = objectGuids.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(g => g.Trim()).ToList();
+
+            int total = guidList.Count;
+            int current = 0;
+
+            foreach (var objectGuid in guidList)
+            {
+                current++;
+                var progress = 30 + (current * 70 / total);
+                this.Invoke(new Action(() =>
+                {
+                    progressBar.Value = progress;
+                    lblProgress.Text = "正在复制：" + objectGuid + " (" + current + "/" + total + ")";
+                }));
+
+                // 复制S_OBJECT表
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_OBJECT", "GUID", objectGuid, deleteFirst, "[Win表单]");
+
+                // 复制S_CONTROL表
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_CONTROL", "OBJECTGUID", objectGuid, deleteFirst, "[Win表单]");
+
+                // 复制S_DATA表
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_DATA", "OBJECTGUID", objectGuid, deleteFirst, "[Win表单]");
+
+                // 复制样式表
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_OBJECTSTYLE", "OBJECTGUID", objectGuid, deleteFirst, "[Win表单]");
+
+                // 复制编码规则
+                await CopyCodeRulesForObjectHttpAsync(srcDA, tgtDA, objectGuid);
+
+                // 复制标准查询
+                await CopyStandardQueriesForObjectHttpAsync(srcDA, tgtDA, objectGuid);
+
+                // 复制关联存储过程（仅当勾选时）
+                if (copyStoredProcs)
+                {
+                    this.Invoke(new Action(() =>
+                    {
+                        lblProgress.Text = "正在复制存储过程：" + objectGuid + " (" + current + "/" + total + ")";
+                    }));
+                    await CopyStoredProcsForObjectHttpAsync(srcDA, tgtDA, objectGuid, deleteFirst);
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            this.Invoke(new Action(() =>
+            {
+                MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }));
+            return false;
+        }
+    }
+
+    // ==================== 直连模式辅助方法（原逻辑不变） ====================
 
     /// <summary>
     /// 获取S_OBJECT记录中的三个存储过程名称
@@ -768,7 +883,7 @@ ORDER BY A.NAME";
         }
     }
 
-    // ==================== 编码规则 & 标准查询复制 ====================
+    // ==================== 编码规则 & 标准查询复制（直连模式，原逻辑不变） ====================
 
     /// <summary>
     /// 解析EXTENDS字段，用'|!'分割多项，'|@'分割KEY和VALUE
@@ -988,6 +1103,258 @@ ORDER BY A.NAME";
         using var adapter = new SqlDataAdapter(cmd);
         adapter.Fill(dt);
         return dt.Rows.Count > 0 ? dt : null;
+    }
+
+    // ==================== Http 代理模式辅助方法 ====================
+
+    private async Task<List<(string FieldName, string ProcName)>> GetStoredProcNamesHttpAsync(IDataAccess srcDA, string objectGuid)
+    {
+        var result = new List<(string, string)>();
+        var sql = $@"SELECT AUDITINGPROCNAME, DELETEPROCNAME, UNAUDITINGPROCNAME
+                     FROM dbo.S_OBJECT WHERE GUID = '{ProxyHelper.EscapeSql(objectGuid)}'";
+        var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+        if (dt.Rows.Count > 0)
+        {
+            foreach (DataColumn col in dt.Columns)
+            {
+                var val = dt.Rows[0][col]?.ToString();
+                if (!string.IsNullOrWhiteSpace(val))
+                    result.Add((col.ColumnName, val));
+            }
+        }
+
+        foreach (var (fn, pn) in result)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GetStoredProcNamesHttp] {fn} -> {pn}");
+        }
+
+        return result;
+    }
+
+    private async Task<bool> ProcExistsInTargetHttpAsync(IDataAccess tgtDA, string procName)
+    {
+        var sql = $@"SELECT COUNT(*) FROM sys.objects
+                     WHERE type = 'P' AND name = '{ProxyHelper.EscapeSql(procName)}' AND is_ms_shipped = 0";
+        var result = await ProxyHelper.ExecuteScalarAsync(tgtDA, sql);
+        return Convert.ToInt32(result ?? 0) > 0;
+    }
+
+    private async Task<string> GetProcDefinitionHttpAsync(IDataAccess srcDA, string procName)
+    {
+        var escaped = ProxyHelper.EscapeSql(procName);
+        var sql = $@"SELECT definition FROM sys.sql_modules
+                     WHERE object_id = OBJECT_ID('{escaped}', 'P')";
+        var result = await ProxyHelper.ExecuteScalarAsync(srcDA, sql);
+        if (result == null || result == DBNull.Value)
+        {
+            var sql2 = $@"SELECT OBJECT_DEFINITION(OBJECT_ID('{escaped}', 'P'))";
+            result = await ProxyHelper.ExecuteScalarAsync(srcDA, sql2);
+        }
+        var text = result as string ?? "";
+        System.Diagnostics.Debug.WriteLine($"[GetProcDefinitionHttp] procName={procName}, definition length={text.Length}");
+        return text;
+    }
+
+    private async Task CreateProcInTargetHttpAsync(IDataAccess tgtDA, string procName, string definition)
+    {
+        System.Diagnostics.Debug.WriteLine($"[CreateProcInTargetHttp] procName={procName}, definition length={definition?.Length ?? -1}");
+
+        // 先删除已存在的同名存储过程
+        if (await ProcExistsInTargetHttpAsync(tgtDA, procName))
+        {
+            var dropSql = "DROP PROCEDURE [" + procName + "]";
+            await ProxyHelper.ExecuteNonQueryAsync(tgtDA, dropSql);
+        }
+
+        var createSql = NormalizeProcDefinition(definition, procName);
+        System.Diagnostics.Debug.WriteLine($"[CreateProcInTargetHttp] createSql length={createSql.Length}");
+        System.Diagnostics.Debug.WriteLine($"[CreateProcInTargetHttp] createSql preview: {createSql.Substring(0, Math.Min(200, createSql.Length))}");
+        // 存储过程定义可能含多语句，用 ExecuteBatchAsync
+        var batchResult = await ProxyHelper.ExecuteBatchAsync(tgtDA, createSql);
+        if (!batchResult.Success)
+        {
+            throw new Exception($"创建存储过程失败: {batchResult.Message}");
+        }
+    }
+
+    private async Task CopyStoredProcsForObjectHttpAsync(IDataAccess srcDA, IDataAccess tgtDA, string objectGuid, bool deleteFirst)
+    {
+        var procNames = await GetStoredProcNamesHttpAsync(srcDA, objectGuid);
+        foreach (var (fieldName, procName) in procNames)
+        {
+            try
+            {
+                if (!await ProcExistsInTargetHttpAsync(tgtDA, procName))
+                {
+                    var definition = await GetProcDefinitionHttpAsync(srcDA, procName);
+                    if (string.IsNullOrWhiteSpace(definition))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 无法获取定义（可能加密或不存在）");
+                        this.Invoke(new Action(() =>
+                        {
+                            lblProgress.Text = $"⚠ {procName} 无法获取定义（加密或不存在）";
+                            lblProgress.ForeColor = Color.Orange;
+                        }));
+                        continue;
+                    }
+                    await CreateProcInTargetHttpAsync(tgtDA, procName, definition);
+                    System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制成功（字段：{fieldName}）");
+                    this.Invoke(new Action(() =>
+                    {
+                        lblProgress.Text = $"✓ {procName} 复制成功";
+                        lblProgress.ForeColor = Color.Green;
+                    }));
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 目标库已存在，跳过");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制失败：{ex.Message}");
+                this.Invoke(new Action(() =>
+                {
+                    lblProgress.Text = $"✗ {procName} 复制失败：{ex.Message}";
+                    lblProgress.ForeColor = Color.Red;
+                }));
+            }
+        }
+    }
+
+    private async Task CopyCodeRulesForObjectHttpAsync(IDataAccess srcDA, IDataAccess tgtDA, string objectGuid)
+    {
+        try
+        {
+            var sql = $@"SELECT EXTENDS FROM dbo.S_CONTROL
+                         WHERE OBJECTGUID = '{ProxyHelper.EscapeSql(objectGuid)}' AND (DATANAME = 'CODE' OR DATANAME = 'BILLNO')";
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+            var codeRuleGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow row in dt.Rows)
+            {
+                var extends = row[0]?.ToString();
+                var dict = ParseExtendsField(extends);
+                if (dict.TryGetValue("CodeRuleGuid", out var ruleGuid) && !string.IsNullOrWhiteSpace(ruleGuid))
+                {
+                    codeRuleGuids.Add(ruleGuid);
+                }
+            }
+
+            foreach (var ruleGuid in codeRuleGuids)
+            {
+                await CopyOneCodeRuleHttpAsync(srcDA, tgtDA, ruleGuid);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[编码规则] 复制失败：" + ex.Message);
+        }
+    }
+
+    private async Task CopyOneCodeRuleHttpAsync(IDataAccess srcDA, IDataAccess tgtDA, string ruleCode)
+    {
+        try
+        {
+            if (await CodeRuleExistsInTargetHttpAsync(tgtDA, ruleCode))
+            {
+                System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 目标库已存在，跳过");
+                return;
+            }
+
+            var guid = await GetCodeRuleGuidFromSourceHttpAsync(srcDA, ruleCode);
+            if (string.IsNullOrEmpty(guid))
+            {
+                System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 在源库中未找到");
+                return;
+            }
+
+            await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_BILLCODERULE", "GUID", guid, false, "[编码规则]");
+            await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_BILLCODERULEDETAIL", "BILLCODERULEGUID", guid, false, "[编码规则]");
+
+            System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 复制成功");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[编码规则] {ruleCode} 复制失败：" + ex.Message);
+        }
+    }
+
+    private async Task<bool> CodeRuleExistsInTargetHttpAsync(IDataAccess tgtDA, string code)
+    {
+        var sql = $@"SELECT COUNT(*) FROM dbo.S_BILLCODERULE WHERE CODE = '{ProxyHelper.EscapeSql(code)}'";
+        var result = await ProxyHelper.ExecuteScalarAsync(tgtDA, sql);
+        return Convert.ToInt32(result ?? 0) > 0;
+    }
+
+    private async Task<string?> GetCodeRuleGuidFromSourceHttpAsync(IDataAccess srcDA, string code)
+    {
+        var sql = $@"SELECT GUID FROM dbo.S_BILLCODERULE WHERE CODE = '{ProxyHelper.EscapeSql(code)}'";
+        var result = await ProxyHelper.ExecuteScalarAsync(srcDA, sql);
+        return result?.ToString();
+    }
+
+    private async Task CopyStandardQueriesForObjectHttpAsync(IDataAccess srcDA, IDataAccess tgtDA, string objectGuid)
+    {
+        try
+        {
+            var sql = $@"SELECT EXTENDS FROM dbo.S_CONTROL
+                         WHERE OBJECTGUID = '{ProxyHelper.EscapeSql(objectGuid)}' AND (CONTROLTYPE = 'A3Text' OR CONTROLTYPE = 'GridColumn')";
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+            var dataSelectCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow row in dt.Rows)
+            {
+                var extends = row[0]?.ToString();
+                var dict = ParseExtendsField(extends);
+                if (dict.TryGetValue("DataSelectCode", out var dataSelectCode) && !string.IsNullOrWhiteSpace(dataSelectCode))
+                {
+                    dataSelectCodes.Add(dataSelectCode);
+                }
+            }
+
+            foreach (var code in dataSelectCodes)
+            {
+                await CopyOneStandardQueryHttpAsync(srcDA, tgtDA, code);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[标准查询] 复制失败：" + ex.Message);
+        }
+    }
+
+    private async Task CopyOneStandardQueryHttpAsync(IDataAccess srcDA, IDataAccess tgtDA, string code)
+    {
+        try
+        {
+            if (await StandardQueryExistsInTargetHttpAsync(tgtDA, code))
+            {
+                System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 目标库已存在，跳过");
+                return;
+            }
+
+            // 检查源库是否存在
+            var existsSql = $@"SELECT COUNT(*) FROM dbo.S_DATASELECT WHERE CODE = '{ProxyHelper.EscapeSql(code)}'";
+            var countResult = await ProxyHelper.ExecuteScalarAsync(srcDA, existsSql);
+            if (Convert.ToInt32(countResult ?? 0) == 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 在源库中未找到");
+                return;
+            }
+
+            await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_DATASELECT", "CODE", code, false, "[标准查询]");
+            System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 复制成功");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[标准查询] {code} 复制失败：" + ex.Message);
+        }
+    }
+
+    private async Task<bool> StandardQueryExistsInTargetHttpAsync(IDataAccess tgtDA, string code)
+    {
+        var sql = $@"SELECT COUNT(*) FROM dbo.S_DATASELECT WHERE CODE = '{ProxyHelper.EscapeSql(code)}'";
+        var result = await ProxyHelper.ExecuteScalarAsync(tgtDA, sql);
+        return Convert.ToInt32(result ?? 0) > 0;
     }
 
 }
