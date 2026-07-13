@@ -58,6 +58,14 @@ public static class SqlScriptLoader
             pureName = objName.Substring(dotIdx + 1);
         }
 
+        // ★ 表(U) 没有 sys.sql_modules 记录,必须走专门的 CREATE TABLE 拼接路径
+        //   否则会查不到 definition,直接返回 null → UI 提示"脚本为空"
+        //   直连和 Http 模式都覆盖,避免再次踩同一坑
+        if (string.Equals(objType, "U", StringComparison.OrdinalIgnoreCase))
+        {
+            return await LoadTableScriptAsync(connStr, schemaName, pureName);
+        }
+
         // Http 代理模式
         if (IsHttpMode)
         {
@@ -101,68 +109,184 @@ WHERE o.name = @name
 
     /// <summary>
     /// 加载表结构脚本(CREATE TABLE)。
-    /// 简化版:从 sys.columns + sys.types 拼出 CREATE TABLE 语句。
+    /// 支持直连 + Http 代理两种模式;支持 schema 拆分(避免重名)。
+    /// 从 sys.columns + sys.types 拼出 CREATE TABLE 语句。
     /// 后续可扩展支持主键/外键/索引。
     /// </summary>
-    public static async Task<string?> LoadTableScriptAsync(string connStr, string objName)
+    public static async Task<string?> LoadTableScriptAsync(string connStr, string? schemaName, string pureName)
     {
         if (string.IsNullOrWhiteSpace(connStr)) throw new ArgumentException("connStr 不能为空", nameof(connStr));
-        if (string.IsNullOrWhiteSpace(objName)) throw new ArgumentException("objName 不能为空", nameof(objName));
+        if (string.IsNullOrWhiteSpace(pureName)) throw new ArgumentException("pureName 不能为空", nameof(pureName));
 
+        if (IsHttpMode)
+        {
+            return await LoadTableScriptViaHttpAsync(connStr, schemaName, pureName);
+        }
+
+        // ====== 直连模式 ======
         using var conn = new SqlConnection(connStr);
         await conn.OpenAsync();
 
-        // 检查表是否存在
+        // 1) 检查表是否存在 + 拿到真实 schema(避免 [dbo].[table] 写到错误的 schema 下)
         const string checkSql = @"
 SELECT SCHEMA_NAME(schema_id) FROM sys.tables WHERE name = @name";
+        string? resolvedSchema;
         using (var check = new SqlCommand(checkSql, conn))
         {
-            check.Parameters.AddWithValue("@name", objName);
-            var schema = await check.ExecuteScalarAsync();
-            if (schema == null) return null;
+            check.Parameters.AddWithValue("@name", pureName);
+            var s = await check.ExecuteScalarAsync();
+            if (s == null) return null;
+            resolvedSchema = s.ToString();
+        }
+        // 调用方如果传了 schema,做精确匹配校验;未传则用库里的 schema
+        if (!string.IsNullOrEmpty(schemaName)
+            && !string.Equals(schemaName, resolvedSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
         }
 
-        const string sql = @"
+        // 2) 取列定义
+        const string colsSql = @"
 SELECT c.name AS ColumnName, tp.name AS DataType, c.max_length, c.is_nullable, c.is_identity
 FROM sys.columns c
 JOIN sys.types tp ON c.user_type_id = tp.user_type_id
-WHERE c.object_id = OBJECT_ID(@name)
+WHERE c.object_id = OBJECT_ID(@fullname)
 ORDER BY c.column_id";
-
-        using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@name", objName);
-
-        var lines = new List<string>();
-        using var r = await cmd.ExecuteReaderAsync();
-        while (await r.ReadAsync())
+        var cols = new List<ColumnDef>();
+        using (var cmd = new SqlCommand(colsSql, conn))
         {
-            var col = r.GetString(0);
-            var type = r.GetString(1);
-            var maxLen = r.GetInt16(2);
-            var isNullable = r.GetBoolean(3);
-            var isIdentity = r.GetBoolean(4);
-
-            string typeStr = type switch
+            cmd.Parameters.AddWithValue("@fullname", $"{resolvedSchema}.{pureName}");
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
             {
-                "varchar" => maxLen == -1 ? "VARCHAR(MAX)" : $"VARCHAR({maxLen})",
-                "nvarchar" => maxLen == -1 ? "NVARCHAR(MAX)" : $"NVARCHAR({maxLen / 2})",
-                "char" => $"CHAR({maxLen})",
-                "nchar" => $"NCHAR({maxLen / 2})",
-                "varbinary" => maxLen == -1 ? "VARBINARY(MAX)" : $"VARBINARY({maxLen})",
-                "decimal" or "numeric" => $"DECIMAL(18,4)",
-                _ => type.ToUpper()
-            };
+                cols.Add(new ColumnDef(
+                    Name: r.GetString(0),
+                    DataType: r.GetString(1),
+                    MaxLength: r.GetInt16(2),
+                    IsNullable: r.GetBoolean(3),
+                    IsIdentity: r.GetBoolean(4)
+                ));
+            }
+        }
+        if (cols.Count == 0) return null;
 
-            var nullable = isNullable ? "NULL" : "NOT NULL";
-            var identity = isIdentity ? " IDENTITY(1,1)" : "";
-            lines.Add($"    [{col}] {typeStr}{identity} {nullable}");
+        return GenerateTableScript(conn.Database, resolvedSchema!, pureName, cols);
+    }
+
+    /// <summary>
+    /// Http 代理模式加载表脚本:走 _dataAccess.ExecuteQueryAsync 跑同一段 SQL,
+    /// 与直连版保持输出格式一致,前端不感知差异。
+    /// HTTP 模式需要手写 Replace 转义(ExecuteQueryAsync 不支持参数化)。
+    /// </summary>
+    private static async Task<string?> LoadTableScriptViaHttpAsync(string connStr, string? schemaName, string pureName)
+    {
+        // 1) 拿 schema
+        const string checkSql = @"
+SELECT SCHEMA_NAME(schema_id) FROM sys.tables WHERE name = '{name}'";
+        var safeCheck = checkSql.Replace("'{name}'", $"'{pureName.Replace("'", "''")}'");
+        var result = await _dataAccess!.ExecuteQueryAsync(safeCheck);
+        if (!result.Success) return null;
+        if (result.Tables.Count == 0 || result.Tables[0].Rows.Count == 0) return null;
+
+        var resolvedSchema = result.Tables[0].Rows[0][0]?.ToString();
+        if (string.IsNullOrEmpty(resolvedSchema)) return null;
+        if (!string.IsNullOrEmpty(schemaName)
+            && !string.Equals(schemaName, resolvedSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
         }
 
+        // 2) 拿列定义
+        const string colsSql = @"
+SELECT c.name AS ColumnName, tp.name AS DataType, c.max_length, c.is_nullable, c.is_identity
+FROM sys.columns c
+JOIN sys.types tp ON c.user_type_id = tp.user_type_id
+WHERE c.object_id = OBJECT_ID('{fullname}')
+ORDER BY c.column_id";
+        var safeFullName = $"{resolvedSchema}.{pureName}".Replace("'", "''");
+        var safeCols = colsSql.Replace("'{fullname}'", $"'{safeFullName}'");
+
+        var colResult = await _dataAccess!.ExecuteQueryAsync(safeCols);
+        if (!colResult.Success || colResult.Tables.Count == 0) return null;
+
+        var cols = new List<ColumnDef>();
+        foreach (var row in colResult.Tables[0].Rows)
+        {
+            if (row == null || row.Length < 5) continue;
+            cols.Add(new ColumnDef(
+                Name: row[0]?.ToString() ?? "",
+                DataType: row[1]?.ToString() ?? "",
+                MaxLength: ToInt16Safe(row[2]),
+                IsNullable: ToBoolSafe(row[3]),
+                IsIdentity: ToBoolSafe(row[4])
+            ));
+        }
+        if (cols.Count == 0) return null;
+
+        // Http 模式拿不到 conn.Database —— 从连接串解析出 Initial Catalog
+        var database = "";
+        try { database = new SqlConnectionStringBuilder(connStr).InitialCatalog ?? ""; } catch { /* ignore */ }
+        return GenerateTableScript(database, resolvedSchema, pureName, cols);
+    }
+
+    /// <summary>
+    /// 列定义(直连 reader / Http row 转换后的统一中间类型)。
+    /// </summary>
+    private record ColumnDef(string Name, string DataType, short MaxLength, bool IsNullable, bool IsIdentity);
+
+    /// <summary>
+    /// 把行里 object 列值转成 short(JSON 反序列后可能是 int/short/long,统一处理)
+    /// </summary>
+    private static short ToInt16Safe(object? v) => v switch
+    {
+        null => 0,
+        short s => s,
+        int i => (short)i,
+        long l => (short)l,
+        _ => Convert.ToInt16(v)
+    };
+
+    /// <summary>object 列值转 bool(JSON 里通常是 bool,直连是 bool,统一兜底)</summary>
+    private static bool ToBoolSafe(object? v) => v switch
+    {
+        null => false,
+        bool b => b,
+        int i => i != 0,
+        long l => l != 0,
+        _ => Convert.ToBoolean(v)
+    };
+
+    /// <summary>
+    /// 拼装 CREATE TABLE 文本(直连 + Http 共用,保证输出格式一致)。
+    /// 顶部 USE 数据库 + GO;列定义带 NOT NULL / IDENTITY(1,1)。
+    /// </summary>
+    private static string GenerateTableScript(string database, string schemaName, string tableName, List<ColumnDef> cols)
+    {
+        var lines = cols.Select(c =>
+        {
+            var typeStr = c.DataType switch
+            {
+                "varchar" => c.MaxLength == -1 ? "VARCHAR(MAX)" : $"VARCHAR({c.MaxLength})",
+                "nvarchar" => c.MaxLength == -1 ? "NVARCHAR(MAX)" : $"NVARCHAR({c.MaxLength / 2})",
+                "char" => $"CHAR({c.MaxLength})",
+                "nchar" => $"NCHAR({c.MaxLength / 2})",
+                "varbinary" => c.MaxLength == -1 ? "VARBINARY(MAX)" : $"VARBINARY({c.MaxLength})",
+                "decimal" or "numeric" => "DECIMAL(18,4)",
+                _ => c.DataType.ToUpper()
+            };
+            var nullable = c.IsNullable ? "NULL" : "NOT NULL";
+            var identity = c.IsIdentity ? " IDENTITY(1,1)" : "";
+            return $"    [{c.Name}] {typeStr}{identity} {nullable}";
+        }).ToList();
+
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"USE [{conn.Database}]");
-        sb.AppendLine("GO");
-        sb.AppendLine();
-        sb.AppendLine($"CREATE TABLE [dbo].[{objName}] (");
+        if (!string.IsNullOrEmpty(database))
+        {
+            sb.AppendLine($"USE [{database}]");
+            sb.AppendLine("GO");
+            sb.AppendLine();
+        }
+        sb.AppendLine($"CREATE TABLE [{schemaName}].[{tableName}] (");
         sb.AppendLine(string.Join(",\n", lines));
         sb.AppendLine(")");
         sb.AppendLine("GO");
