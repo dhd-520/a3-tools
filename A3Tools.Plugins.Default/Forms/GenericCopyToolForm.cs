@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
+using A3Tools.Common.DataAccess;
 using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
@@ -19,6 +20,15 @@ public partial class GenericCopyToolForm : Form
     private readonly IToolContext _context;
     private readonly CustomToolConfig _config;
     private System.Data.DataTable? _searchResults;
+
+    // 源/目标账套引用（用于判断 Http 模式和创建 IDataAccess）
+    private Account? _srcAccount;
+    private Account? _tgtAccount;
+
+    // Http 模式判断（仿 Win 表单 CrossDbCopyFormForm Line 83-85）
+    private bool IsSourceHttp => ProxyHelper.IsHttp(_srcAccount);
+    private bool IsTargetHttp => ProxyHelper.IsHttp(_tgtAccount);
+    private bool IsHttpMode => IsSourceHttp || IsTargetHttp;
 
     public GenericCopyToolForm(IToolContext context, CustomToolConfig config)
     {
@@ -115,6 +125,7 @@ public partial class GenericCopyToolForm : Form
     private void ApplyAccountToDatabaseFields(Account? account, bool isSource)
     {
         if (account == null) return;
+        if (isSource) _srcAccount = account; else _tgtAccount = account;
         if (isSource)
         {
             txtSourceServer.Text = account.Database ?? "";
@@ -255,6 +266,13 @@ public partial class GenericCopyToolForm : Form
         {
             MessageBox.Show("请输入搜索关键字！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             txtSearchKeyword.Focus();
+            return;
+        }
+
+        // Http 代理模式
+        if (IsSourceHttp && _srcAccount != null)
+        {
+            await BtnSearchHttpAsync(keyword);
             return;
         }
 
@@ -504,6 +522,13 @@ WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName";
             return;
         }
 
+        // Http 代理模式
+        if (IsHttpMode)
+        {
+            await BtnConfirmHttpAsync(keyValues);
+            return;
+        }
+
         var srcConnStr = BuildConnStr(txtSourceServer.Text.Trim(), txtSourceDbName.Text.Trim(), txtSourceUser.Text.Trim(), txtSourcePassword.Text);
         var tgtConnStr = BuildConnStr(txtTargetServer.Text.Trim(), txtTargetDbName.Text.Trim(), txtTargetUser.Text.Trim(), txtTargetPassword.Text);
         if (!TestConn(srcConnStr)) { MessageBox.Show("源数据库连接失败！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
@@ -608,4 +633,179 @@ ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
 
     private static bool ValidateFieldName(string name) =>
         !string.IsNullOrWhiteSpace(name) && name.All(c => char.IsLetterOrDigit(c) || c == '_');
+
+    #region HTTP 代理模式分支（直连模式代码 100% 不动）
+
+    // Http 模式搜索：构建 srcDA + 查询列 + 查询数据
+    private async Task BtnSearchHttpAsync(string keyword)
+    {
+        var srcDA = ProxyHelper.CreateDataAccess(_srcAccount)!;
+        lblSearchProgress.Text = "查询中...";
+        lblSearchProgress.ForeColor = Color.Blue;
+        dgvSearchResults.DataSource = null;
+        btnSearch.Enabled = false;
+
+        try
+        {
+            // 查 dbColumns（Http 版本，独立于直连 GetAllColumns）
+            var dbColumns = await GetAllColumnsHttpAsync(srcDA, _config.MainTable);
+
+            // 计算 validSearchCols（同直连逻辑，独立实现）
+            var validSearchCols = new List<string>();
+            var dbSet = new HashSet<string>(dbColumns, StringComparer.OrdinalIgnoreCase);
+            var pk = _config.PrimaryKey;
+            var configuredCols = _config.SearchColumnList;
+            if (configuredCols.Count > 0)
+            {
+                foreach (var c in configuredCols)
+                    if (dbSet.Contains(c)) validSearchCols.Add(c);
+                if (!string.IsNullOrEmpty(pk) && !validSearchCols.Any(c => string.Equals(c, pk, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (dbSet.Contains(pk)) validSearchCols.Insert(0, pk);
+                }
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(pk) && dbSet.Contains(pk)) validSearchCols.Add(pk);
+                if (dbSet.Contains("NAME")) validSearchCols.Add("NAME");
+            }
+
+            if (validSearchCols.Count == 0)
+                throw new InvalidOperationException("未能找到任何可用于搜索的列，请检查搜索列配置。");
+
+            // 去重（按大小写不敏感）保持顺序
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var uniqueCols = new List<string>();
+            foreach (var c in validSearchCols)
+                if (!string.IsNullOrWhiteSpace(c) && seen.Add(c)) uniqueCols.Add(c);
+
+            // 构建 SQL（Http 版本：keyword 直接拼接，不走 @keyword 参数）
+            var whereClauses = uniqueCols
+                .Select(c => $"CONVERT(NVARCHAR(4000), [{c}]) LIKE '%{ProxyHelper.EscapeSql(keyword)}%'");
+            var where = string.Join(" OR ", whereClauses);
+            var sql = $"SELECT TOP 5000 * FROM dbo.[{_config.MainTable}] WHERE {where} ORDER BY [{_config.PrimaryKey}]";
+
+            _searchResults = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+            BindSearchResults(_searchResults);
+            lblSearchProgress.Text = $"查询完成，共 {_searchResults.Rows.Count} 条。";
+            lblSearchProgress.ForeColor = Color.Green;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            lblSearchProgress.Text = "查询失败";
+            lblSearchProgress.ForeColor = Color.Red;
+        }
+        finally
+        {
+            btnSearch.Enabled = true;
+        }
+    }
+
+    // Http 模式确认复制：构建 srcDA + tgtDA + 调 ProxyHelper.CopyTableDataAsync
+    private async Task BtnConfirmHttpAsync(string[] keyValues)
+    {
+        if (_srcAccount == null || _tgtAccount == null)
+        {
+            MessageBox.Show("请先选择源/目标账套！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var srcDA = ProxyHelper.CreateDataAccess(_srcAccount)!;
+        var tgtDA = ProxyHelper.CreateDataAccess(_tgtAccount)!;
+        var relatedTables = _config.RelatedTableList;
+        var tag = $"[{_config.Name}]";
+        var errors = new List<string>();
+        var success = 0;
+
+        btnConfirm.Enabled = false;
+        progressBar.Value = 0;
+        lblProgress.Text = $"开始复制 {keyValues.Length} 条...";
+
+        try
+        {
+            for (int i = 0; i < keyValues.Length; i++)
+            {
+                var key = keyValues[i];
+                try
+                {
+                    var parentGuid = await GetMainRowGuidHttpAsync(srcDA, _config.MainTable, _config.PrimaryKey, key);
+                    await ProxyHelper.CopyTableDataAsync(srcDA, tgtDA, _config.MainTable, _config.PrimaryKey, key, chkDeleteFirst.Checked, tag);
+
+                    if (!string.IsNullOrEmpty(parentGuid) && !string.IsNullOrWhiteSpace(_config.ForeignKey))
+                    {
+                        foreach (var related in relatedTables)
+                            await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, related, _config.ForeignKey, parentGuid, chkDeleteFirst.Checked, tag);
+                    }
+                    else if (relatedTables.Count > 0)
+                    {
+                        errors.Add($"{key}: 未找到主表 GUID/OBJECTGUID，关联表未复制");
+                    }
+
+                    success++;
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"{key}: {ex.Message}");
+                }
+
+                var done = i + 1;
+                progressBar.Value = done * 100 / keyValues.Length;
+                lblProgress.Text = $"已处理 {done}/{keyValues.Length}（成功 {success}）";
+            }
+
+            progressBar.Value = 100;
+            lblProgress.Text = $"完成：成功 {success}/{keyValues.Length}";
+            if (errors.Count > 0)
+            {
+                var preview = string.Join("\n", errors.Take(10));
+                if (errors.Count > 10) preview += $"\n... 还有 {errors.Count - 10} 条错误";
+                MessageBox.Show($"复制完成，但有 {errors.Count} 条错误：\n\n{preview}", "部分失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show($"复制完成！成功 {success} 条。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"复制过程出错：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            lblProgress.Text = $"失败：{ex.Message}";
+        }
+        finally
+        {
+            btnConfirm.Enabled = true;
+        }
+    }
+
+    // Http 模式获取表列名（独立于直连 GetAllColumns）
+    private static async Task<List<string>> GetAllColumnsHttpAsync(IDataAccess da, string tableName)
+    {
+        var sql = $"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='{ProxyHelper.EscapeSql(tableName)}'";
+        var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+        var list = new List<string>();
+        foreach (System.Data.DataRow row in dt.Rows)
+            list.Add(row[0]?.ToString() ?? "");
+        return list;
+    }
+
+    // Http 模式获取主表 GUID（独立于直连 GetMainRowGuid）
+    private static async Task<string?> GetMainRowGuidHttpAsync(IDataAccess da, string tableName, string primaryKey, string keyValue)
+    {
+        var hasGuidSql = $@"
+SELECT TOP 1 COLUMN_NAME
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='{ProxyHelper.EscapeSql(tableName)}' AND COLUMN_NAME IN ('GUID','OBJECTGUID')
+ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
+        var guidColDt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, hasGuidSql);
+        if (guidColDt.Rows.Count == 0) return null;
+        var guidColumn = guidColDt.Rows[0][0]?.ToString();
+        if (string.IsNullOrEmpty(guidColumn)) return null;
+
+        var sql = $"SELECT TOP 1 [{guidColumn}] FROM dbo.[{tableName}] WHERE [{primaryKey}] = '{ProxyHelper.EscapeSql(keyValue)}'";
+        var result = await ProxyHelper.ExecuteScalarAsync(da, sql);
+        return result?.ToString();
+    }
+
+    #endregion
 }
