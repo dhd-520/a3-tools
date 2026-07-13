@@ -19,6 +19,11 @@ public partial class CrossDbCopyAppChartForm : Form
     private Account? _tgtAccount;
     private System.Data.DataTable? _searchResults;
 
+    // Http 模式判断（仿 Win 表单 CrossDbCopyFormForm Line 83-85）
+    private bool IsSourceHttp => ProxyHelper.IsHttp(_srcAccount);
+    private bool IsTargetHttp => ProxyHelper.IsHttp(_tgtAccount);
+    private bool IsHttpMode => IsSourceHttp || IsTargetHttp;
+
     public CrossDbCopyAppChartForm(IToolContext context, Account? currentAccount)
     {
         _context = context;
@@ -108,6 +113,7 @@ public partial class CrossDbCopyAppChartForm : Form
     private void ApplyAccountToDatabaseFields(Account? account, bool isSource)
     {
         if (account == null) return;
+        if (isSource) _srcAccount = account; else _tgtAccount = account;
 
         if (isSource)
         {
@@ -401,7 +407,7 @@ public partial class CrossDbCopyAppChartForm : Form
         return account;
     }
 
-    private void BtnSearch_Click(object? sender, EventArgs e)
+    private async void BtnSearch_Click(object? sender, EventArgs e)
     {
         // 验证源数据库连接信息
         if (string.IsNullOrWhiteSpace(txtSourceServer.Text))
@@ -427,6 +433,13 @@ public partial class CrossDbCopyAppChartForm : Form
         lblSearchProgress.ForeColor = Color.Blue;
         dgvSearchResults.DataSource = null;
         btnSearch.Enabled = false;
+
+        // Http 代理模式
+        if (IsSourceHttp && _srcAccount != null)
+        {
+            await BtnSearchHttpAsync();
+            return;
+        }
 
         Task.Run(() =>
         {
@@ -577,4 +590,74 @@ ORDER BY NAME";
         lblSearchProgress.Text = "已清空选项";
         lblSearchProgress.ForeColor = Color.Gray;
     }
+
+    #region HTTP 代理模式分支（直连模式代码 100% 不动）
+
+    // Http 模式搜索（独立方法，走 IDataAccess，不走 Task.Run）
+    private async Task BtnSearchHttpAsync()
+    {
+        var srcDA = ProxyHelper.CreateDataAccess(_srcAccount)!;
+        var keyword = txtSearchKeyword.Text.Trim();
+
+        try
+        {
+            var sql = $@"
+SELECT GUID AS APPCHARTGUID,
+       CODE AS 代码,
+       NAME AS 名称,
+       DESCRIPTION AS 备注
+FROM S_APP_CHART
+WHERE CODE LIKE '%{ProxyHelper.EscapeSql(keyword)}%' OR NAME LIKE '%{ProxyHelper.EscapeSql(keyword)}%'
+ORDER BY NAME";
+
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+
+            _searchResults = dt;
+            // 先移除旧的选择列（如果存在）
+            if (dgvSearchResults.Columns.Contains("chk"))
+            {
+                dgvSearchResults.Columns.Remove("chk");
+            }
+            // 先设置数据源
+            dgvSearchResults.DataSource = dt;
+            // 再插入checkbox列作为第一列
+            var checkCol = new DataGridViewCheckBoxColumn();
+            checkCol.HeaderText = "选择";
+            checkCol.Width = 50;
+            checkCol.Name = "chk";
+            dgvSearchResults.Columns.Insert(0, checkCol);
+            dgvSearchResults.AutoResizeColumns();
+            // 隐藏APPCHARTGUID列
+            if (dgvSearchResults.Columns.Contains("APPCHARTGUID"))
+            {
+                dgvSearchResults.Columns["APPCHARTGUID"].Visible = false;
+            }
+            // 默认选中第一行并同步checkbox
+            if (dgvSearchResults.Rows.Count > 0)
+            {
+                dgvSearchResults.Rows[0].Selected = true;
+            }
+            // 同步所有选中行的checkbox状态
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null) checkCell.Value = row.Selected;
+            }
+            lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
+            lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
+            lblSearchProgress.ForeColor = Color.Green;
+        }
+        catch (Exception ex)
+        {
+            lblSearchProgress.Text = "查询失败";
+            lblSearchProgress.ForeColor = Color.Red;
+            MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            btnSearch.Enabled = true;
+        }
+    }
+
+    #endregion
 }
