@@ -22,6 +22,11 @@ public partial class CrossDbCopyConfigDataForm : Form
     private Account? _srcAccount;
     private Account? _tgtAccount;
 
+    // Http 模式判断（仿 Win 表单 CrossDbCopyFormForm Line 83-85）
+    private bool IsSourceHttp => ProxyHelper.IsHttp(_srcAccount);
+    private bool IsTargetHttp => ProxyHelper.IsHttp(_tgtAccount);
+    private bool IsHttpMode => IsSourceHttp || IsTargetHttp;
+
     /// <summary>
     /// 复合主键分隔符：用于在内存中拼接/拆分多列主键
     /// </summary>
@@ -182,7 +187,7 @@ public partial class CrossDbCopyConfigDataForm : Form
     /// <summary>
     /// 搜索按钮：根据当前选中的数据类型 + 关键字查询源库
     /// </summary>
-    private void BtnSearch_Click(object? sender, EventArgs e)
+    private async void BtnSearch_Click(object? sender, EventArgs e)
     {
         if (string.IsNullOrWhiteSpace(txtSourceServer.Text))
         {
@@ -218,6 +223,13 @@ public partial class CrossDbCopyConfigDataForm : Form
         lblSearchProgress.ForeColor = Color.Blue;
         dgvSearchResults.DataSource = null;
         btnSearch.Enabled = false;
+
+        // Http 代理模式
+        if (IsSourceHttp && _srcAccount != null)
+        {
+            await BtnSearchHttpAsync();
+            return;
+        }
 
         Task.Run(() =>
         {
@@ -297,7 +309,7 @@ public partial class CrossDbCopyConfigDataForm : Form
     /// <summary>
     /// 缺失对象：根据当前数据类型的判断依据，分别从源库和目标库取主键集合，求差集（源有目标无）展示在下方，默认全选
     /// </summary>
-    private void BtnFindMissing_Click(object? sender, EventArgs e)
+    private async void BtnFindMissing_Click(object? sender, EventArgs e)
     {
         if (string.IsNullOrWhiteSpace(txtSourceServer.Text) || string.IsNullOrWhiteSpace(txtSourceDbName.Text))
         {
@@ -326,6 +338,13 @@ public partial class CrossDbCopyConfigDataForm : Form
         dgvSearchResults.DataSource = null;
         btnFindMissing.Enabled = false;
         btnSearch.Enabled = false;
+
+        // Http 代理模式
+        if (IsHttpMode)
+        {
+            await BtnFindMissingHttpAsync();
+            return;
+        }
 
         Task.Run(() =>
         {
@@ -671,6 +690,7 @@ public partial class CrossDbCopyConfigDataForm : Form
     private void ApplyAccountToDatabaseFields(Account? account, bool isSource)
     {
         if (account == null) return;
+        if (isSource) _srcAccount = account; else _tgtAccount = account;
 
         if (isSource)
         {
@@ -997,6 +1017,175 @@ public partial class CrossDbCopyConfigDataForm : Form
             return false;
         }
     }
+
+    #region HTTP 代理模式分支（直连模式代码 100% 不动）
+
+    // Http 模式查找缺失对象（独立方法，走 IDataAccess，不走 Task.Run）
+    private async Task BtnFindMissingHttpAsync()
+    {
+        var type = (ConfigDataType)cboObjectType.SelectedItem!;
+        var keyword = txtSearchKeyword.Text.Trim();
+        var hasKeyword = !string.IsNullOrWhiteSpace(keyword);
+
+        try
+        {
+            // 构建临时账套（自动适配 Http 模式）
+            var srcAccount = BuildTempAccount(txtSourceServer.Text.Trim(), txtSourceDbName.Text.Trim(), txtSourceUser.Text.Trim(), txtSourcePassword.Text);
+            var tgtAccount = BuildTempAccount(txtTargetServer.Text.Trim(), txtTargetDbName.Text.Trim(), txtTargetUser.Text.Trim(), txtTargetPassword.Text);
+            var srcDA = ProxyHelper.CreateDataAccess(srcAccount)!;
+            var tgtDA = ProxyHelper.CreateDataAccess(tgtAccount)!;
+
+            // 1. 源库（Http 模式：keyword 直接拼接）
+            var whereConditions = type.WhereColumns.Select(c => $"[{c}] LIKE '%{ProxyHelper.EscapeSql(keyword)}%'");
+            var whereClause = hasKeyword
+                ? "(" + string.Join(" OR ", whereConditions) + ")"
+                : "1=1";
+            var srcSql = $"{type.SearchSql} WHERE {whereClause} ORDER BY [{type.KeyColumns[0]}]";
+
+            var srcDt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, srcSql);
+            var srcTotal = srcDt.Rows.Count;
+
+            // 2. 目标库主键集合
+            var keyCols = type.KeyColumns;
+            var concatCols = string.Join($"+'{KEY_SEPARATOR}'+", keyCols.Select(c => $"ISNULL([{c}], '')"));
+            var tgtKeySelect = $"{concatCols} AS [{KEY_SEPARATOR}]";
+            var tgtSql = $"SELECT {tgtKeySelect} FROM {type.TableName}";
+
+            var tgtKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var tgtDt = await ProxyHelper.ExecuteQueryToDataTableAsync(tgtDA, tgtSql);
+            foreach (System.Data.DataRow row in tgtDt.Rows)
+            {
+                var k = row[KEY_SEPARATOR]?.ToString();
+                if (!string.IsNullOrEmpty(k)) tgtKeys.Add(k);
+            }
+
+            // 3. 差集
+            var missingRows = srcDt.AsEnumerable()
+                .Where(r =>
+                {
+                    var key = keyCols.Length == 1
+                        ? r[keyCols[0]]?.ToString() ?? ""
+                        : string.Join(KEY_SEPARATOR, keyCols.Select(c => r[c]?.ToString() ?? ""));
+                    return !tgtKeys.Contains(key);
+                })
+                .ToList();
+
+            // 4. UI 绑定（Http 模式已在 UI 线程，不需要 Invoke）
+            if (dgvSearchResults.Columns.Contains("chk"))
+            {
+                dgvSearchResults.Columns.Remove("chk");
+            }
+            if (missingRows.Count > 0)
+            {
+                _originalDt = missingRows.CopyToDataTable();
+                _dataView = new DataView(_originalDt);
+                dgvSearchResults.DataSource = _dataView;
+                var checkCol = new DataGridViewCheckBoxColumn
+                {
+                    HeaderText = "选择",
+                    Width = 50,
+                    Name = "chk"
+                };
+                dgvSearchResults.Columns.Insert(0, checkCol);
+                dgvSearchResults.AutoResizeColumns();
+                foreach (DataGridViewRow row in dgvSearchResults.Rows)
+                {
+                    row.Selected = true;
+                    var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                    if (checkCell != null) checkCell.Value = true;
+                }
+            }
+            else
+            {
+                _originalDt = null;
+                _dataView = null;
+                dgvSearchResults.DataSource = null;
+            }
+
+            lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
+            var missing = missingRows.Count;
+            var hint = hasKeyword ? "（已按关键字过滤）" : "";
+            lblSearchProgress.Text = $"源库共 {srcTotal} 条{type.Display}{hint}，缺失 {missing} 条";
+            lblSearchProgress.ForeColor = missing > 0 ? Color.FromArgb(228, 94, 29) : Color.Green;
+            ApplyFilter();
+            SyncFilterRowPositions();
+        }
+        catch (Exception ex)
+        {
+            lblSearchProgress.Text = "查询失败";
+            lblSearchProgress.ForeColor = Color.Red;
+            MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            btnFindMissing.Enabled = true;
+            btnSearch.Enabled = true;
+        }
+    }
+
+    // Http 模式搜索（独立方法，走 IDataAccess，不走 Task.Run）
+    private async Task BtnSearchHttpAsync()
+    {
+        var type = (ConfigDataType)cboObjectType.SelectedItem!;
+        var keyword = txtSearchKeyword.Text.Trim();
+
+        try
+        {
+            // 构建临时账套（自动检测源账套 Http 模式）
+            var srcAccount = BuildTempAccount(txtSourceServer.Text.Trim(), txtSourceDbName.Text.Trim(), txtSourceUser.Text.Trim(), txtSourcePassword.Text);
+            var srcDA = ProxyHelper.CreateDataAccess(srcAccount)!;
+
+            // Http 模式：keyword 直接拼接（IDataAccess.ExecuteQueryAsync 不支持参数化）
+            var whereConditions = type.WhereColumns.Select(c => $"[{c}] LIKE '%{ProxyHelper.EscapeSql(keyword)}%'");
+            var whereClause = "(" + string.Join(" OR ", whereConditions) + ")";
+            var orderBy = type.KeyColumns[0];
+            var sql = $"{type.SearchSql} WHERE {whereClause} ORDER BY [{orderBy}]";
+
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+
+            if (dgvSearchResults.Columns.Contains("chk"))
+            {
+                dgvSearchResults.Columns.Remove("chk");
+            }
+            _originalDt = dt;
+            _dataView = new DataView(dt);
+            dgvSearchResults.DataSource = _dataView;
+            var checkCol = new DataGridViewCheckBoxColumn
+            {
+                HeaderText = "选择",
+                Width = 50,
+                Name = "chk"
+            };
+            dgvSearchResults.Columns.Insert(0, checkCol);
+            dgvSearchResults.AutoResizeColumns();
+            if (dgvSearchResults.Rows.Count > 0)
+            {
+                dgvSearchResults.Rows[0].Selected = true;
+            }
+            foreach (DataGridViewRow row in dgvSearchResults.Rows)
+            {
+                var checkCell = row.Cells["chk"] as DataGridViewCheckBoxCell;
+                if (checkCell != null) checkCell.Value = row.Selected;
+            }
+            lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
+            lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
+            lblSearchProgress.ForeColor = Color.Green;
+            ApplyFilter();
+            SyncFilterRowPositions();
+        }
+        catch (Exception ex)
+        {
+            lblSearchProgress.Text = "查询失败";
+            lblSearchProgress.ForeColor = Color.Red;
+            MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            btnSearch.Enabled = true;
+        }
+    }
+
+    #endregion
 }
 
 
