@@ -59,8 +59,13 @@ $gitStatus = (& git status --porcelain)
 if ($gitStatus) {
     Warn "git working dir has uncommitted changes:"
     $gitStatus | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
-    $ans = Read-Host "Continue? [y/N]"
-    if ($ans -ne 'y' -and $ans -ne 'Y') { exit 1 }
+    # 非交互模式(Agent / CI): 默认继续;交互模式: 询问
+    if ([Environment]::UserInteractive) {
+        $ans = Read-Host "Continue? [y/N]"
+        if ($ans -ne 'y' -and $ans -ne 'Y') { exit 1 }
+    } else {
+        Warn "non-interactive mode -> auto continue"
+    }
 }
 
 # 3) Token 校验（优先读 env，其次读项目根 ./secrets.local.env）
