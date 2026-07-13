@@ -66,8 +66,20 @@ internal static class ProxyHelper
 
         var table = result.Tables[0];
         var dt = new DataTable();
+        // 对齐 SqlDataAdapter 行为：重复列名自动加 _2/_3/... 后缀（直连模式 SqlDataAdapter 内部就这样处理）。
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in table.Columns)
-            dt.Columns.Add(col.Name, typeof(object));
+        {
+            var name = col.Name;
+            if (!usedNames.Add(name))
+            {
+                int suffix = 2;
+                string unique;
+                do { unique = $"{name}_{suffix++}"; } while (!usedNames.Add(unique));
+                name = unique;
+            }
+            dt.Columns.Add(name, typeof(object));
+        }
 
         foreach (var row in table.Rows)
         {

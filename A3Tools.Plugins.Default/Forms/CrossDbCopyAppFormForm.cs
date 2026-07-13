@@ -513,13 +513,6 @@ public partial class CrossDbCopyAppFormForm : Form
 
     private void BtnSearch_Click(object? sender, EventArgs e)
     {
-        // 搜索功能提示：Http 模式下不支持单条搜索（因为 ProxyHelper 不分页），切换为 ProxyHelper 查询
-        if (ProxyHelper.IsHttp(_srcAccount))
-        {
-            if (MessageBox.Show("Http 代理模式下，搜索区功能有限。是否继续？", "提示", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-                return;
-        }
-
         if (string.IsNullOrWhiteSpace(txtSourceServer.Text))
         {
             MessageBox.Show("请填写源数据库地址！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
