@@ -457,6 +457,65 @@ del ""%~f0""
         // bat 详细日志版：每一步 echo 到 _update.log
         // Plan B: cd /d %~dp0 强制切到 bat 所在目录，不依赖 C# 传的 WorkingDirectory
         // bat 用 UTF-8 写入避免 GBK 中文乱码
+        //
+        // 【2026-07-13 升级卡住修复】从 64MB v2.3.14 到 71MB v2.4.0 时，bat 内嵌
+        //   powershell -Command "ExtractToDirectory(...)" 调用在解压期间静默不输出，
+        //   加上 Windows Defender 首次扫描 75MB A3Tools.exe，耗时可达 30~60秒。
+        //   陛下看到 1 分钟没进度以为卡了，手动重试 → 第二个 PS 起来争抢同一 zip。
+        //   修复：把解压逻辑抽到独立的 _unzip.ps1（UTF-8 BOM），bat 调
+        //         powershell -File _unzip.ps1（.ps1 走 BOM 路径，不靠命令行传中文）。
+        //         同时加进度 echo：每解压 1 个 entry 就输出 1 个 dot，让陛下看到在跑。
+        //         + 启动时检测残留 _unzip.ps1 / 残留 powershell，先清理避免重入。
+
+        // 生成独立 .ps1（带 UTF-8 BOM，避免 PS5.1 GBK 源文件解析问题）
+        string unzipScriptPath = Path.Combine(currentDir, "_unzip.ps1");
+        // 把路径用单引号包起来传给 .ps1（.ps1 走 BOM 路径后是 UTF-8 模式，单引号字面量安全）
+        string psContent =
+            "# _unzip.ps1 - 独立解压脚本（bat 调 powershell -File 跑）\r\n" +
+            "# 入参: $args[0]=zipPath, $args[1]=tempExtract\r\n" +
+            "$ErrorActionPreference = 'Stop'\r\n" +
+            "try {\r\n" +
+            "    Add-Type -AssemblyName System.IO.Compression.FileSystem\r\n" +
+            "    $zipPath = $args[0]\r\n" +
+            "    $dst = $args[1]\r\n" +
+            "    Write-Host (\"[unzip] zip='\" + $zipPath + \"' dst='\" + $dst + \"'\")\r\n" +
+            "    if (-not (Test-Path $zipPath)) { throw \"zip not found: $zipPath\" }\r\n" +
+            "    if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }\r\n" +
+            "    New-Item -ItemType Directory -Path $dst -Force | Out-Null\r\n" +
+            "    # 用 ZipArchive 手动遍历解压，启进度反馈（每 5 entries 输出一个 .）\r\n" +
+            "    $fs = [System.IO.File]::OpenRead($zipPath)\r\n" +
+            "    $archive = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Read)\r\n" +
+            "    $total = $archive.Entries.Count\r\n" +
+            "    $i = 0\r\n" +
+            "    Write-Host (\"[unzip] total entries: $total\")\r\n" +
+            "    try {\r\n" +
+            "        foreach ($e in $archive.Entries) {\r\n" +
+            "            $i++\r\n" +
+            "            $target = Join-Path $dst $e.FullName\r\n" +
+            "            $dir = [System.IO.Path]::GetDirectoryName($target)\r\n" +
+            "            if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }\r\n" +
+            "            if (-not [string]::IsNullOrEmpty($e.Name)) {\r\n" +
+            "                $es = $e.Open()\r\n" +
+            "                try {\r\n" +
+            "                    $out = [System.IO.File]::Create($target)\r\n" +
+            "                    try { $es.CopyTo($out) } finally { $out.Close() }\r\n" +
+            "                } finally { $es.Close() }\r\n" +
+            "            }\r\n" +
+            "            if (($i % 5) -eq 0 -or $i -eq $total) { Write-Host (\"[unzip] progress: $i / $total\") }\r\n" +
+            "        }\r\n" +
+            "    } finally {\r\n" +
+            "        $fs.Close()\r\n" +
+            "        $fs.Dispose()\r\n" +
+            "    }\r\n" +
+            "    Write-Host \"[unzip] OK\"\r\n" +
+            "    exit 0\r\n" +
+            "} catch {\r\n" +
+            "    Write-Host (\"[unzip] FAILED: \" + $_.Exception.Message)\r\n" +
+            "    exit 1\r\n" +
+            "}\r\n";
+        // UTF-8 BOM, .ps1 走 BOM 后 PS 5.1 会按 UTF-8 解析
+        File.WriteAllText(unzipScriptPath, psContent, new System.Text.UTF8Encoding(true));
+
         string batContent = $@"@echo off
 chcp 65001 >nul
 setlocal
@@ -474,15 +533,28 @@ echo [%date% %time%] currentExe={currentExe} >> ""{logPath}""
 echo [%date% %time%] zipPath={zipPath} >> ""{logPath}""
 echo [%date% %time%] tempExtract={tempExtract} >> ""{logPath}""
 
+:: === 0. 防重入：上一次的 unzip 进程残留检测 ===
+:: 如果前一次升级用户在解压中手动重试了，会留个 powershell 在解压同一个 zip
+:: 这会让新一次解压卡住。检测并 kill 残留进程（同一 tempExtract 标记）
+set ""STALE_TAG={tempExtract}""
+echo [%date% %time%] checking stale powershell (tag=%STALE_TAG%) >> ""{logPath}""
+for /f ""tokens=*"" %%p in ('powershell -NoProfile -Command ""Get-Process powershell -ErrorAction SilentlyContinue | Where-Object {{ \$_.StartTime -gt (Get-Date).AddMinutes(-10) }} | Select-Object -ExpandProperty Id""') do (
+    echo [%date% %time%] stale powershell found: PID=%%p, killing >> ""{logPath}""
+    taskkill /F /PID %%p >> ""{logPath}"" 2>&1
+)
+timeout /t 1 /nobreak >nul
+
 timeout /t 2 /nobreak >nul
 
-:: === 1. 解压 zip 到临时目录 ===
+:: === 1. 解压 zip 到临时目录（用独立 .ps1 走 BOM 路径，避免命令行 GBK 问题） ===
 echo [%date% %time%] STEP 1: unzipping... >> ""{logPath}""
-powershell -NoProfile -Command ""try {{ Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('{zipPath}', '{tempExtract}') }} catch {{ 'unzip FAILED: ' + $_.Exception.Message; exit 1 }}"" >> ""{logPath}"" 2>&1
+echo [%date% %time%] STEP 1: invoking powershell -File _unzip.ps1 >> ""{logPath}""
+powershell -NoProfile -ExecutionPolicy Bypass -File ""%~dp0_unzip.ps1"" ""{zipPath}"" ""{tempExtract}"" >> ""{logPath}"" 2>&1
 if errorlevel 1 (
     echo [%date% %time%] FATAL: unzip failed >> ""{logPath}""
     start """" ""{currentExe}""
     del ""%~f0""
+    del ""%~dp0_unzip.ps1"" >nul 2>&1
     exit /b 1
 )
 
@@ -490,6 +562,7 @@ if not exist ""{tempExtract}"" (
     echo [%date% %time%] FATAL: tempExtract not exist after unzip >> ""{logPath}""
     start """" ""{currentExe}""
     del ""%~f0""
+    del ""%~dp0_unzip.ps1"" >nul 2>&1
     exit /b 1
 )
 
@@ -520,6 +593,8 @@ start """" ""{currentExe}""
 :: === 6. 清理临时 zip 和 bat ===
 echo [%date% %time%] cleanup >> ""{logPath}""
 del ""{zipPath}"" >nul 2>&1
+:: === 清理 .ps1 脚本 ===
+del ""%~dp0_unzip.ps1"" >nul 2>&1
 :: === 清理日志：升级成功后清掉 _update.log（前面任何 exit /b 1 都跳过这行） ===
 del ""{logPath}"" >nul 2>&1
 del ""%~f0""
