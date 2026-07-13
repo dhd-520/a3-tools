@@ -9,6 +9,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
+using A3Tools.Forms;
 
 namespace A3Tools.Services;
 
@@ -348,6 +350,23 @@ public class UpdateService
     /// </summary>
     public static void PerformUpdate(string newExePath)
     {
+        // 【2026-07-13 加进度 toast】弹个"升级中"提示，2.5 秒后自动消失（不抢焦点）
+        //   让陛下知道升级开始了，而不是被静默杀进程。toast 是独立 message loop，
+        //   用 Task.Run 异步显示不阻塞 PerformUpdate 后续启动 bat 的流程。
+        Task.Run(() =>
+        {
+            try
+            {
+                using var toast = new AlreadyRunningToastForm
+                {
+                    DurationMs = 2500,
+                    Message = "A3Tools 升级中…升级完成后会自动重启"
+                };
+                Application.Run(toast);
+            }
+            catch { /* toast 弹不出来也不重要 */ }
+        });
+
         // StandaloneSF 单文件发布下，MainModule.FileName 会返回 self-extract 临时目录
         // 优先用 Environment.ProcessPath（.NET 6+）获取真实启动 exe 路径
         string currentExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule!.FileName!;
@@ -378,8 +397,8 @@ echo [%date% %time%] moving new exe >> ""{logPath}""
 move ""{newExePath}"" ""{currentExe}"" >> ""{logPath}"" 2>&1
 echo [%date% %time%] moving done, errorlevel=%errorlevel% >> ""{logPath}""
 start """" ""{currentExe}""
-:: === 清理日志：升级成功后清掉 _update.log（失败时前面的 exit /b 1 已经跳到这里） ===
-del ""{logPath}"" >nul 2>&1
+:: === 【2026-07-13】保留 _update.log 让新启动的 A3Tools 检测升级结果，弹 toast 告知陛下 ===
+echo [%date% %time%] STATUS=SUCCESS >> ""{logPath}""
 del ""%~f0""
 ";
         // CRITICAL: Normalize line endings to CRLF.
@@ -440,6 +459,21 @@ del ""%~f0""
     /// </summary>
     public static void PerformZipUpdate(string zipPath)
     {
+        // 【2026-07-13 加进度 toast】弹个"升级中"提示，让陛下知道升级开始了
+        Task.Run(() =>
+        {
+            try
+            {
+                using var toast = new AlreadyRunningToastForm
+                {
+                    DurationMs = 3000,
+                    Message = "A3Tools 升级中…升级完成后会自动重启"
+                };
+                Application.Run(toast);
+            }
+            catch { /* toast 弹不出来也不重要 */ }
+        });
+
         // StandaloneSF 单文件发布下，MainModule.FileName 会返回 self-extract 临时目录
         // 优先用 Environment.ProcessPath（.NET 6+）获取真实启动 exe 路径
         string currentExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule!.FileName!;
@@ -596,8 +630,10 @@ echo [%date% %time%] cleanup >> ""{logPath}""
 del ""{zipPath}"" >nul 2>&1
 :: === 清理 .ps1 脚本 ===
 del ""%~dp0_unzip.ps1"" >nul 2>&1
-:: === 清理日志：升级成功后清掉 _update.log（前面任何 exit /b 1 都跳过这行） ===
-del ""{logPath}"" >nul 2>&1
+:: === 清理日志：保留最后状态供下次启动检测升级结果 ===
+::      【2026-07-13】陛下默认在桌面上着不到升级进度，改为不删 _update.log，
+::      让新启动的 A3Tools 检测日志判断升级是否成功 → toast 告知。
+echo [%date% %time%] STATUS=SUCCESS >> ""{logPath}""
 del ""%~f0""
 ";
         string batPath = Path.Combine(currentDir, "_update.bat");
