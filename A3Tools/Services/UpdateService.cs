@@ -476,6 +476,7 @@ del ""%~f0""
             "$ErrorActionPreference = 'Stop'\r\n" +
             "try {\r\n" +
             "    Add-Type -AssemblyName System.IO.Compression.FileSystem\r\n" +
+            "    Add-Type -AssemblyName System.IO.Compression\r\n" +
             "    $zipPath = $args[0]\r\n" +
             "    $dst = $args[1]\r\n" +
             "    Write-Host (\"[unzip] zip='\" + $zipPath + \"' dst='\" + $dst + \"'\")\r\n" +

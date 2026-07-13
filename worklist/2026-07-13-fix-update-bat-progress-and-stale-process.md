@@ -38,7 +38,8 @@ v2.4.0 (71MB zip, 含 75MB 单文件 A3Tools.exe) 升级时，bat 卡在解压�
 ### 测试
 - Build: 0 错 334 警告（warnings 都是已有 nullable 警告，无新增）
 - Publish: StandaloneSF-test 编译成功
-- 手动 unzip test: 71MB zip → 0.5 秒解压
+- 手动 unzip test: 71MB zip → 0.5 秒解压 10 entries
+- 进度 echo 工作: `[unzip] total entries: 10` / `[unzip] progress: 5 / 10` / `[unzip] progress: 10 / 10` / `[unzip] OK`
 - 验证 _unzip.ps1 内容（用 utf8.bom 写入）
 
 ### 已知问题（未修）
