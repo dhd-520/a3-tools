@@ -2378,27 +2378,48 @@ public partial class MainForm : Form, IToolContext
     private void RefreshAccountStatuses()
     {
         // 清理已结束的进程，更新显示
+        // 【2026-07-14 修复】按类型化 list 检查死进程，同步 bool 标记。
+        // 之前只清合并 ProcessIds 但不同步 bool，导致手动关开发工具后
+        // IsDevToolsRunning 始终 true → DataGridView 显示"开发工具运行中"但实际已死
         var deadCodes = new List<string>();
         foreach (var kvp in _accountStatuses)
         {
-            var deadPids = new List<int>();
-            foreach (var pid in kvp.Value.ProcessIds)
-            {
-                try
-                {
-                    var p = Process.GetProcessById(pid);
-                    if (p.HasExited)
-                        deadPids.Add(pid);
-                }
-                catch
-                {
-                    deadPids.Add(pid);
-                }
-            }
-            foreach (var pid in deadPids)
-                kvp.Value.ProcessIds.Remove(pid);
+            var status = kvp.Value;
 
-            if (kvp.Value.ProcessIds.Count == 0)
+            // 按类型化 list 清理死 PID（每种类型分别清，避免串）
+            CleanupDeadPids(status.ClientProcessIds, status);
+            CleanupDeadPids(status.DevToolsProcessIds, status);
+            CleanupDeadPids(status.WebProcessIds, status);
+            CleanupDeadPids(status.DbProcessIds, status);
+            CleanupDeadPids(status.RemoteProcessIds, status);
+
+            // 清理后同步 bool 标记：列表空了 → 对应状态为 false
+            if (status.ClientProcessIds.Count == 0) status.IsClientRunning = false;
+            if (status.DevToolsProcessIds.Count == 0) status.IsDevToolsRunning = false;
+            if (status.WebProcessIds.Count == 0) status.IsWebRunning = false;
+            if (status.DbProcessIds.Count == 0) status.IsDbConnected = false;
+            if (status.RemoteProcessIds.Count == 0) status.IsRemoteConnected = false;
+
+            // 同步合并 ProcessIds（去掉已死的 PID）
+            var deadInMerged = new List<int>();
+            foreach (var pid in status.ProcessIds)
+            {
+                bool stillAliveInAnyType =
+                    status.ClientProcessIds.Contains(pid) ||
+                    status.DevToolsProcessIds.Contains(pid) ||
+                    status.WebProcessIds.Contains(pid) ||
+                    status.DbProcessIds.Contains(pid) ||
+                    status.RemoteProcessIds.Contains(pid);
+                if (!stillAliveInAnyType) deadInMerged.Add(pid);
+            }
+            foreach (var pid in deadInMerged)
+            {
+                status.ProcessIds.Remove(pid);
+                _processIds.Remove(pid);
+                _processLaunchModes.Remove(pid);
+            }
+
+            if (status.ProcessIds.Count == 0)
                 deadCodes.Add(kvp.Key);
         }
 
@@ -2407,6 +2428,35 @@ public partial class MainForm : Form, IToolContext
             _accountStatuses.Remove(code);
 
         RefreshStatusGrid();
+    }
+
+    /// <summary>
+    /// 从类型化 PID list 清理死进程，同步移除合并 list 和全局 _processIds / _processLaunchModes
+    /// </summary>
+    private void CleanupDeadPids(List<int> typedList, AccountStatus status)
+    {
+        var dead = new List<int>();
+        foreach (var pid in typedList)
+        {
+            try
+            {
+                var p = Process.GetProcessById(pid);
+                if (p == null || p.HasExited)
+                    dead.Add(pid);
+            }
+            catch
+            {
+                // GetProcessById 进程不存在时抛 ArgumentException → 视为已退出
+                dead.Add(pid);
+            }
+        }
+        foreach (var pid in dead)
+        {
+            typedList.Remove(pid);
+            status.ProcessIds.Remove(pid);
+            _processIds.Remove(pid);
+            _processLaunchModes.Remove(pid);
+        }
     }
 
     private void RefreshStatusGrid()
@@ -2614,6 +2664,11 @@ public partial class MainForm : Form, IToolContext
     /// 按账套 Code + 进程类型（如 "client" / "dev"）查找仍存活的进程 ID 列表。
     /// 自动过滤已退出的进程（GetProcessById 抛异常 = 已死），并同步清理死进程 + 对应的 ProcessIds。
     /// 用于「按账套判断是否已启动」场景：A3 客户端/开发工具进程名都一样，必须按账套 Code 区分。
+    ///
+    /// 【2026-07-14 修复】按类型化 PID list 取（ClientProcessIds / DevToolsProcessIds / ...），
+    /// 不再遍历混合 ProcessIds + 靠 bool 标记判断。否则手动关掉开发工具后，
+    /// IsDevToolsRunning 仍是 true，遍历会把客户端 PID 误加进 dev 结果里。
+    /// 同时清理死 PID 后同步重算各 IsXxxRunning 标记。
     /// </summary>
     /// <param name="code">账套代号</param>
     /// <param name="processType">进程类型："client" / "dev" / "web" / "db" / "remote"</param>
@@ -2624,26 +2679,28 @@ public partial class MainForm : Form, IToolContext
         if (string.IsNullOrEmpty(code) || !_accountStatuses.ContainsKey(code)) return result;
 
         var status = _accountStatuses[code];
+
+        // 按类型取对应的 PID 列表（不再靠 bool 标记判断，避免混 bug）
+        List<int> typedList = processType.ToLower() switch
+        {
+            "client" => status.ClientProcessIds,
+            "dev" => status.DevToolsProcessIds,
+            "web" => status.WebProcessIds,
+            "db" => status.DbProcessIds,
+            "remote" => status.RemoteProcessIds,
+            _ => status.ProcessIds, // 未指定类型时取合并 list
+        };
+
         var dead = new List<int>();
 
-        foreach (var pid in status.ProcessIds)
+        foreach (var pid in typedList)
         {
             try
             {
                 var p = Process.GetProcessById(pid);
                 if (p != null && !p.HasExited)
                 {
-                    // 仅收集匹配类型的存活进程（用 AccountStatus 上的 bool 标记判断更稳）
-                    bool typeMatch = processType switch
-                    {
-                        "client" => status.IsClientRunning,
-                        "dev" => status.IsDevToolsRunning,
-                        "web" => status.IsWebRunning,
-                        "db" => status.IsDbConnected,
-                        "remote" => status.IsRemoteConnected,
-                        _ => true, // 未指定类型时不过滤
-                    };
-                    if (typeMatch) result.Add(pid);
+                    result.Add(pid);
                 }
                 else
                 {
@@ -2657,13 +2714,22 @@ public partial class MainForm : Form, IToolContext
             }
         }
 
-        // 顺手清掉死进程，避免列表越长越脏
+        // 顺手清掉死进程（从类型化 list + 合并 list + 全局 _processIds 都清）
         foreach (var pid in dead)
         {
+            typedList.Remove(pid);
             status.ProcessIds.Remove(pid);
             _processIds.Remove(pid);
             _processLaunchModes.Remove(pid);
         }
+
+        // 清理后同步 bool 标记：列表空了 → 对应状态为 false
+        // 修复 bug：之前死进程清理不同步 bool，导致手动关开发工具后 IsDevToolsRunning 始终 true
+        if (status.ClientProcessIds.Count == 0) status.IsClientRunning = false;
+        if (status.DevToolsProcessIds.Count == 0) status.IsDevToolsRunning = false;
+        if (status.WebProcessIds.Count == 0) status.IsWebRunning = false;
+        if (status.DbProcessIds.Count == 0) status.IsDbConnected = false;
+        if (status.RemoteProcessIds.Count == 0) status.IsRemoteConnected = false;
 
         return result;
     }
