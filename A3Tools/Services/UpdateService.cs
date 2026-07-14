@@ -363,41 +363,76 @@ public class UpdateService
 chcp 65001 >nul
 setlocal
 cd /d ""%~dp0""
+
 echo. >> ""{logPath}""
 echo ====================================================== >> ""{logPath}""
 echo [%date% %time%] exe update bat started >> ""{logPath}""
 echo [%date% %time%] cwd=%CD% >> ""{logPath}""
 echo [%date% %time%] currentExe={currentExe} >> ""{logPath}""
 echo [%date% %time%] newExePath={newExePath} >> ""{logPath}""
-timeout /t 2 /nobreak >nul
-:retry
-echo [%date% %time%] retry del {currentExe} >> ""{logPath}""
-del ""{currentExe}"" >nul 2>&1
-if exist ""{currentExe}"" goto retry
-echo [%date% %time%] moving new exe >> ""{logPath}""
-move ""{newExePath}"" ""{currentExe}"" >> ""{logPath}"" 2>&1
-echo [%date% %time%] moving done, errorlevel=%errorlevel% >> ""{logPath}""
-start """" ""{currentExe}""
-del ""%~f0""
-";
-        File.WriteAllText(batPath, batContent, new System.Text.UTF8Encoding(true));
 
-        // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
-        // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
-        // Environment.Exit(0) 杀 A3Tools 不会级联到独立 cmd
+:: 等待 A3Tools 完全退出（释放 exe 文件锁）
+timeout /t 3 /nobreak >nul
+
+:: === 1. 重试删除旧 exe ===
+:retry_del
+echo [%date% %time%] try del ""{currentExe}"" >> ""{logPath}""
+del ""{currentExe}"" >nul 2>&1
+if exist ""{currentExe}"" (
+    timeout /t 1 /nobreak >nul
+    goto retry_del
+)
+echo [%date% %time%] old exe deleted >> ""{logPath}""
+
+:: === 2. 移动新 exe ===
+echo [%date% %time%] moving ""{newExePath}"" to ""{currentExe}"" >> ""{logPath}""
+move /Y ""{newExePath}"" ""{currentExe}"" >> ""{logPath}"" 2>&1
+echo [%date% %time%] move done, errorlevel=%errorlevel% >> ""{logPath}""
+
+:: === 3. 启动新版本 ===
+echo [%date% %time%] starting new version >> ""{logPath}""
+start """" ""{currentExe}""
+
+:: === 4. 后台延迟清理 bat 和 log（陛下关窗口后清理，独立 cmd 不被影响）===
+echo [%date% %time%] scheduling cleanup in 10s >> ""{logPath}""
+(
+    echo @echo off
+    echo chcp 65001 ^>nul
+    echo timeout /t 10 /nobreak ^>nul
+    echo del ""%~f0"" 2^>nul
+    echo del ""{logPath}"" 2^>nul
+) > ""_cleanup.bat""
+start /min """" cmd /c ""_cleanup.bat""
+
+:: === 5. 让陛下看到结果（pause 不自动关窗）===
+echo.
+echo ============================================================
+echo   升级完成！可以关闭此窗口
+echo   日志和脚本将在 10 秒后自动清理
+echo ============================================================
+pause
+";
+        // CRLF 必须！bat 在 Windows 上要求 CRLF，否则 ^> 等转义会失效
+        var normalizedExeBat = batContent.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        File.WriteAllText(batPath, normalizedExeBat, new System.Text.UTF8Encoding(true));
+
+        // 关键：直接启动 bat 文件（FileName=batPath），Windows 自动用 cmd.exe 跑
+        //   - UseShellExecute=true：cmd 是独立进程，A3Tools Environment.Exit 不影响
+        //   - CreateNoWindow=false：cmd 窗口显示
+        //   - bat 末尾 pause：跑完不自动关，陛下能看到结果
+        //   - 不再用 cmd /k 转义（v2.4.2 的 /k ""batPath"" 在 UseShellExecute=true 下行为不可控）
         var psi = new ProcessStartInfo
         {
-            FileName = "cmd.exe",
-            Arguments = $"/c start \"\" /b \"{batPath}\"",
+            FileName = batPath,
             UseShellExecute = true,
-            CreateNoWindow = true,
+            CreateNoWindow = false,
             WorkingDirectory = currentDir
         };
 
         // 1) 启动 bat 后台进程（异步）
         var batProc = Process.Start(psi);
 
-        // 2) 等 bat 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
+        // 2) 等 cmd 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd 可能还没拉起窗口
         if (batProc != null)
         {
             for (int i = 0; i < 30; i++)
@@ -408,9 +443,9 @@ del ""%~f0""
         }
 
         // 3) StandaloneSF 单文件模式下 A3Tools.exe 是 self-extracted，
-        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 bat。
-        //    给 bat 1 秒时间复制 / 解压完自己再退出。
-        Thread.Sleep(1000);
+        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 cmd。
+        //    给 cmd 500ms 时间显示窗口再退出。
+        Thread.Sleep(500);
 
         // 4) 强制退出
         Environment.Exit(0);
@@ -498,32 +533,50 @@ if exist ""%CD%\A3Tools.exe"" (
 echo [%date% %time%] STEP 5: start {currentExe} >> ""{logPath}""
 start """" ""{currentExe}""
 
-:: === 6. 清理临时 zip 和 bat ===
-echo [%date% %time%] cleanup >> ""{logPath}""
+:: === 6. 后台延迟清理（陛下关窗口后清理，独立 cmd 不被影响）===
+echo [%date% %time%] cleanup scheduled in 10s >> ""{logPath}""
 del ""{zipPath}"" >nul 2>&1
-del ""%~f0""
+(
+    echo @echo off
+    echo chcp 65001 ^>nul
+    echo timeout /t 10 /nobreak ^>nul
+    echo del ""%~f0"" 2^>nul
+    echo del ""{logPath}"" 2^>nul
+    echo del ""{zipPath}"" 2^>nul
+) > ""_cleanup.bat""
+start /min """" cmd /c ""_cleanup.bat""
+
+:: === 7. 让陛下看到结果（pause 不自动关窗）===
+echo.
+echo ============================================================
+echo   升级完成！可以关闭此窗口
+echo   日志和脚本将在 10 秒后自动清理
+echo ============================================================
+pause
 ";
         string batPath = Path.Combine(currentDir, "_update.bat");
         // bat 写 UTF-8 with BOM，chcp 65001 才能正确显示中文
-        File.WriteAllText(batPath, batContent, new System.Text.UTF8Encoding(true));
+        // CRLF 必须！bat 在 Windows 上要求 CRLF，否则 ^> 等转义会失效
+        var normalizedZipBat = batContent.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        File.WriteAllText(batPath, normalizedZipBat, new System.Text.UTF8Encoding(true));
 
-        // 关键：UseShellExecute=true + FileName=cmd.exe + Arguments 用 start /b
-        // 这样 cmd.exe 启动后立即 start 新的独立 cmd 跑 bat（不是当前 cmd 的子进程）
-        // Environment.Exit(0) 杀 A3Tools 不会级联到独立 cmd
-        // WorkingDirectory 不传（bat 第一行 cd /d %~dp0 自救）
+        // 关键：直接启动 bat 文件（FileName=batPath），Windows 自动用 cmd.exe 跑
+        //   - UseShellExecute=true：cmd 是独立进程，A3Tools Environment.Exit 不影响
+        //   - CreateNoWindow=false：cmd 窗口显示
+        //   - bat 末尾 pause：跑完不自动关，陛下能看到结果
+        //   - 不再用 cmd /k 转义（v2.4.2 的 /k ""batPath"" 在 UseShellExecute=true 下行为不可控）
         var psi = new ProcessStartInfo
         {
-            FileName = "cmd.exe",
-            Arguments = $"/c start \"\" /b \"{batPath}\"",
+            FileName = batPath,
             UseShellExecute = true,
-            CreateNoWindow = true,
+            CreateNoWindow = false,
             WorkingDirectory = currentDir
         };
 
         // 1) 启动 bat 后台进程（异步）
         var batProc = Process.Start(psi);
 
-        // 2) 等 bat 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd.exe 可能还没拉起
+        // 2) 等 cmd 实际启动（最多 1.5 秒）— Process.Start 返回后 cmd 可能还没拉起窗口
         if (batProc != null)
         {
             for (int i = 0; i < 30; i++)
@@ -534,9 +587,9 @@ del ""%~f0""
         }
 
         // 3) StandaloneSF 单文件模式下 A3Tools.exe 是 self-extracted，
-        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 bat。
-        //    给 bat 1 秒时间复制 / 解压完自己再退出。
-        Thread.Sleep(1000);
+        //    Environment.Exit 时 self-extract 临时目录会被清，可能影响刚启动的 cmd。
+        //    给 cmd 500ms 时间显示窗口再退出。
+        Thread.Sleep(500);
 
         // 4) 强制退出
         Environment.Exit(0);
