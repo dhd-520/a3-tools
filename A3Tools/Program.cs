@@ -42,10 +42,8 @@ static class Program
         {
             ApplicationConfiguration.Initialize();
 
-            // 【2026-07-13 升级结果 toast】如果上次升级遗留了 _update.log，
-            //   说明此次启动是 bat 升级后的新版本启动，检测日志末尾判断成功/失败 → toast 告知陛下
-            CheckPreviousUpdateResult();
-
+            // 【2026-07-14 回滚】升级时 cmd 窗口直接显示给陛下看结果，不需要 toast 反馈
+            // 静默模式 + toast 是 19294bf 引入的"补救"代码，现在回滚到 cmd 窗口显示模式，toast 也不需要了
             Application.Run(new MainForm());
         }
         finally
@@ -142,85 +140,9 @@ static class Program
         }
     }
 
-    /// <summary>
-    /// 【2026-07-13 升级结果 toast】检测 A3Tools.exe 同目录下的 _update.log
-    ///   - log 存在且末尾 STATUS=SUCCESS → toast "升级成功"
-    ///   - log 存在且含 FATAL/STATUS=FAILED → toast "升级失败，请查看 _update.log"
-    ///   - log 不存在 → 什么都不做
-    /// 检测后删除 log（避免下次启动重复提示）
-    /// </summary>
-    private static void CheckPreviousUpdateResult()
-    {
-        try
-        {
-            string currentExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "";
-            if (string.IsNullOrEmpty(currentExe)) return;
-            string currentDir = Path.GetDirectoryName(currentExe);
-            if (string.IsNullOrEmpty(currentDir)) return;
-
-            string logPath = Path.Combine(currentDir, "_update.log");
-            if (!File.Exists(logPath)) return;
-
-            string content;
-            try { content = File.ReadAllText(logPath); } catch { return; }
-
-            string message;
-            int durationMs;
-            if (content.Contains("STATUS=SUCCESS"))
-            {
-                message = "A3Tools 升级成功";
-                durationMs = 3000;
-            }
-            else if (content.Contains("FATAL") || content.Contains("STATUS=FAILED"))
-            {
-                // 抓最后一行 FATAL 详情（可能是 unzip failed / A3Tools.exe missing）
-                string lastFatal = "";
-                try
-                {
-                    foreach (var line in content.Split('\n').Reverse())
-                    {
-                        if (line.Contains("FATAL"))
-                        {
-                            lastFatal = line.Trim();
-                            break;
-                        }
-                    }
-                }
-                catch { }
-                message = string.IsNullOrEmpty(lastFatal)
-                    ? "A3Tools 升级失败，请查看 _update.log"
-                    : "A3Tools 升级失败：" + lastFatal;
-                durationMs = 6000;
-            }
-            else
-            {
-                // log 存在但没有明确的 STATUS/FATAL 行 → 不提示，避免隔一天重启还弹隔夜的升级提示
-                return;
-            }
-
-            // 删 log（避免下次启动重复弹）
-            try { File.Delete(logPath); } catch { /* ignore */ }
-
-            // 弹 toast（异步，不阻塞主窗创建）
-            Task.Run(() =>
-            {
-                try
-                {
-                    using var toast = new AlreadyRunningToastForm
-                    {
-                        DurationMs = durationMs,
-                        Message = message
-                    };
-                    Application.Run(toast);
-                }
-                catch { /* toast 弹不出来不重要 */ }
-            });
-        }
-        catch
-        {
-            // 任何异常都不影响主流程
-        }
-    }
+    // 【2026-07-14 回滚】CheckPreviousUpdateResult + _update.log toast 检测 已废弃
+    // 升级流程改回 cmd 窗口显示模式（陛下能直接看到 bat 每步执行结果），不再需要 toast 补救反馈
+    // 保留这段注释以便以后查 git history
 
     // ===== Win32 imports =====
 
