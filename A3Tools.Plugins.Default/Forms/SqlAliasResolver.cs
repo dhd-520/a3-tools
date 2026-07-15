@@ -98,7 +98,13 @@ public static class SqlAliasResolver
 
         try
         {
-            foreach (Match m in regexObj.Matches(sqlText))
+            // ★ 2026-07-15 剥掉注释 / 字符串内容再用 regex 匹配
+            // 原因：注释 /* JOIN T1 */ 或字符串 'FROM T1' 里的 FROM / JOIN 关键字
+            //       会被现有正则误识别为 alias 定义，导致 alias map 错位（比如在 ON 子句里弹错表的列）。
+            // 策略：用同长度空格替换注释 / 字符串内容（保持偏移），保留方括号内容（obj 正则要识别 [dbo].[T1]）。
+            var cleanSql = StripCommentsAndStrings(sqlText);
+
+            foreach (Match m in regexObj.Matches(cleanSql))
             {
                 var (schema, name) = SplitObj(m.Groups["obj"].Value);
                 var alias = StripBrackets(m.Groups["alias"].Value);
@@ -106,7 +112,7 @@ public static class SqlAliasResolver
             }
 
             // TVF 列定义形式只补充 alias，没匹配上的再补一次（避免覆盖）
-            foreach (Match m in regexTvfCols.Matches(sqlText))
+            foreach (Match m in regexTvfCols.Matches(cleanSql))
             {
                 var alias = StripBrackets(m.Groups["alias"].Value);
                 if (!map.ContainsKey(alias))
@@ -117,7 +123,7 @@ public static class SqlAliasResolver
             }
 
             // 逗号分隔的多表：FROM A a, B b  → b 关联到 B
-            foreach (Match m in regexComma.Matches(sqlText))
+            foreach (Match m in regexComma.Matches(cleanSql))
             {
                 var alias = StripBrackets(m.Groups["alias"].Value);
                 if (!map.ContainsKey(alias))
@@ -129,7 +135,7 @@ public static class SqlAliasResolver
 
             // 4. FROM/JOIN 后无别名：以表名末段为 alias 记入
             // 例：SELECT * FROM S_SCM_SEORDER  → map["S_SCM_SEORDER"] = (null, S_SCM_SEORDER)
-            foreach (Match m in regexObjNoAlias.Matches(sqlText))
+            foreach (Match m in regexObjNoAlias.Matches(cleanSql))
             {
                 var (schema, name) = SplitObj(m.Groups["obj"].Value);
                 // alias 用表名末段
@@ -146,6 +152,90 @@ public static class SqlAliasResolver
         }
 
         return map;
+    }
+
+    /// <summary>
+    /// ★ 2026-07-15 同长度空格替换 SQL 中的注释 / 字符串内容（保留方括号 [xxx]，供 obj 正则继续识别）。
+    /// - 块注释 /* ... */ → 替换为同长度空格
+    /// - 行注释 -- ... \n → 替换为同长度空格
+    /// - 字符串 '...' → 替换为同长度空格（含 SQL Server 的 '' 转义）
+    /// 保持偏移 → regex 匹配位置不变。
+    /// </summary>
+    private static string StripCommentsAndStrings(string sql)
+    {
+        if (string.IsNullOrEmpty(sql)) return sql;
+        var sb = new System.Text.StringBuilder(sql.Length);
+        int i = 0;
+        while (i < sql.Length)
+        {
+            // 块注释 /* ... */
+            if (i + 1 < sql.Length && sql[i] == '/' && sql[i + 1] == '*')
+            {
+                sb.Append("  ");
+                i += 2;
+                while (i + 1 < sql.Length && !(sql[i] == '*' && sql[i + 1] == '/'))
+                {
+                    sb.Append(sql[i] == '\t' ? '\t' : ' ');
+                    i++;
+                }
+                if (i + 1 < sql.Length)
+                {
+                    sb.Append("  ");
+                    i += 2;
+                }
+                else
+                {
+                    // 未闭合的块注释：把剩余也替换掉
+                    while (i < sql.Length) { sb.Append(' '); i++; }
+                }
+                continue;
+            }
+            // 行注释 -- ... \n
+            if (i + 1 < sql.Length && sql[i] == '-' && sql[i + 1] == '-')
+            {
+                while (i < sql.Length && sql[i] != '\n')
+                {
+                    sb.Append(' ');
+                    i++;
+                }
+                continue;
+            }
+            // 字符串 '...'（含 '' 转义 → 双写跳过）
+            if (sql[i] == '\'')
+            {
+                sb.Append(' ');
+                i++;
+                while (i < sql.Length && sql[i] != '\'')
+                {
+                    if (sql[i] == '\\' && i + 1 < sql.Length)
+                    {
+                        sb.Append("  ");
+                        i += 2;
+                    }
+                    else if (sql[i] == '\'' && i + 1 < sql.Length && sql[i + 1] == '\'')
+                    {
+                        // SQL Server '' 转义
+                        sb.Append("  ");
+                        i += 2;
+                    }
+                    else
+                    {
+                        sb.Append(' ');
+                        i++;
+                    }
+                }
+                if (i < sql.Length)
+                {
+                    sb.Append(' ');
+                    i++;
+                }
+                continue;
+            }
+            // 其他字符（含方括号）原样保留
+            sb.Append(sql[i]);
+            i++;
+        }
+        return sb.ToString();
     }
 
     /// <summary>把 "dbo.Customer" / "[dbo].[Customer]" 拆成 (schema 或 null, name)</summary>

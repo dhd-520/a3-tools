@@ -49,6 +49,12 @@ public class SqlEditor : RichTextBox
         // 默认字体设大2个字号，使用Consolas等宽字体更适合SQL
         Font = new System.Drawing.Font("Consolas", 12f);
 
+        // 【2026-07-15 选中修复】关闭单词级自动选择
+        // RichTextBox 默认 AutoWordSelection = true → 鼠标拖选会"吸附"到单词边界，
+        // 表现：选区莫名扩大/跳字、像不听使唤。VS / SSMS 都是 false → 字符级精确选择。
+        // 保留：双击 = 选词、三击 = 选段（这两个不受 AutoWordSelection 影响）。
+        AutoWordSelection = false;
+
         _highlightTimer = new System.Windows.Forms.Timer { Interval = 200 };
         _highlightTimer.Tick += (_, _) =>
         {
@@ -462,11 +468,33 @@ public class SqlEditor : RichTextBox
         return start;
     }
 
-    /// <summary>替换当前单词为指定文本（用于补全）</summary>
+    /// <summary>
+    /// 替换当前单词为指定文本（用于补全）。
+    /// ★ 2026-07-15：如果 word 含 "."（如 "T1.Na" / "dbo.T1.Name"），只替换最后一个 "." 之后的部分。
+    ///   - "T1.Na" 回车选 "Name"  → "T1.Name"（保留 "T1."）
+    ///   - "T1." 回车选 "Name"    → "T1.Name"（保留 "T1."）
+    ///   - "Na" 回车选 "Name"     → "Name"（无 dot 走原逻辑）
+    /// 原因：GetCurrentWordStart() 把 "." 当 word 一部分返回起点（IntelliSense 解析用），
+    ///       但补全时不能从最早起点全替换——会把 "别名." / "表名." 吃掉。
+    /// </summary>
     private void ReplaceCurrentWord(string replacement)
     {
         int caret = SelectionStart;
         int start = GetCurrentWordStart();
+
+        // 找最后一个 "." → 从 "."+1 开始替换（保留前缀）
+        if (start < caret)
+        {
+            for (int i = caret - 1; i >= start; i--)
+            {
+                if (Text[i] == '.')
+                {
+                    start = i + 1;
+                    break;
+                }
+            }
+        }
+
         int len = caret - start;
         if (len <= 0)
         {

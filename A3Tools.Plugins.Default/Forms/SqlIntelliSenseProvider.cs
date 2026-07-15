@@ -154,25 +154,36 @@ public static class SqlIntelliSenseProvider
             return new List<string>();
         }
 
-        // ===== 0. 列名联想（仅当 prefix 含 "." 且能解析成 别名/表名 时） =====
-        // 行为：
-        //   "A."          → 列（且 A 在 alias map 里）
-        //   "A.N"         → 列（且 A 在 alias map 里）
-        //   "Customer."   → 列（Customer 是表/视图/函数名）
-        //   "Customer.N"  → 列
-        //   "dbo.Customer." / "dbo.Customer.N" → 列（优先按 全限定名 查对象）
-        //   "Sales.X."    → 不常见，但若 Sales 是 schema → 退回到"Sales. 补全"由 section 2 处理
-        ColumnResult? colResult = TryGetColumnSuggestion(prefix, connectionString, fullSql);
-        if (colResult != null && colResult.Columns.Count > 0)
+        // ===== 0. ★ 2026-07-15 精确列名联想（prefix 含 "." 的优先级最高） =====
+        // 陛下反馈：JOIN 时输入 "表名." 或 "别名." 提示混乱（混入其他表的列 / 关键字）。
+        // 之前：先走 AfterColumnKeyword 路径（拿所有别名列），miss 才走 TryGetColumnSuggestion；
+        //        再 miss 就 fall through 到 关键字 + 对象，把 SELECT/WHERE 之类都涌进来。
+        // 现在：prefix 含 "." 时强制走精确路径；解析不到就退到 schema 路径；都没有就返回空（保持弹窗干净）。
+        //   - "a." / "A."           → 只返 a 别名的列
+        //   - "Customer."           → 只返 Customer 表的列
+        //   - "dbo.TableA." / "dbo.TableA.col" → 只返 dbo.TableA 的列（3 段全限定名）
+        //   - "dbo."                → 退到 schema 路径，返 dbo 下所有对象
+        //   - "xxx."                → 既不是表/别名，也不是 schema → 空（之前会涌关键字进来）
+        if (!string.IsNullOrEmpty(prefix) && prefix.Contains('.'))
         {
-            foreach (var c in colResult.Columns)
+            var colResult = TryGetColumnSuggestion(prefix, connectionString, fullSql);
+            if (colResult != null && colResult.Columns.Count > 0)
             {
-                if (list.Count >= maxResults) break;
-                if (seen.Add(c)) list.Add(c);
+                foreach (var c in colResult.Columns)
+                {
+                    if (list.Count >= maxResults) break;
+                    if (seen.Add(c)) list.Add(c);
+                }
+                return list;
             }
-            if (list.Count >= maxResults) return list;
-            // 列联想命中 → 不再混关键字 / 对象（用户期望就是列）
-            return list;
+            // miss → 尝试 schema 路径（如 "dbo." → 返 dbo 下所有对象）
+            if (!string.IsNullOrEmpty(connectionString))
+            {
+                var objs = SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix);
+                if (objs.Count > 0) return objs.Take(maxResults).ToList();
+            }
+            // 既不是表/别名，也不是 schema → 返回空列表（保持弹窗干净）
+            return new List<string>();
         }
 
         // ===== 1. 关键字 =====
@@ -222,9 +233,15 @@ public static class SqlIntelliSenseProvider
     }
 
     /// <summary>
-    /// 尝试识别 prefix 为 "alias." / "table." / "schema.table." 模式，找出对应列名。
-    /// 返回 null 表示不是列联想场景，调用方继续走"对象 / 关键字"路径。
+    /// 尝试识别 prefix 为 "alias." / "table." / "schema.table." / "schema.table.col" 模式，找出对应列名。
+    /// 返回 null 表示不是列联想场景，调用方继续走 schema 路径或返回空。
     /// </summary>
+    /// <remarks>
+    /// ★ 2026-07-15 增强：
+    /// - 支持 3 段全限定名 "dbo.TableA." / "dbo.TableA.col" → 直接按 schema+obj 查列
+    /// - 之前只支持 length=2，3 段会返回 null 导致 fall through 到关键字/对象（陛下反馈的"混乱"根源之一）
+    /// - alias 优先：如果 leftPart 命中 alias map，则按 alias 解析（即便 prefix 有 schema 段）
+    /// </remarks>
     private static ColumnResult? TryGetColumnSuggestion(string prefix, string? connectionString, string? fullSql)
     {
         if (string.IsNullOrEmpty(prefix) || !prefix.Contains('.')) return null;
@@ -235,20 +252,34 @@ public static class SqlIntelliSenseProvider
             ? new Dictionary<string, SqlAliasResolver.AliasedObject>(StringComparer.OrdinalIgnoreCase)
             : SqlAliasResolver.Parse(fullSql, 0);
 
-        // 把 word 拆解为 [leftPart].[rightPart?]
-        // "A."        -> left="A", right=null
-        // "A.N"       -> left="A", right="N"
-        // "dbo.Customer." -> left="dbo.Customer", right=null
-        // "dbo.Customer.N"-> left="dbo.Customer", right="N"
-        // "dbo.Customer.N." -> 太深（>2 段），不是列联想
-        // ".N"        -> left=null，不查列
+        // 把 prefix 拆解为 [leftPart].[rightPart?]
+        //   2 段：
+        //     "A."        → leftPart="A",  rightPart=""
+        //     "A.N"       → leftPart="A",  rightPart="N"
+        //     "dbo.C."    → leftPart="dbo"（误判为对象名 → 上层 fall back 到 schema 路径处理）
+        //   3 段：
+        //     "dbo.C."    → schema="dbo", objName="C", columnPrefix=""
+        //     "dbo.C.N"   → schema="dbo", objName="C", columnPrefix="N"
+        //   4+ 段：返回 null
         var parts = prefix.Split('.');
-        if (parts.Length != 2) return null;
-        var leftPart = parts[0];
-        var rightPart = parts[1];
+        if (parts.Length < 2 || parts.Length > 3) return null;
+
+        string leftPart;
+        string rightPart;
+        if (parts.Length == 2)
+        {
+            leftPart = parts[0];
+            rightPart = parts[1];
+        }
+        else // 3
+        {
+            // schema.obj.col → leftPart 是 obj，rightPart 是 col 前缀
+            leftPart = parts[1];
+            rightPart = parts[2];
+        }
         if (string.IsNullOrEmpty(leftPart)) return null;
 
-        // 1) 先尝试把 leftPart 当别名
+        // 1) 先尝试把 leftPart 当别名（alias 优先）
         SqlAliasResolver.AliasedObject? target = null;
         if (aliasMap.TryGetValue(leftPart, out var aliased))
             target = aliased;
@@ -256,10 +287,18 @@ public static class SqlIntelliSenseProvider
         // 2) miss → 把 leftPart 当裸对象名 / 全限定名
         if (target == null)
         {
-            // 拆分 [schema, name]（支持 [dbo].[Customer] 已经过 GetCurrentWord 处理）
             var (schema, name) = SqlAliasResolver.SplitObj(leftPart);
-            if (!string.IsNullOrEmpty(name))
-                target = new SqlAliasResolver.AliasedObject(string.IsNullOrEmpty(schema) ? null : schema, name);
+            if (string.IsNullOrEmpty(name)) return null;
+
+            // 3 段 prefix：schema 已从 parts[0] 明确给出，不依赖 SplitObj 的推断
+            if (parts.Length == 3 && !string.IsNullOrEmpty(parts[0]))
+            {
+                target = new SqlAliasResolver.AliasedObject(parts[0], name);
+            }
+            else
+            {
+                target = new SqlAliasResolver.AliasedObject(schema, name);
+            }
         }
 
         if (target == null) return null;

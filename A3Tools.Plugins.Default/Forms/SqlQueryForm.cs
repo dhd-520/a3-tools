@@ -127,15 +127,15 @@ public partial class SqlQueryForm : Form
         // GetSuggestions 入口会同步 EnsureLoadedSync 保证后续读到了可用
         _ = SqlObjectSchemaCache.WarmupAsync(_currentConnStr);
 
-        // 顶栏快捷键：Ctrl+N 新建查询，Ctrl+W 关闭当前，F5 执行，Ctrl+F5 执行选中
+        // 顶栏快捷键：Ctrl+N 新建查询，Ctrl+W 关闭当前，F5 / Ctrl+F5 智能执行（SSMS 风格：有选中执行选中，否则执行全部）
         KeyPreview = true;
         KeyDown += (s, e) =>
         {
             if (e.Control && e.KeyCode == Keys.N) { NewTab(); e.SuppressKeyPress = true; }
             else if (e.Control && e.KeyCode == Keys.W && tabControl.TabPages.Count > 0) { CloseActiveTab(); e.SuppressKeyPress = true; }
             else if (e.Control && e.KeyCode == Keys.Tab) { SwitchToNextTab(); e.SuppressKeyPress = true; }
-            else if (e.KeyCode == Keys.F5 && !e.Shift) { GetActiveTab()?.PerformExecuteAll(); e.SuppressKeyPress = true; }
-            else if (e.Control && e.KeyCode == Keys.F5) { GetActiveTab()?.PerformExecuteSelected(); e.SuppressKeyPress = true; }
+            else if (e.KeyCode == Keys.F5 && !e.Shift) { GetActiveTab()?.PerformExecuteSmart(); e.SuppressKeyPress = true; }
+            else if (e.Control && e.KeyCode == Keys.F5) { GetActiveTab()?.PerformExecuteSmart(); e.SuppressKeyPress = true; }
         };
     }
 

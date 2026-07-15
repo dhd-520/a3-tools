@@ -266,30 +266,25 @@ public partial class SqlQueryTabPage : UserControl
     // 执行逻辑
     // ============================================
 
-    /// <summary>公开接口：执行当前 Tab 全部 SQL（供主窗体 F5 快捷键调用）</summary>
-    public void PerformExecuteAll()
+    /// <summary>
+    /// 公开接口：智能执行（SSMS 风格）。
+    /// 有选中文本 → 执行选中；无选中 → 执行编辑器全部内容。
+    /// 由【执行】按钮和主窗体 F5 / Ctrl+F5 快捷键统一调用。
+    /// </summary>
+    public void PerformExecuteSmart()
     {
-        var sql = rtbEditor.Text;
+        var sql = !string.IsNullOrWhiteSpace(rtbEditor.SelectedText)
+            ? rtbEditor.SelectedText
+            : rtbEditor.Text;
         if (string.IsNullOrWhiteSpace(sql)) return;
         _ = ExecuteAsync(sql);
     }
 
-    /// <summary>公开接口：执行选中 SQL（供主窗体 Ctrl+F5 快捷键调用）</summary>
-    public void PerformExecuteSelected()
-    {
-        var sql = rtbEditor.SelectedText;
-        if (string.IsNullOrWhiteSpace(sql))
-        {
-            AppendMessage("[提示] 未选中文本，执行全部\n");
-            sql = rtbEditor.Text;
-        }
-        if (string.IsNullOrWhiteSpace(sql)) return;
-        _ = ExecuteAsync(sql);
-    }
+    // 保留旧 API 防止外部调用失败；都路由到智能执行
+    public void PerformExecuteAll() => PerformExecuteSmart();
+    public void PerformExecuteSelected() => PerformExecuteSmart();
 
-    private async void BtnExecute_Click(object? sender, EventArgs e) => PerformExecuteAll();
-
-    private async void BtnExecuteSelected_Click(object? sender, EventArgs e) => PerformExecuteSelected();
+    private async void BtnExecute_Click(object? sender, EventArgs e) => PerformExecuteSmart();
 
     private void BtnStop_Click(object? sender, EventArgs e)
     {
@@ -324,7 +319,6 @@ public partial class SqlQueryTabPage : UserControl
     private async Task ExecuteAsync(string sql)
     {
         btnExecute.Enabled = false;
-        btnExecuteSelected.Enabled = true;
         btnStop.Enabled = true;
         ClearResults();
         _cts = new CancellationTokenSource();
@@ -517,7 +511,6 @@ public partial class SqlQueryTabPage : UserControl
         finally
         {
             btnExecute.Enabled = true;
-            btnExecuteSelected.Enabled = true;
             btnStop.Enabled = false;
             _cts?.Dispose();
             _cts = null;
@@ -643,7 +636,6 @@ public partial class SqlQueryTabPage : UserControl
         finally
         {
             btnExecute.Enabled = true;
-            btnExecuteSelected.Enabled = true;
             btnStop.Enabled = false;
         }
     }

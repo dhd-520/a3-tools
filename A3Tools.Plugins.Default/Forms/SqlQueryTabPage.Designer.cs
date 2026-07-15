@@ -9,7 +9,6 @@ partial class SqlQueryTabPage
 
     private Panel pnlToolBar;
     private Button btnExecute;
-    private Button btnExecuteSelected;
     private Button btnStop;
     private Button btnSave;
     private Label lblHint;
@@ -38,7 +37,6 @@ partial class SqlQueryTabPage
 
         pnlToolBar = new Panel();
         btnExecute = new Button();
-        btnExecuteSelected = new Button();
         btnStop = new Button();
         btnSave = new Button();
         lblHint = new Label();
@@ -62,7 +60,7 @@ partial class SqlQueryTabPage
 
         btnExecute.Text = "▶ 执行 (F5)";
         btnExecute.Location = new Point(6, 4);
-        btnExecute.Size = new Size(105, 36);
+        btnExecute.Size = new Size(120, 36);
         btnExecute.BackColor = Color.FromArgb(24, 144, 255);
         btnExecute.ForeColor = Color.White;
         btnExecute.FlatStyle = FlatStyle.Flat;
@@ -70,29 +68,24 @@ partial class SqlQueryTabPage
         btnExecute.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
         btnExecute.Click += BtnExecute_Click;
 
-        btnExecuteSelected.Text = "▶ 选中 (Ctrl+F5)";
-        btnExecuteSelected.Location = new Point(118, 4);
-        btnExecuteSelected.Size = new Size(140, 36);
-        btnExecuteSelected.Click += BtnExecuteSelected_Click;
-
         btnStop.Text = "⏹ 停止";
-        btnStop.Location = new Point(265, 4);
+        btnStop.Location = new Point(132, 4);
         btnStop.Size = new Size(100, 36);
         btnStop.Enabled = false;
         btnStop.Click += BtnStop_Click;
 
         btnSave.Text = "💾 保存脚本";
-        btnSave.Location = new Point(372, 4);
+        btnSave.Location = new Point(239, 4);
         btnSave.Size = new Size(110, 36);
         btnSave.Click += BtnSave_Click;
 
         lblHint.AutoSize = true;
-        lblHint.Location = new Point(495, 14);
-        lblHint.Text = "提示: F5=执行  Ctrl+F5=执行选中  Ctrl+L=清空消息  Ctrl+/=注释  Ctrl+Shift+/=取消注释";
+        lblHint.Location = new Point(362, 14);
+        lblHint.Text = "提示: F5=执行(有选中则执行选中,否则执行全部)  Ctrl+L=清空消息  Ctrl+/=注释  Ctrl+Shift+/=取消注释";
         lblHint.ForeColor = Color.FromArgb(140, 140, 140);
 
         pnlToolBar.Controls.AddRange(new Control[] {
-            btnExecute, btnExecuteSelected, btnStop, btnSave, lblHint
+            btnExecute, btnStop, btnSave, lblHint
         });
 
         // ===== 编辑器区 =====
