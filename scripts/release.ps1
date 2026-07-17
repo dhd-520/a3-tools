@@ -27,7 +27,12 @@ param(
 
     # 默认$true：2026-07-08 陛下决定先只用 Gitee（GitHub 国内连接不稳 + gh CLI 未 auth）
     # 设 -IncludeGitHub 可手动启用 GitHub 发布
-    [bool]$SkipGitHub = $true
+    [bool]$SkipGitHub = $true,
+
+    # ★ 2026-07-17 v2.4.5 踩坑后加固：默认把 -ReleaseNotes 内嵌到 zip 里的 RELEASE_NOTES.md
+    # （给离线用户阅读）。客户端 update popup 读 Gitee API body 即可，无需本地 notes。
+    # 设 -SkipEmbedNotes 可跳过（不推荐）
+    [bool]$SkipEmbedNotes = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -103,6 +108,9 @@ if (-not $githubToken -and -not $ghCli) {
 }
 
 # 4) 默认发布说明（单引号 heredoc，不解析变量）
+#    支持中文！Gitee API 存 UTF-8 正确（v2.4.0 起的 "mojibake" 是 PowerShell 5.1
+#    Invoke-WebRequest | ConvertFrom-Json 解码 bug，不是 Gitee bug）。
+#    实际验证：D:\work\A3Tools\worklist\2026-07-17-release-ps1-fix-and-powershell-utf8-misdiagnosis.md
 if (-not $ReleaseNotes) {
     $ReleaseNotes = @'
 ## A3Tools vNEW_VERSION
@@ -135,6 +143,21 @@ foreach ($csproj in $csprojs) {
     }
 }
 
+# 5.5) 自动 commit csproj bump（避免 Step 8 push tag 时指向错 commit）
+#      2026-07-17 v2.4.5 踩坑：之前脚本改了 csproj 但不 commit，导致陛下得手 commit + push master，
+#      否则 release tag 会指向旧 commit。这次固化下来。
+$csprojChanged = $false
+foreach ($csproj in $csprojs) {
+    if ((& git status --porcelain $csproj) -ne "") { $csprojChanged = $true; break }
+}
+if ($csprojChanged) {
+    & git add $csprojs
+    & git commit -m ("chore(release): csproj 版本号 bump -> " + $Version) --no-verify | Out-Null
+    Ok "csproj bump committed"
+} else {
+    Info "csproj bump already committed (skip)"
+}
+
 # 6) dotnet publish StandaloneSF
 $standaloneDir = Join-Path $gitRoot (Join-Path $PublishDir "StandaloneSF")
 if (Test-Path $standaloneDir) { Remove-Item $standaloneDir -Recurse -Force }
@@ -161,6 +184,23 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zipSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
 Ok (("zip done (" + $zipSize + " MB)"))
 
+# 7.5) 可选：把 -ReleaseNotes 内嵌为 zip 根目录下的 RELEASE_NOTES.md（给离线用户阅读）
+#       默认开启（除非 -SkipEmbedNotes）。客户端 update popup 直接读 Gitee API 的 body，
+#       但下载 zip 解压后能看完整 release notes 是 nice-to-have。
+if (-not $SkipEmbedNotes -and $ReleaseNotes) {
+    $notesPath = Join-Path $gitRoot (Join-Path $PublishDir ("RELEASE_NOTES_v" + $Version + ".md"))
+    [System.IO.File]::WriteAllText($notesPath, $ReleaseNotes, (New-Object System.Text.UTF8Encoding $false))
+    Info ("  notes -> " + $notesPath)
+    $zip = [System.IO.Compression.ZipFile]::Open($zipPath, "Update")
+    $entry = $zip.CreateEntry("RELEASE_NOTES.md")
+    $writer = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding $false))
+    $writer.Write($ReleaseNotes)
+    $writer.Close()
+    $zip.Dispose()
+    $newSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+    Ok ("  RELEASE_NOTES.md embedded (zip now " + $newSize + " MB)")
+}
+
 # 8) 推送 tag
 $tag = "v" + $Version
 Info ("Pushing tag " + $tag + " to remotes")
@@ -179,12 +219,44 @@ try {
             Info ("  pushing tag to " + $remote + "...")
             & git push $remote $tag --force
         } catch {
-            Warn ("  push to " + $remote + " failed: " + $_.Exception.Message)
+            Err ("  push to " + $remote + " failed: " + $_.Exception.Message)
+            throw
+        }
+    }
+
+    # 8.5) 验证 tag 指向 ★ 2026-07-17 v2.4.5 踩坑自动化
+    #       Gitee release API 创建 release 时，如果 tag 已存在会“自动创建”一个指向
+    #       target_commitish 分支 HEAD 的 tag——本意是好的，但如果 API 误用了【A3ToolsRelease 仓库】
+    #       master 分支的 HEAD（那边 master 仍指向 aafca3d=v2.4.4），创建的 tag 会指向错 commit。
+    #       验证：local tag 指向的 commit 必须 = 当前 HEAD，不一致就 force push 修。
+    $expectedSha = (& git rev-parse HEAD).Trim()
+    $actualSha = (& git rev-parse "$tag^{}" 2>$null)
+    if ($actualSha) {
+        $actualSha = $actualSha.Trim()
+        if ($expectedSha -ne $actualSha) {
+            Err ("tag " + $tag + " 指向错 commit: " + $actualSha + " (期望 " + $expectedSha + ")")
+            Err "force push 修正..."
+            foreach ($remote in $remotes) {
+                $url = (& git remote get-url $remote)
+                if ($url -notmatch 'gitee\.com') { continue }
+                & git push $remote $tag --force
+            }
+            $actualSha = (& git rev-parse "$tag^{}" 2>$null).Trim()
+            if ($actualSha -eq $expectedSha) {
+                Ok ("tag 修正完成 -> " + $expectedSha.Substring(0, 7))
+            } else {
+                Err ("tag 修正失败！需要人工处理: actual=" + $actualSha + " expected=" + $expectedSha)
+                throw "tag verification failed"
+            }
+        } else {
+            Ok ("tag 指向正确 -> " + $expectedSha.Substring(0, 7))
         }
     }
     Ok "tag pushed to Gitee remotes"
 } catch {
-    Warn ("tag push failed (may not affect API publish): " + $_.Exception.Message)
+    Err ("tag push failed: " + $_.Exception.Message)
+    Err "不能继续 release 流程——tag 状态不一致，请人工检查后重试"
+    exit 1
 }
 
 # 9) Gitee 发布
@@ -363,3 +435,45 @@ if ($giteeReleaseUrl)  { Write-Host ("  Gitee:  " + $giteeReleaseUrl)  -Foregrou
 if ($githubReleaseUrl) { Write-Host ("  GitHub: " + $githubReleaseUrl) -ForegroundColor Cyan }
 Write-Host ""
 Info ("Users will see v" + $Version + " on next launch via Help -> Check Update")
+
+# 12) ★ 2026-07-17 v2.4.5 踩坑后加固：最终验证
+#     验证 Gitee release body 实际存了 UTF-8 中文（不是 PowerShell 5.1 解码 bug 的幻觉），
+#     tag 指向正确 commit，zip asset 可下载。
+if ($giteeReleaseId) {
+    Info "Final verification..."
+    try {
+        $verifyBytes = (Invoke-WebRequest -Uri ("https://gitee.com/api/v5/repos/" + $giteeOwner + "/" + $giteeRepo + "/releases/" + $giteeReleaseId) -UseBasicParsing).Content
+        $verifyFile = Join-Path $env:TEMP ("verify_release_" + $Version + ".json")
+        [System.IO.File]::WriteAllBytes($verifyFile, $verifyBytes)
+
+        # 1. 验证 body 中文 UTF-8 (扫原始字节看有没有 E4 B8 AD 这种中文 UTF-8 头字节)
+        #    用 .NET UTF-8 decoder 读出真实 string（避免 PowerShell Latin-1 误读）
+        $rawJson = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($verifyFile))
+        if ($rawJson -match "[\u4e00-\u9fff]") {
+            Ok "body 包含中文字符 (UTF-8 验证通过)"
+        } elseif ($ReleaseNotes -match "[\u4e00-\u9fff]") {
+            Warn "body 应包含中文但扫描未发现——可能 Gitee 存储 / API 输出异常，请人工检查"
+        }
+
+        # 2. 验证 tag 指向
+        $expectedSha = (& git rev-parse HEAD).Trim()
+        $tagSha = (& git ls-remote origin "refs/tags/" + $tag).Trim()
+        if ($tagSha -match "\w{40}") {
+            $actualTag = $matches[0]
+            if ($actualTag -eq $expectedSha) {
+                Ok ("tag " + $tag + " 指向正确 -> " + $expectedSha.Substring(0, 7))
+            } else {
+                Err ("tag 指向错: actual=" + $actualTag + " expected=" + $expectedSha)
+            }
+        }
+
+        # 3. 验证 zip 在 assets 里
+        if ($rawJson -match "A3Tools_v" + $Version + ".zip") {
+            Ok "zip asset 已挂载到 release"
+        } else {
+            Warn "zip asset 未在 release 里找到"
+        }
+    } catch {
+        Warn ("最终验证失败: " + $_.Exception.Message)
+    }
+}
