@@ -34,3 +34,29 @@
 - **EXEC 不受影响**: EXEC 上下文走完全独立的 `AfterExec` 分支,不调 `GetObjectSuggestions`
 - **worklist**: D:\work\A3Tools\worklist\2026-07-17-fix-from-intellisense-shows-stored-procedures.md
 - **经验**: 往缓存里加 Kind 时,**所有"返回对象的 API"都要同步审视是否需要 kind 过滤**(同 6c216b2 commit 还改过 `GetColumnSuggestions`,目前只按 name 查列,kind 不影响列查询,这次不需要动)
+
+## 2026-07-17 PowerShell 5.1 UTF-8 误判修正 + release.ps1 端到端加固
+
+- ✅ **状态**: release.ps1 改造完成 (commit 42fb045),0 语法错
+- **⚠️ 重大修正**: **v2.4.0 → v2.4.4 一直以为的"Gitee API 中文 mojibake bug"是误判**
+  - **真相**: PowerShell 5.1 `Invoke-WebRequest` 把 UTF-8 字节流当 Latin-1 解码,臣读回来的全是 mojibake。**Gitee 服务端存的始终是正确 UTF-8**(hex 验证:"修复"=`E4 BF AE E5 A4 8D` ✅)
+  - **客户端为什么显示正常**: `UpdateService.cs` 用 .NET `HttpClient` 读 Gitee API,正确处理 UTF-8。陛下 v2.4.4 截图就是铁证
+  - **后续**: v2.4.5 已经 PATCH body 改回中文(id=750218,hex 已验证)。release.ps1 直接传中文即可,**不需要**英文 body + 塞 zip workaround(虽然塞 zip 仍有离线阅读价值所以保留)
+  - **调试 API 编码问题的正确做法**:
+    ```powershell
+    Invoke-WebRequest -Uri "..." -UseBasicParsing -OutFile raw.json
+    $rawJson = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes("raw.json"))
+    # 或者直接 hex 看
+    ```
+- **release.ps1 加固**(v2.4.5 踩坑自动化):
+  1. **Step 5.5(新)**: csproj bump 后自动 `git commit -m "chore(release): csproj 版本号 bump -> vX.Y.Z"`
+  2. **Step 7.5(新)**: 默认把 `-ReleaseNotes` 内嵌为 zip 里的 `RELEASE_NOTES.md`(`-SkipEmbedNotes` 可跳过)
+  3. **Step 8 改造**: tag push 失败时 `throw + exit 1`(不再 warn 继续)。新增 Step 8.5 验证 tag 指向当前 HEAD,不一致就 force push 修
+  4. **Step 12(新)**: 最终验证——GET release 检查 body UTF-8 中文存在 + tag 指向 + zip asset 挂载
+- **worklist**: D:\work\A3Tools\worklist\2026-07-17-release-ps1-fix-and-powershell-utf8-misdiagnosis.md
+- **经验教训**(重要,记一次够):
+  1. **绝不能再信 PowerShell 5.1 `Invoke-WebRequest | ConvertFrom-Json` 输出做中文判断**——必须用 `OutFile` + `[Text.Encoding]::UTF8.GetString` 或 hex dump
+  2. **脚本失败要 throw + exit**,不要只 Warn——warn 会让流程半残继续走完,出问题难定位
+  3. **任何"原子操作"必须 commit**——之前 Step 5 改 csproj 不 commit 是大坑,Step 5.5 强制 commit
+  4. **Gitee release API 行为诡异**: tag 已存在时会"自动创建"一个指向 target_commitish 分支 HEAD 的新 tag object,但实际用的是 A3ToolsRelease 仓库(发布仓库)而非 origin(源码仓库)的 master HEAD——如果发布仓库 master 落后源码仓库 master,tag 指向就错了。Step 8.5 强制验证可破
+- **下次发版**: 直接 `.\scripts\release.ps1 -Version "2.4.6" -ReleaseNotes "...中文..."` 一键搞定
