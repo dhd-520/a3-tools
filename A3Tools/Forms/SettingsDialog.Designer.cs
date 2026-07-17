@@ -118,10 +118,12 @@ partial class SettingsDialog
         mainPanel.Controls.Add(lblHubConfigDir);
         mainPanel.Controls.Add(txtHubConfigDir);
         mainPanel.Controls.Add(btnHubConfigBrowse);
-        mainPanel.Dock = DockStyle.Fill;
+        mainPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         mainPanel.Location = new Point(0, 60);
         mainPanel.Name = "mainPanel";
-        mainPanel.Size = new Size(1152, 1320);
+        mainPanel.AutoScrollMinSize = new Size(0, 1260);
+        mainPanel.Padding = new Padding(0, 0, 0, 12);
+        mainPanel.Size = new Size(1152, 582);
         mainPanel.TabIndex = 1;
         // 
         // lblAppDir
@@ -586,14 +588,13 @@ partial class SettingsDialog
         AcceptButton = btnOK;
         BackColor = Color.White;
         CancelButton = btnCancel;
-        ClientSize = new Size(1152, 1430);
+        ClientSize = new Size(1152, 720);
         Controls.Add(bottom);
         Controls.Add(mainPanel);
         Controls.Add(titleBar);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        MinimumSize = new Size(820, 600);
         Name = "SettingsDialog";
+        SizeGripStyle = SizeGripStyle.Show;
         StartPosition = FormStartPosition.CenterParent;
         Text = "设置";
         titleBar.ResumeLayout(false);
