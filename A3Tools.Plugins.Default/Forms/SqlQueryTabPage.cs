@@ -544,8 +544,24 @@ public partial class SqlQueryTabPage : UserControl
             {
                 resultIdx++;
                 var dt = new DataTable();
+                // ★ 重复列名处理（与直连模式 + ProxyHelper 对齐）：
+                //   SSMS 允许 `SELECT BILLNO, *` 展开后多列同名（HTTP 服务端用 List<ColumnInfo>
+                //   装结果不报错，原样把两个 "BILLNO" 序列化回客户端），但 DataTable.Columns.Add
+                //   不允许重名——会抛 "A column named 'BILLNO' already belongs to this DataTable"
+                //   陛下 2026-07-17 Http 模式反馈。对齐 SSMS/直连 ProxyHelper 行为：重复名加 _2/_3 后缀。
+                var usedColNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var col in table.Columns)
-                    dt.Columns.Add(col.Name, Type.GetType(col.TypeName) ?? typeof(object));
+                {
+                    var name = col.Name;
+                    if (!usedColNames.Add(name))
+                    {
+                        int suffix = 2;
+                        string unique;
+                        do { unique = $"{name}_{suffix++}"; } while (!usedColNames.Add(unique));
+                        name = unique;
+                    }
+                    dt.Columns.Add(name, Type.GetType(col.TypeName) ?? typeof(object));
+                }
 
                 foreach (var row in table.Rows)
                 {
