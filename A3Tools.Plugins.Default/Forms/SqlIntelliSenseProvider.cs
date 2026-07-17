@@ -148,7 +148,10 @@ public static class SqlIntelliSenseProvider
         {
             if (!string.IsNullOrEmpty(connectionString))
             {
-                var objs = SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix ?? "");
+                // FROM/JOIN/UPDATE/TABLE 上下文只允许表/视图/表值函数
+                // 排除存储过程 P、标量函数 FN、触发器 TR（陛下 2026-07-17 反馈）
+                var fromKinds = new[] { SqlObjectSchemaCache.ObjectKind.Table, SqlObjectSchemaCache.ObjectKind.View, SqlObjectSchemaCache.ObjectKind.TableValuedFunction };
+                var objs = SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix ?? "", fromKinds);
                 return objs.Take(maxResults).ToList();
             }
             return new List<string>();
@@ -179,7 +182,9 @@ public static class SqlIntelliSenseProvider
             // miss → 尝试 schema 路径（如 "dbo." → 返 dbo 下所有对象）
             if (!string.IsNullOrEmpty(connectionString))
             {
-                var objs = SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix);
+                // schema 前缀路径仍属 FROM-like 上下文，只取表/视图/表值函数
+                var fromKinds = new[] { SqlObjectSchemaCache.ObjectKind.Table, SqlObjectSchemaCache.ObjectKind.View, SqlObjectSchemaCache.ObjectKind.TableValuedFunction };
+                var objs = SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix, fromKinds);
                 if (objs.Count > 0) return objs.Take(maxResults).ToList();
             }
             // 既不是表/别名，也不是 schema → 返回空列表（保持弹窗干净）
@@ -214,7 +219,9 @@ public static class SqlIntelliSenseProvider
                 : true;
 
             var objs = schemaQualified
-                ? SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix ?? "")
+                // 普通文本路径同样只取表/视图/表值函数（避免存储过程混入 SELECT/WHERE 等位置）
+                ? SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix ?? "",
+                    new[] { SqlObjectSchemaCache.ObjectKind.Table, SqlObjectSchemaCache.ObjectKind.View, SqlObjectSchemaCache.ObjectKind.TableValuedFunction })
                 : new();
 
             foreach (var o in objs)

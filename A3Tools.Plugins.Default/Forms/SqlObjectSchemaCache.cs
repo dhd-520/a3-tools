@@ -168,7 +168,12 @@ public static class SqlObjectSchemaCache
     /// </summary>
     /// <param name="connectionString">当前连接的 connectionString（决定用哪个 (server,db) 的缓存）</param>
     /// <param name="word">光标前的单词（已含 schema. 前缀时传入完整字符串；否则纯名字）</param>
-    public static List<string> GetObjectSuggestions(string connectionString, string word)
+    /// <param name="kinds">
+    /// 限定返回的对象类型集合。null 或空 = 返所有 6 类（向后兼容）。
+    /// FROM/JOIN/UPDATE/TABLE 上下文应只传 { Table, View, TableValuedFunction }，
+    /// 否则会混入存储过程 / 标量函数 / 触发器（陛下 2026-07-17 反馈）。
+    /// </param>
+    public static List<string> GetObjectSuggestions(string connectionString, string word, IEnumerable<ObjectKind>? kinds = null)
     {
         if (string.IsNullOrEmpty(connectionString) || string.IsNullOrEmpty(word))
             return new();
@@ -191,8 +196,17 @@ public static class SqlObjectSchemaCache
             namePrefix = parts.Length > 1 ? parts[1] : "";
         }
 
+        // 对象类型过滤（FROM/JOIN 上下文只取表/视图/表值函数，排除存储过程/标量函数/触发器）
+        HashSet<ObjectKind>? kindSet = null;
+        if (kinds != null)
+        {
+            var arr = kinds as ObjectKind[] ?? kinds.ToArray();
+            if (arr.Length > 0) kindSet = new HashSet<ObjectKind>(arr);
+        }
+
         // 跟 SSMS 一致：补全是大小写不敏感前缀匹配
         var matches = entry.Objects
+            .Where(o => kindSet == null || kindSet.Contains(o.Kind))
             .Where(o => string.IsNullOrEmpty(schemaFilter)
                 || o.SchemaName.Equals(schemaFilter, StringComparison.OrdinalIgnoreCase))
             .Where(o => string.IsNullOrEmpty(namePrefix)
