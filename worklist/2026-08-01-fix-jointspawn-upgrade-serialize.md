@@ -216,13 +216,52 @@ private bool IsClientLoginWindowVisible(int clientPid)
 
 ## 编译
 
-✔ **0 CS 错误 2 警告**(原历史警告,不变)
-- 输出到 `D:\work\A3Tools\scratch\compile_v246\Debug\net7.0-windows\`(临时目录,因 VS PID 19624 + A3Tools PID 22128 锁了原 bin/Debug)
-- **A3Tools.dll = 341,504 bytes**(v2.4.5 = 338,432 → +3,072 = +3 KB,符合新增方法预期)
-- A3Tools.Plugins.Default.dll = 607,232 bytes(不变)
-- A3Tools.Common.dll = 87,040 bytes(不变)
+✔ **0 CS 错误 338 警告**(原历史警告 337 + 1 个新 CS8604 在 MainForm.cs:1899 `GetAccountClientPid(string accountCode)` 调用的参数 _pendingAccountCode 为 string?,不影响运行)
 
-⚠️ **陛下需要**:关 VS (19624) + 关 A3Tools (22128) → 我再跑一次 `dotnet build` 写到正式 bin/Debug
+## 边界 case(陛下已 OK 模糊匹配 + 5min 超时降级)
+
+- **升级完成弹窗标题变体**:模糊匹配覆盖(陛下说不确定,加 5 个常见字)
+- **5min 内没升级完**:降级照常启 devtools,不影响 launcher 主流程
+- **client 升级时 PID 变了**(重启自己):需要让 `WaitForClientUpgradeComplete` 处理 PID 漂移(轮询时找同 Code 的 client PID,不用入参的旧 PID)
+- **devtools 也勾但 launcher 没要升级**(`_userUpdateChoice=false`):走现状两个一起启(陛下 09:36 语义)
+
+---
+
+## 🐶 2026-08-01 11:07 陛下反馈修复(增量 v2.4.6.1)
+
+陛下 11:04 反馈:"当不需要升级时候,我同时启动客户端和 IDE IDE 永远无法启动"
+11:07 补充:"不是啊,没有升级提示,我同事启动客户端和开发工具,客户端正常启动了,工具直接卡死"
+
+**根因**: `PrepareUpdateScenarioForLaunch` 开头无条件设 `_userUpdateChoice = true`。
+当 launcher 没有新版本(CheckUpdateOnStartupAsync 返 null)+ 两勾启账套时:
+- `_userUpdateChoice = true` (默认)
+- `needSerializeUpgrade = true && true && true = true`
+- `WaitForClientUpgradeComplete` 轮询 5 分钟找「升级完成」确认框
+- client 不弹升级框 → `TryAutoConfirmUpdateDialog` 找不到框 → 返 false(但要 12s)
+- `IsClientLoginWindowVisible` 判定可能命中不到(client 登录页状态)→ 5min 超时
+- 然后才启 devtools → 看起来像「工具卡死」
+
+**修复**: `PrepareUpdateScenarioForLaunch` 开头改 `_userUpdateChoice = null`(不动 A3 弹窗),
+只在 External 分支根据陛下选择覆盖 null → true/false。
+
+**正确语义**(陛下 09:36 修正版):
+| 检测到外部 A3 在跑? | launcher 处理 | `_userUpdateChoice` |
+|---|---|---|
+| 是(External) | 弹 YesNo 框 | 按陛下选择(true/false) |
+| 否(Solo/JointSpawn) | 不弹框,**不主动升级 A3** | `null`(client 弹框陛下手动) |
+
+陛下 09:36 说的「默认升级」实际语义是:
+- Launcher 自身走 CheckUpdateOnStartupAsync 检测新版本 → 弹 UpdateForm 让陛下选升级 launcher 本身
+- 与 `_userUpdateChoice`(A3 客户端/IDE 弹框的处理)是两件事
+- launcher 没新版本时(client 也基本不会弹升级框),`_userUpdateChoice=null` 让陛下手动处理
+
+**改动**:
+- `PrepareUpdateScenarioForLaunch` 开头:`_userUpdateChoice = true` → `_userUpdateChoice = null`
+- External 选「是」分支:加 `_userUpdateChoice = true`(覆盖 null)
+- External 选「否」分支:已经 `_userUpdateChoice = false`,保持
+- Solo / JointSpawn 注释更新
+
+**编译**: 0 错 338 警告(原 337 + 1 个 CS8604 MainForm.cs:1899)
 
 ## 测试步骤
 

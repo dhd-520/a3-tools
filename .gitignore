@@ -1,59 +1,33 @@
-# .NET
+# build output
 bin/
 obj/
+publish/
 *.user
 *.suo
-*.cache
+
+# scratch / debug
+scratch/
+compile_log*.txt
+compile_only*/
+compile_v246*/
+compile_only2/
 *.log
 
-# Data files (keep sample)
-DATA/*.json
-!DATA/settings.json.example
-
-# Build output
-*.exe
-*.dll
-*.pdb
-
-# Local secrets (发布脚本 token 存放点，**绝不进版本控制**)
-# 格式：GITEE_TOKEN=xxx
-# 加载方式：release.ps1 会自动读 ./secrets.local.env
-secrets.local.env
-secrets.*.env
-!.gitkeep_in_secrets_dir
-
-# VS
+# OS / IDE
 .vs/
-
-# Rider
-.idea/
-
-# Mac
+.vscode/
 .DS_Store
-
-# Temp
-*.tmp
-*.bak
-
-# Office lock files
-~*.*
 Thumbs.db
 
-# Build release
-release/
+# secrets (NEVER commit)
+secrets.local.env
+secrets.*.env
 
-# Test project
-TestForm/
+# release artifacts (built by release.ps1)
+publish/*.zip
+publish/StandaloneSF/
+publish/RELEASE_NOTES_*.md
 
-# Junk files
-nul
-
-# Publish outputs (Framework2/Standalone2/StandaloneSF/Framework/Standalone)
-publish/
-
-# ILRepack tools (download manually)
-tools/ILRepack/
-# 部署工具的输出（生成的 Web.config/公钥/README）不进 git
-tools/A3ToolsHubSetup/out/
-tools/A3ToolsHubSetup/bin/
-tools/A3ToolsHubSetup/obj/
+# Gitee token + .NET user-specific
+*.pfx
+*.snupkg

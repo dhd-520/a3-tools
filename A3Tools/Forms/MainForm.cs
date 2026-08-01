@@ -455,21 +455,27 @@ public partial class MainForm : Form, IToolContext
     {
         var scenario = DetectUpdateScenario();
 
-        // ★ 2026-08-01 09:36 陛下明确:默认升级。只有「检测到外部 A3 进程在跑」才问陛下。
-        // 每次 launcher 启动账套都重置默认(避免上次会话的偏好串到这次),由下面的分支按需覆盖。
-        _userUpdateChoice = true;
-        System.Diagnostics.Debug.WriteLine($"[UpdateScenario] 默认 _userUpdateChoice=true (scenario={scenario})");
+        // ★ 2026-08-01 11:07 陛下反馈修复:默认 _userUpdateChoice = null(不动 A3 弹窗)。
+        //   09:36 设计的「默认升级=true」会导致 Solo + 两勾 时 needSerializeUpgrade=true
+        //   → WaitForClientUpgradeComplete 5min 阻塞 → IDE 等 5min 才启(看起来像「卡死」)。
+        //   正确语义:launcher 没新版本时不主动升级 A3,client 万一弹框留陛下手动。
+        //   只在 External 分支根据陛下选择覆盖 null → true/false。
+        _userUpdateChoice = null;
+        System.Diagnostics.Debug.WriteLine($"[UpdateScenario] 默认 _userUpdateChoice=null (scenario={scenario})");
 
         if (scenario == UpdateScenario.Solo)
         {
-            // 没别的 A3 进程在跑,默认升级,A3 万一弹更新框 launcher 也按【是】。
+            // 没别的 A3 进程在跑,_userUpdateChoice 保持 null(不动 A3 弹窗),
+            // client 万一弹升级框陛下手动或 launcher UpdateForm 处理。
             return true;
         }
 
         if (scenario == UpdateScenario.JointSpawn)
         {
             // 场景 2：客户端 + 开发工具 一起启动 → 先关开发工具进程，用客户端进行更新
-            // launcher 隐含意图就是「要升级」,保持默认 _userUpdateChoice=true。
+            // launcher 隐含意图「要升级」仅适用于 launcher 自己检测到新版本时
+            // (走 CheckUpdateOnStartupAsync + ShowUpdateForm,独立路径)。
+            // 这里保持 _userUpdateChoice=null,client/devtools 弹框陛下手动。
             var devList = GetOurTrackedDevtools();
             if (devList.Count > 0)
             {
@@ -504,12 +510,14 @@ public partial class MainForm : Form, IToolContext
                       "是否继续 launcher 升级？";
             if (MessageBox.Show(this, msg, "发现更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             {
-                // 选「否」→ 覆盖默认 true → A3 弹框时 launcher 自动按【否】。
+                // 选「否」→ 覆盖默认 null → false → A3 弹框时 launcher 自动按【否】。
                 _userUpdateChoice = false;
                 System.Diagnostics.Debug.WriteLine("[UpdateScenario] External 选「否」→ launcher 跳过更新，照常启动 A3 进程");
                 return true;
             }
-            // 选「是」：关闭所有外部 A3 进程,_userUpdateChoice 保持默认 true → A3 弹框按【是】。
+            // 选「是」：覆盖默认 null → true → A3 弹框按【是】。
+            _userUpdateChoice = true;
+            System.Diagnostics.Debug.WriteLine("[UpdateScenario] External 选「是」→ 关外部进程后启动 A3, _userUpdateChoice=true");
             CloseExternalA3Processes();
             return true;
         }
