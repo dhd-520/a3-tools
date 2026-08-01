@@ -1,5 +1,6 @@
 using System.Data;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using Microsoft.Data.SqlClient;
 
@@ -450,6 +451,18 @@ public partial class SqlQueryTabPage : UserControl
                             affectedRows += totalRead;
                         }
                         while (reader.NextResult());
+
+                        // ★ 陛下 09:25 反馈：UPDATE / DELETE 永远显示 0 行受影响
+                        // SqlDataReader.RecordsAffected 在 ExecuteReaderAsync 执行完后返回 batch 内 DML 影响行数：
+                        //   - SELECT 结尾  → -1（跳过，SELECT 行已通过 totalRead 累计）
+                        //   - INSERT / UPDATE / DELETE 结尾 → 实际行数 N（累加到 affectedRows）
+                        // 仅 batch 内最后一个语句是 DML 时正确；陛下用例是纯 DML（UPDATE/DELETE），足够。
+                        // 边角案例：'UPDATE 5行; SELECT 1' 这种末尾 SELECT 会让 RecordsAffected=-1 丢掉前者 5 行 — 与 SSMS 类似行为。
+                        // try-catch 防御：reader 被释放后访问 RecordsAffected 会抛 ObjectDisposedException。
+                        int recAffected = -1;
+                        try { recAffected = reader.RecordsAffected; } catch { /* reader disposed */ }
+                        if (recAffected >= 0)
+                            affectedRows += recAffected;
                     }
                     catch (InvalidOperationException) when (reader.IsClosed)
                     {
@@ -791,7 +804,7 @@ public partial class SqlQueryTabPage : UserControl
     /// <summary>创建一个结果集 DataGridView（与原 dgvResult 同款样式，共享右键菜单）</summary>
     private DataGridView CreateResultDataGridView()
     {
-        return new DataGridView
+        var dgv = new DataGridView
         {
             Dock = DockStyle.Fill,
             AllowUserToAddRows = false,
@@ -814,6 +827,30 @@ public partial class SqlQueryTabPage : UserControl
             },
             ContextMenuStrip = ctxResultMenu
         };
+        // 日期时间统一格式化到毫秒 + 零补位，对齐 SSMS 默认显示
+        dgv.CellFormatting += Dgv_CellFormatting;
+        return dgv;
+    }
+
+    /// <summary>
+    /// 日期时间单元格格式化为 yyyy-MM-dd HH:mm:ss.fff（毫秒精度 + 零补位）。
+    /// · 陛下 09:20 反馈：默认格式只到分钟 + 不补 0（2025/11/2 16:18），跟 SSMS 不一致
+    /// · 只对 DateTime / DateTimeOffset 生效，其它类型（含 TimeSpan）保持原样
+    /// · 用 InvariantCulture 防止用户区域设置重新解释格式串
+    /// · 性能：CellFormatting 渲染期触发，每个 DateTime 单元格 ~1 次 ToString，开销极小
+    /// </summary>
+    private static void Dgv_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.Value is DateTime dt)
+        {
+            e.Value = dt.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
+            e.FormattingApplied = true;
+        }
+        else if (e.Value is DateTimeOffset dto)
+        {
+            e.Value = dto.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
+            e.FormattingApplied = true;
+        }
     }
 
     // ============================================
