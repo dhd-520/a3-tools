@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Xml.Linq;
 using Microsoft.Win32;
@@ -216,7 +217,18 @@ public partial class MainForm : Form, IToolContext
 
     #endregion
 
-    public MainForm()
+    public MainForm() : this(null)
+    {
+    }
+
+    /// <summary>
+    /// ★ 2026-07-28 原计划接收启动参数处理场景 2 重启重拉 devtools，但陛下 12:01 反馈
+    /// "更新机制你不需要管，有更新你启动客户端或开发工具会弹出更新提示窗体，
+    ///  你只需要模拟按确定或取消就行"——意即 A3 客户端自己有更新机制，A3Tools
+    /// 只需要模拟点击更新弹窗和登录窗。--relaunch-devtools 跨进程启动参数架构作废。
+    /// </summary>
+    [Obsolete("场景 2 重启后自动重拉 devtools 的设计被陛下取消，保留仅为不破坏调用方")]
+    public MainForm(string[]? startupArgs)
     {
         _dataService = new DataService();
         _toolsConfigService = new ToolsConfigService();
@@ -255,13 +267,23 @@ public partial class MainForm : Form, IToolContext
         _ = CheckUpdateOnStartupAsync();
 
         // 初始化快捷键管理器（延迟到窗体显示后注册，确保Handle已创建）
-        this.Shown += (s, e) => InitHotkey();
+        this.Shown += (s, e) =>
+        {
+            InitHotkey();
+        };
 
         // 启用键盘预览，使F键能聚焦到搜索框
         this.KeyPreview = true;
     }
 
-    /// <summary>启动后 2 秒后台检查更新。有新版本→静默弹 UpdateForm</summary>
+    /// <summary>
+    /// 启动后 2 秒后台检查更新。陛下 11:47 反馈的三种场景调度逻辑：
+    /// · Solo → 直接弹 UpdateForm（默认）
+    /// · JointSpawn → 取我们启动的 devtools 代码 + postArgs，传入 UpdateForm。用户在 UpdateForm
+    ///   点「立即更新」后，preAction 会先 kill devtools 进程释放文件锁，PerformUpdate
+    ///   会把 --relaunch-devtools 传给新 launcher，重启后 Shown 阶段自动拉起来
+    /// · External → 弹确认框，陛下选否则所有 update 选项都选否（不跳 UpdateForm）
+    /// </summary>
     private async Task CheckUpdateOnStartupAsync()
     {
         try
@@ -273,15 +295,717 @@ public partial class MainForm : Form, IToolContext
             var info = await UpdateService.CheckForUpdateAsync();
             if (info == null || !info.HasUpdate) return;
 
-            // 切到 UI 线程弹窗
+            // 1) 场景 3：外部进程在跑 → 弹确认框。选否则所有 update 提示都忽略
+            var scenario = DetectUpdateScenario();
+            if (scenario == UpdateScenario.External)
+            {
+                var extNames = GetExternalProcessDisplayNames();
+                var msg = "检测到更新，同时发现其他 A3 客户端或开发工具正在运行：\n\n" +
+                          string.Join("、", extNames.Select(n => "「" + n + "」")) +
+                          "\n\n更新会先关闭这些进程（请提前保存未提交的工作），仅保留当前 launcher 完成更新。\n" +
+                          "更新后会正常启动。\n\n" +
+                          "是否继续更新？";
+                var r = MessageBox.Show(this, msg, "发现更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (r != DialogResult.Yes) return;
+            }
+
+            // 2) 场景 2：准备 preAction 和 postArgs
+            Action? preAction = null;
+            string postArgs = "";
+            if (scenario == UpdateScenario.JointSpawn)
+            {
+                var devList = GetOurTrackedDevtools();
+                if (devList.Count > 0)
+                {
+                    // preAction：只 kill devtools（client 不动，避免占据陛下使用中的工作界面）
+                    preAction = () => KillProcesses(devList);
+                    // postArgs：收集账套 Code，重启后重拉 + auto-login
+                    postArgs = BuildRelaunchArgs(devList.Select(x => x.Code));
+                }
+            }
+
+            // 3) 弹 UpdateForm
             if (InvokeRequired)
-                BeginInvoke(new Action(() => ShowUpdateForm(info)));
+                BeginInvoke(new Action(() => ShowUpdateForm(info, preAction, postArgs)));
             else
-                ShowUpdateForm(info);
+                ShowUpdateForm(info, preAction, postArgs);
         }
-        catch
+        catch (Exception ex)
         {
-            // 静默失败，不打扰用户
+            // 静默失败，不打扰用户（但场景 2 预动作如果有 Exception 会重抦抦出，打印调试日志）
+            System.Diagnostics.Debug.WriteLine($"CheckUpdateOnStartupAsync 失败: {ex.Message}");
+        }
+    }
+
+    private void ShowUpdateForm(UpdateInfo info, Action? preUpdateAction = null, string postUpdateExeArgs = "")
+    {
+        if (IsDisposed) return;
+        // 窗体最小化时还原
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+        Activate();
+        // 2026-07-28 TODO 陛下需要 A3 客户端更新机制后才能接入 UpdateForm，现阶段仅走 A3Tools 自更新
+        // preAction / postUpdateExeArgs 参数点 暂不传给 UpdateForm，等下轮陛下的目标明确后重新接入
+        using var dlg = new UpdateForm(info);
+        dlg.ShowDialog(this);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ★ 2026-07-28 A3 客户端更新调度（陛下 12:01 / 12:32 反馈）
+    //   - A3 客户端/开发工具 自己内置更新机制，弹窗提示用户
+    //   - A3Tools 只负责：场景调度（关闭其他进程） + 模拟点“更新”按钮 + 后续自动登录
+    // ════════════════════════════════════════════════════════════════════════
+
+    // P/Invoke：SetForegroundWindow 已在文件下方（line ~3303）定义过，本方法不重复。
+    // BringWindowToTop 同理（line ~3300 区域）。
+    // 本处新增一组窗体枚举 + 子控件枚举 + 线程输入附加 API，给「A3 客户端更新弹窗自动点否」用。
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    private delegate bool EnumChildProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr hWndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetClassNameW(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowTextW(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLengthW(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+    private const uint WM_KEYDOWN = 0x0100;
+    private const uint WM_KEYUP = 0x0101;
+    private const uint BM_CLICK = 0x00F5;
+    private const int VK_RETURN = 0x0D;
+    private const int VK_TAB = 0x09;
+    private const int VK_DOWN = 0x28;
+
+    /// <summary>否/取消/跳过 之类按钮的常见文案（中英文都覆盖）。</summary>
+    private static readonly string[] A3_NO_BUTTON_TEXTS = new[]
+    {
+        "否", "取消", "稍后", "跳过", "暂不", "不更新", "Skip", "No", "Cancel", "Later", "Remind",
+        // WinForms 含助记符的「否(N)」「取消(C)」等：去掉 (&N) 后匹配
+        "否(N)", "否(&N)", "取消(&C)", "取消(C)", "稍后(&L)", "稍后(L)"
+    };
+
+    /// <summary>是/确定/立即更新 之类按钮的常见文案（中英文都覆盖）。</summary>
+    private static readonly string[] A3_YES_BUTTON_TEXTS = new[]
+    {
+        "是", "确定", "立即更新", "现在更新", "马上更新", "升级", "OK", "Yes", "Update", "OKAY",
+        // WinForms 带助记符的「是(Y)」「确定」等
+        "是(Y)", "是(&Y)", "立即更新(&U)", "确定(&O)",
+        // ★ 2026-08-01 升级完成后的「确认框」按钮(陛下 09:47 明确:点完才弹登录页)
+        "确认", "知道了", "好的", "继续", "完成", "Confirm", "OK"
+    };
+
+    /// <summary>常见 A3 客户端/开发工具“更新提示”窗体标题关键字。</summary>
+    private static readonly string[] A3_UPDATE_DIALOG_TITLES = new[]
+    {
+        "更新", "升级", "升级文件检测", "发现新版本", "新版本可用", "发现更新", "版本更新",
+        "Update", "Upgrade", "A3 更", "君则A3更",
+        // ★ 2026-08-01 升级完成后 A3 弹的「确认框」(陛下 09:47 明确字样)
+        "升级完成", "更新完成", "升级成功", "更新成功", "升级完成确认",
+        // ★ 2026-08-01 09:57 陛下截图确认:A3 升级完成后的确认框标题是「系统提示」
+        //   (标准 Windows MessageBox,主体文字才是「升级完成!」)
+        "系统提示", "提示", "Information", "系统消息"
+    };
+
+    /// <summary>
+    /// 陛下 12:32 说可以用 0081 标准账套试试。启动账套前调本方法：
+    ///   · Solo：直接返 true，不动其他
+    ///   · JointSpawn：关掉我们启的 devtools（让 A3 客户端能顺利更新），返 true
+    ///   · External：弹确认框，选否则返 false（不启任何 A3 进程）；选是则关外部后返 true
+    /// 后期 pre-cleanup 完成后，下游 LaunchDesktop 块会走原流程启 A3 客户端。
+    /// </summary>
+    private bool PrepareUpdateScenarioForLaunch(Account account, AppSettings settings)
+    {
+        var scenario = DetectUpdateScenario();
+
+        // ★ 2026-08-01 09:36 陛下明确:默认升级。只有「检测到外部 A3 进程在跑」才问陛下。
+        // 每次 launcher 启动账套都重置默认(避免上次会话的偏好串到这次),由下面的分支按需覆盖。
+        _userUpdateChoice = true;
+        System.Diagnostics.Debug.WriteLine($"[UpdateScenario] 默认 _userUpdateChoice=true (scenario={scenario})");
+
+        if (scenario == UpdateScenario.Solo)
+        {
+            // 没别的 A3 进程在跑,默认升级,A3 万一弹更新框 launcher 也按【是】。
+            return true;
+        }
+
+        if (scenario == UpdateScenario.JointSpawn)
+        {
+            // 场景 2：客户端 + 开发工具 一起启动 → 先关开发工具进程，用客户端进行更新
+            // launcher 隐含意图就是「要升级」,保持默认 _userUpdateChoice=true。
+            var devList = GetOurTrackedDevtools();
+            if (devList.Count > 0)
+            {
+                // 同步从 _processIds / Status 中清掉，避免后续查活 PID / 重拉
+                foreach (var (p, code, _) in devList)
+                {
+                    try { if (!p.HasExited) p.Kill(entireProcessTree: true); } catch { }
+                    try { p.Dispose(); } catch { }
+                    if (_accountStatuses.TryGetValue(code, out var st))
+                    {
+                        st.ProcessIds.Remove(p.Id);
+                        st.DevToolsProcessIds.Remove(p.Id);
+                    }
+                    _processIds.Remove(p.Id);
+                    _processLaunchModes.Remove(p.Id);
+                }
+                Thread.Sleep(1200); // 等被杀进程释放文件锁
+            }
+            return true;
+        }
+
+        if (scenario == UpdateScenario.External)
+        {
+            // 场景 3：检测到「其他 A3 客户端/开发工具」在跑 → 弹框问陛下
+            // (默认升级可能让其他实例的未保存修改丢失,所以必须问)
+            var extNames = GetExternalProcessDisplayNames();
+            if (extNames.Count == 0) return true;  // 其他判断变了，防胏
+            var msg = "检测到更新，同时发现其他 A3 客户端或开发工具正在运行：\n\n" +
+                      string.Join("、", extNames.Select(n => "「" + n + "」")) +
+                      "\n\n选「是」→ launcher 会先关外部进程再启动 A3，按【是】升级。\n" +
+                      "选「否」→ launcher 跳过更新，A3 客户端/开发工具按账套照常启动（客户端自己弹的更新提示我们会按你这次选择自动点【是/否】）。\n\n" +
+                      "是否继续 launcher 升级？";
+            if (MessageBox.Show(this, msg, "发现更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                // 选「否」→ 覆盖默认 true → A3 弹框时 launcher 自动按【否】。
+                _userUpdateChoice = false;
+                System.Diagnostics.Debug.WriteLine("[UpdateScenario] External 选「否」→ launcher 跳过更新，照常启动 A3 进程");
+                return true;
+            }
+            // 选「是」：关闭所有外部 A3 进程,_userUpdateChoice 保持默认 true → A3 弹框按【是】。
+            CloseExternalA3Processes();
+            return true;
+        }
+
+        return true;
+    }
+
+    /// <summary>场景 3 选是后：关掉所有外部 A3 进程（排除自己启的 devtools——他们已在 JointSpawn 分支处理过）。</summary>
+    private void CloseExternalA3Processes()
+    {
+        var ourTrackedPids = new HashSet<int>();
+        foreach (var status in _accountStatuses.Values)
+        {
+            foreach (var pid in status.ClientProcessIds) ourTrackedPids.Add(pid);
+            foreach (var pid in status.DevToolsProcessIds) ourTrackedPids.Add(pid);
+            foreach (var pid in status.ProcessIds) ourTrackedPids.Add(pid);
+        }
+        int myPid = Process.GetCurrentProcess().Id;
+        var killed = new List<Process>();
+        foreach (var name in new[] { PROC_CLIENT, PROC_DEVTOOLS })
+        {
+            Process[] procs;
+            try { procs = Process.GetProcessesByName(name); }
+            catch { continue; }
+            foreach (var p in procs)
+            {
+                if (p.Id == myPid) { p.Dispose(); continue; }
+                if (ourTrackedPids.Contains(p.Id)) { p.Dispose(); continue; }
+                killed.Add(p);
+            }
+        }
+        foreach (var p in killed)
+        {
+            try { if (!p.HasExited) p.Kill(entireProcessTree: true); } catch { }
+            try { p.Dispose(); } catch { }
+        }
+        Thread.Sleep(1500);
+    }
+
+    /// <summary>
+    /// 启动 A3 客户端/开发工具后轮询桌面上是否弹出“更新提示”窗。找到后：
+    ///   1. 拉到前台 + BringWindowToTop
+    ///   2. SendMessage WM_KEYDOWN/VK_RETURN 发送回车（模拟点默认按钮，通常是“更新”/“确定”）
+    ///   3. 返回 true，调用方后续等进程重启 + 走自动登录
+    /// 轮询超时 12s，找不到返 false。
+    /// </summary>
+    private bool TryAutoConfirmUpdateDialog(int launchedPid, int timeoutMs = 12000)
+    {
+        if (_userUpdateChoice == null)
+        {
+            // 2026-07-31 17:53: 陛下还没决定。完全不动 A3 弹窗,让陛下手动按。
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] _userUpdateChoice == null, 不点 A3 弹窗 (留给陛下手动处理)");
+            return false;
+        }
+        bool yesButton = _userUpdateChoice == true;
+        try
+        {
+            var startTime = DateTime.Now;
+            while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
+            {
+                try
+                {
+                    var p = Process.GetProcessById(launchedPid);
+                    if (p.HasExited) return false;
+                }
+                catch { return false; }
+
+                var found = TryFindAndClickUpdateDialog(yesButton);
+                if (found) return true;
+
+                Thread.Sleep(400);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 异常：{ex.Message}");
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// <summary>
+    /// 扫桌面上 A3 相关进程的窗口，找到“更新提示”弹窗后：
+    ///   1. 用 EnumWindows 找顶层窗口（进程限制在 A3 进程内）
+    ///   2. 拉前台 + AttachThreadInput 抢焦点
+    ///   3. EnumChildWindows 找按钮，根据 yesOrNo 按对应按钮（是 = 升级 / 否 = 跳过）
+    ///   4. 按钮未找到：走 VK_TAB + VK_RETURN 退路
+    ///   5. 全部日志打 Debug.WriteLine，陛下调 DebugView 可观察。
+    ///   yesOrNo 决定按哪个按钮：true = 找 A3_YES_BUTTON_TEXTS（是/确定/立即更新），
+    ///                          false = 找 A3_NO_BUTTON_TEXTS（否/取消/稍后）。
+    /// </summary>
+    private bool TryFindAndClickUpdateDialog(bool yesOrNo)
+    {
+        IntPtr foundHwnd = IntPtr.Zero;
+        string foundTitle = "";
+        string foundClass = "";
+        uint foundPid = 0;
+
+        // 收集 A3 进程组 PIDs
+        var a3Pids = new HashSet<uint>();
+        int myPid = Process.GetCurrentProcess().Id;
+        foreach (var name in new[] { PROC_CLIENT, PROC_DEVTOOLS })
+        {
+            Process[] procs;
+            try { procs = Process.GetProcessesByName(name); }
+            catch { continue; }
+            foreach (var p in procs)
+            {
+                if (p.Id == myPid) { p.Dispose(); continue; }
+                a3Pids.Add((uint)p.Id);
+                p.Dispose();
+            }
+        }
+
+        // EnumWindows 找顶层窗口
+        EnumWindows((h, l) =>
+        {
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            if (!a3Pids.Contains(pid)) return true;
+            if (!IsWindowVisible(h)) return true;
+
+            var classSb = new System.Text.StringBuilder(256);
+            GetClassNameW(h, classSb, classSb.Capacity);
+            var cls = classSb.ToString();
+            // WinForms 主窗体 + 模态弹窗都是这个 ClassName 系列
+            if (!cls.StartsWith("WindowsForms10.Window", StringComparison.OrdinalIgnoreCase)) return true;
+
+            int len = GetWindowTextLengthW(h);
+            var titleSb = new System.Text.StringBuilder(Math.Max(1, len) + 1);
+            if (len > 0) GetWindowTextW(h, titleSb, titleSb.Capacity);
+            var title = titleSb.ToString();
+
+            // 标题包含更新关键字
+            foreach (var t in A3_UPDATE_DIALOG_TITLES)
+            {
+                if (title.Contains(t, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundHwnd = h;
+                    foundPid = pid;
+                    foundTitle = title;
+                    foundClass = cls;
+                    return false;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        if (foundHwnd == IntPtr.Zero)
+        {
+            // 没找到，本轮跳过。正常 —— 客户端启动到弹窗之间一般几百毫秒。
+            return false;
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 找到更新弹窗 '{foundTitle}' (PID={foundPid}, HWND=0x{foundHwnd.ToInt64():X}, Class={foundClass})");
+
+        // 抢焦点：AllowSetForegroundWindow + AttachThreadInput + SetForegroundWindow + BringWindowToTop
+        try
+        {
+            AllowSetForegroundWindow(Process.GetCurrentProcess().Id);
+            uint targetTid = GetWindowThreadProcessId(foundHwnd, out _);
+            uint myTid = GetCurrentThreadId();
+            bool attached = (myTid != targetTid) && AttachThreadInput(myTid, targetTid, true);
+            try
+            {
+                SetForegroundWindow(foundHwnd);
+                BringWindowToTop(foundHwnd);
+            }
+            finally
+            {
+                if (attached) AttachThreadInput(myTid, targetTid, false);
+            }
+            Thread.Sleep(150);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 抢焦点异常：{ex.Message}");
+        }
+
+        // 找按钮：按 yesOrNo 选对应关键字数组
+        var targetKeywords = yesOrNo ? A3_YES_BUTTON_TEXTS : A3_NO_BUTTON_TEXTS;
+        IntPtr targetBtn = IntPtr.Zero;
+        string targetBtnText = "";
+        List<(IntPtr h, string t, string c)> allBtns = new List<(IntPtr, string, string)>();
+
+        EnumChildWindows(foundHwnd, (ch, l) =>
+        {
+            var clsSb = new System.Text.StringBuilder(256);
+            GetClassNameW(ch, clsSb, clsSb.Capacity);
+            var cls = clsSb.ToString();
+            if (!cls.Contains("BUTTON", StringComparison.OrdinalIgnoreCase)) return true;
+            int tlen = GetWindowTextLengthW(ch);
+            var tSb = new System.Text.StringBuilder(Math.Max(1, tlen) + 1);
+            if (tlen > 0) GetWindowTextW(ch, tSb, tSb.Capacity);
+            var btnText = tSb.ToString();
+            allBtns.Add((ch, btnText, cls));
+            // 去助记符 (如 "否(N)" → "否") 再匹配
+            var stripped = btnText.Replace("(", "").Replace(")", "").Trim();
+            foreach (var key in targetKeywords)
+            {
+                var kStrip = key.Replace("(", "").Replace(")", "").Trim();
+                if (btnText.Contains(key, StringComparison.OrdinalIgnoreCase)
+                    || stripped.Contains(kStrip, StringComparison.OrdinalIgnoreCase))
+                {
+                    targetBtn = ch;
+                    targetBtnText = btnText;
+                    break;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        // 打日志：所有看到的按钮（调试用）
+        if (allBtns.Count > 0)
+        {
+            var btnList = string.Join(", ", allBtns.Select(b => $"'{b.t}'"));
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 弹窗子按钮 [{allBtns.Count} 个]: {btnList}");
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 弹窗中未发现任何 Button 子控件（可能不是标准 WinForms 弹窗）");
+        }
+
+        if (targetBtn != IntPtr.Zero)
+        {
+            // 找到对应按钮 → BM_CLICK 精确点击
+            SendMessage(targetBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+            var tag = yesOrNo ? "是" : "否";
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 点击「{tag}」按钮 '{targetBtnText}' (HWND=0x{targetBtn.ToInt64():X}) 成功");
+            return true;
+        }
+
+        // 未找到精确按钮 → 退路
+        // 既然 A3 弹窗默认焦点是「是」，按陛下选择走：
+        //   · yesOrNo = true  → 直接回车 = 默认按钮【是】
+        //   · yesOrNo = false → Tab 一次切焦点 = 【否】，再回车
+        if (yesOrNo)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 未找到【是】按钮, 退路: 直接回车 = 默认按钮");
+            keybd_event((byte)VK_RETURN, 0, 0, IntPtr.Zero);
+            Thread.Sleep(50);
+            keybd_event((byte)VK_RETURN, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
+            return true;
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 未找到【否】按钮, 退路: VK_TAB + VK_RETURN");
+            keybd_event((byte)VK_TAB, 0, 0, IntPtr.Zero);
+            Thread.Sleep(50);
+            keybd_event((byte)VK_TAB, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
+            Thread.Sleep(50);
+            keybd_event((byte)VK_RETURN, 0, 0, IntPtr.Zero);
+            Thread.Sleep(50);
+            keybd_event((byte)VK_RETURN, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
+            return true;
+        }
+
+        // 仅有 1 个按钮或没有按钮 → 发回车当默认退路（不完美，但不能卡住 launcher）
+        if (allBtns.Count == 1)
+        {
+            keybd_event((byte)VK_RETURN, 0, 0, IntPtr.Zero);
+            Thread.Sleep(50);
+            keybd_event((byte)VK_RETURN, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
+            System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 仅 1 个按钮，发回车走默认退路");
+            return true;
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[AutoConfirm] 未找到任何可点按钮，无法自动处理");
+        return false;
+    }
+
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, IntPtr dwExtraInfo);
+
+    /// <summary>
+    /// 2026-07-31 17:53 陛下明确语义: launcher 检测到升级只问陛下一次 (是/否),
+    /// 后续 A3 客户端/开发工具自己弹的“升级文件检测”弹窗, launcher 按这个选择自动点对应按钮,
+    /// 永远不会让陛下面临两次同样的选择。
+    ///   · true  = 陛下选了升级 → A3 弹框时按【是】/【确定】/【立即更新】
+    ///   · false = 陛下选了跳过 → A3 弹框时按【否】/【取消】/【稍后】
+    ///   · null  = 还没轮询到陛下的选择 (例如 launcher 还没启动过、walked launcher 跳过)
+    ///     这种情况下 A3 弹框不来动,让陛下手动按 (防止 launcher 走 launch 块还被拦住)
+    /// TODO 明天 (2026-08-01) 接入: 启动前从 launcher 中的多处 (CheckUpdateOnStartupAsync 各种场景) 同步
+    ///      _userUpdateChoice, 并把 TryFindAndClickUpdateDialog 接受调用点的硬编码改成 bool?。
+    /// </summary>
+    private bool? _userUpdateChoice = null;
+
+    /// <summary>时序门: TryFindAndClickUpdateDialog 外部在轮询到 _userUpdateChoice 之前不中动弹窗。</summary>
+    public bool? UserUpdateChoice { get => _userUpdateChoice; set => _userUpdateChoice = value; }
+
+    // ★ 2026-08-01 升级序列化场景:当前 LaunchSelectedAccount 处理的账套 Code
+    //    给 WaitForClientUpgradeComplete 用(原 client PID 死了之后要按 Code 找新 PID)
+    private string? _pendingAccountCode = null;
+
+    // Plan A vs Plan B 二选一 (明天陛下拍板):
+    //   Plan A = 两个独立升级域 (launcher 自己是 UpdateForm, A3 弹框单独问陛下一次 选一次,后续按同选择自动点)
+    //   Plan B = 一个统一弹框 (launcher 启动检测到 A3 有新版本, 弹 YesNo, launcher 升级 + A3 弹框都按这个选走)
+    // 现在 _userUpdateChoice 作为 A 选项的跨场景选迹状态走; B 选项也能重用同一个 bool?, 只是补 init 路径不同。
+
+
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    // ★ 2026-07-28 三种更新场景调度（陛下 11:47 反馈）
+    // ★   1. Solo：自己独自跑 + 电脑无其他 A3 客户端/开发工具 → 直接更新 + 登陸后自动登陸
+    // ★   2. JointSpawn：客户端 + 开发工具 一起启动（我们启动的）→ 先关 devtools，用 launcher 更新
+    // ★      → 更新后自动重启 devtools + 自动登陸
+    // ★   3. External：已有其他 客户端/开发工具 启动（不是我们启的）→ 弹确认框问是否更新
+    // ★      → 选否则所有 update 都选否；选是则用 launcher 更新（不重拉外部进程）
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+    /// <summary>更新场景枚举</summary>
+    private enum UpdateScenario { Solo, JointSpawn, External }
+
+    private const string PROC_CLIENT = "君则A3";
+    private const string PROC_DEVTOOLS = "君则A3集成开发工具";
+
+    /// <summary>
+    /// 检测当前处于哪种更新场景。
+    /// 判定逻辑：
+    ///   1. 列全部 A3 相关进程（客户端 + 开发工具），排除自己
+    ///   2. 与 _accountStatuses 里我们跟踪的 PID 取交集 → 分为两类
+    ///   3. 有交集 → JointSpawn（是我们启动的）
+    ///   4. 无交集但有进程在跑 → External（外部）
+    ///   5. 都没 → Solo
+    /// </summary>
+    private UpdateScenario DetectUpdateScenario()
+    {
+        int myPid = Process.GetCurrentProcess().Id;
+        var ourTrackedPids = new HashSet<int>();
+        foreach (var status in _accountStatuses.Values)
+        {
+            foreach (var pid in status.ClientProcessIds) ourTrackedPids.Add(pid);
+            foreach (var pid in status.DevToolsProcessIds) ourTrackedPids.Add(pid);
+            foreach (var pid in status.ProcessIds) ourTrackedPids.Add(pid);
+        }
+
+        bool anyJointSpawn = false;
+        bool anyExternal = false;
+
+        foreach (var name in new[] { PROC_CLIENT, PROC_DEVTOOLS })
+        {
+            Process[] procs;
+            try { procs = Process.GetProcessesByName(name); }
+            catch { continue; }
+            foreach (var p in procs)
+            {
+                if (p.Id == myPid)
+                {
+                    p.Dispose();
+                    continue;
+                }
+                try
+                {
+                    bool isOurs = ourTrackedPids.Contains(p.Id);
+                    if (isOurs) anyJointSpawn = true;
+                    else anyExternal = true;
+                }
+                catch { /* get 不到，忽略 */ }
+                finally { p.Dispose(); }
+                if (anyJointSpawn && anyExternal) break;
+            }
+            if (anyJointSpawn && anyExternal) break;
+        }
+
+        if (anyJointSpawn) return UpdateScenario.JointSpawn;
+        if (anyExternal) return UpdateScenario.External;
+        return UpdateScenario.Solo;
+    }
+
+    /// <summary>拿我们跟踪的 devtools 进程及其账套 Code 列表（场景 2 kill 目标）。</summary>
+    private List<(Process Proc, string Code, string AccountName)> GetOurTrackedDevtools()
+    {
+        var list = new List<(Process, string, string)>();
+        foreach (var status in _accountStatuses.Values)
+        {
+            // 过滤死进程
+            var alive = new List<int>();
+            foreach (var pid in status.DevToolsProcessIds)
+            {
+                try
+                {
+                    var p = Process.GetProcessById(pid);
+                    if (p != null && !p.HasExited)
+                    {
+                        list.Add((p, status.Code, status.Name));
+                        alive.Add(pid);
+                    }
+                }
+                catch { /* 死了 */ }
+            }
+            status.DevToolsProcessIds = alive;
+        }
+        return list;
+    }
+
+    /// <summary>拿到正在运行的 A3 进程列表（排除自己），供场景 3 弹确认框用。</summary>
+    private List<string> GetExternalProcessDisplayNames()
+    {
+        int myPid = Process.GetCurrentProcess().Id;
+        var names = new List<string>();
+        foreach (var name in new[] { PROC_CLIENT, PROC_DEVTOOLS })
+        {
+            Process[] procs;
+            try { procs = Process.GetProcessesByName(name); }
+            catch { continue; }
+            foreach (var p in procs)
+            {
+                if (p.Id == myPid) { p.Dispose(); continue; }
+                names.Add(name);
+                p.Dispose();
+            }
+        }
+        return names;
+    }
+
+    /// <summary>批量 Kill 指定进程列表。等待一定时间确认死亡。</summary>
+    private static void KillProcesses(IEnumerable<(Process Proc, string Code, string AccountName)> procs, int waitMs = 1500)
+    {
+        foreach (var (p, _, _) in procs)
+        {
+            try
+            {
+                if (!p.HasExited) p.Kill(entireProcessTree: true);
+            }
+            catch { /* 权限或已死，忽略 */ }
+            finally
+            {
+                try { p.Dispose(); } catch { }
+            }
+        }
+        // 等被杀进程释放文件锁
+        Thread.Sleep(waitMs);
+    }
+
+    /// <summary>拼 --relaunch-devtools CODE1,CODE2 命令行参数。</summary>
+    private static string BuildRelaunchArgs(IEnumerable<string> codes)
+    {
+        var cleanCodes = codes
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Replace("\"", "").Replace("'", ""))  // 防御性剔除引号
+            .ToList();
+        if (cleanCodes.Count == 0) return "";
+        return " --relaunch-devtools " + string.Join(",", cleanCodes);
+    }
+
+    /// <summary>
+    /// 提取的「拉 devtools + auto-login」独立方法，供 LaunchSelectedAccount 复用。
+    /// 2026-07-28 陛下取消场景 2 重启后自动重拉 devtools 架构，但该方法本身是 clean refactor，保留。
+    /// </summary>
+    private void LaunchDevToolsForAccount(Account account, string appDir, AppSettings settings)
+    {
+        string exe2 = Path.Combine(appDir, "君则A3集成开发工具.exe");
+        if (!File.Exists(exe2)) return;
+
+        // TryBringAccountProcessesToFront 已被调用方检查过，这里直接拉
+        try
+        {
+            Process? p;
+            string devToolsPassword = settings.DevToolsPassword;
+            if (settings.DevToolsAutoLogin
+                && !string.IsNullOrEmpty(account.ServerPassword)
+                && !string.IsNullOrEmpty(account.ServerUsername)
+                && !string.IsNullOrEmpty(devToolsPassword))
+            {
+                p = Win32AutoLoginHelper.LaunchAndAutoLoginDevTools(
+                    exe2,
+                    windowTitleContains: "IDE授权登录",
+                    accountName: account.Name,
+                    clientUsername: account.ServerUsername,
+                    clientPassword: account.ServerPassword,
+                    devPassword: devToolsPassword,
+                    stepTimeoutMs: 30000,
+                    transitionDelayMs: 100);
+            }
+            else
+            {
+                p = Process.Start(new ProcessStartInfo
+                {
+                    FileName = exe2,
+                    WorkingDirectory = appDir,
+                    UseShellExecute = true
+                });
+            }
+
+            if (p != null)
+            {
+                _processIds.Add(p.Id);
+                RecordProcess(account.Code, p.Id, "dev");
+                // ★ 2026-07-31：开发工具也会检到“A3 是否升级”弹窗，一并调走点【否】。
+                TryAutoConfirmUpdateDialog(p.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"LaunchDevToolsForAccount {account.Code} 失败: {ex.Message}");
         }
     }
 
@@ -943,6 +1667,9 @@ public partial class MainForm : Form, IToolContext
         var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
         if (account == null) return;
 
+        // ★ 2026-08-01 升级序列化场景:记下账套 Code 给 WaitForClientUpgradeComplete 用
+        _pendingAccountCode = account.Code;
+
         // 保证主窗在最前端：
         // - 托盘隐藏状态：ShowFromTray() 恢复 + 拉前台
         // - 正常但非激活状态：ForceForegroundWindow 拉前台（避免启动后主窗被压在后看不见）
@@ -981,6 +1708,15 @@ public partial class MainForm : Form, IToolContext
             _dataService.SaveSettings(settings);
         }
 
+        // ★ 2026-07-28 场景调度：启动前看其他 A3 进程，决定是否需要 pre-cleanup
+        //   · Solo：直接启
+        //   · JointSpawn（启了 devtools）：关 devtools 后再启 client（让 A3 客户端能顺利更新）
+        //   · External：弹确认框，选否则不启任何 A3 进程，选是则关外部
+        if (!PrepareUpdateScenarioForLaunch(account, settings))
+        {
+            return;
+        }
+
         string appDir = settings.AppDirectory;
 
         string configPath = Path.Combine(appDir, "AppConfig.xml");
@@ -1013,51 +1749,32 @@ public partial class MainForm : Form, IToolContext
         if (!string.IsNullOrEmpty(account.ServerPassword))
             Clipboard.SetText(account.ServerPassword);
 
+        // ★ 2026-08-01 09:44 升级序列化触发条件(陛下明确:两勾+要升级→先 client 后 devtools)
+        bool needSerializeUpgrade = _userUpdateChoice == true
+                                    && settings.LaunchDesktop
+                                    && settings.LaunchDevTools;
+
+        int? clientPid = null;
         if (settings.LaunchDesktop)
         {
-            string exe1 = Path.Combine(appDir, "君则A3.exe");
-            if (File.Exists(exe1))
-            {
-                // 按账套判断：A3 客户端进程名都一样，全局去重会误伤其他账套
-                // 改为查「这个账套 Code」是否已经启动过客户端 → 有则只切到前台
-                if (TryBringAccountProcessesToFront(account.Code, "client"))
-                {
-                    ShowToast($"账套【{account.Name}】客户端已在运行，已切到前台");
-                }
-                else
-                {
-                    Process? p;
-                    // 客户端自动登录：复用 ServerUsername + ServerPassword
-                    // 受 Settings.ClientAutoLogin 开关控制
-                    var appSettingsClient = _dataService.LoadSettings();
-                    if (appSettingsClient.ClientAutoLogin
-                        && !string.IsNullOrEmpty(account.ServerPassword)
-                        && !string.IsNullOrEmpty(account.ServerUsername))
-                    {
-                        p = Win32AutoLoginHelper.LaunchAndAutoLogin(
-                            exe1,
-                            windowTitleContains: "君则A3",
-                            accountName: account.Name,
-                            username: account.ServerUsername,
-                            password: account.ServerPassword,
-                            timeoutMs: 30000);
-                    }
-                    else
-                    {
-                        p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
-                    }
-
-                    if (p != null)
-                    {
-                        _processIds.Add(p.Id);
-                        RecordProcess(account.Code, p.Id, "client");
-                    }
-                }
-            }
+            clientPid = LaunchClientOnly(account, appDir, settings);
         }
 
         if (settings.LaunchDevTools)
         {
+            if (needSerializeUpgrade && clientPid.HasValue)
+            {
+                // ★ 等 client 升级完成再启 devtools(避免 devtools 走自己的升级覆盖 client 的更新)
+                System.Diagnostics.Debug.WriteLine(
+                    $"[UpgradeSerialize] Launcher 要升级且两勾 → 等 client (PID={clientPid.Value}) 升级完成");
+                bool ok = WaitForClientUpgradeComplete(clientPid.Value, timeoutMs: 5 * 60 * 1000);
+                if (!ok)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        "[UpgradeSerialize] 等 client 升级完成超时 5min → 降级照常启 devtools");
+                }
+            }
+
             string exe2 = Path.Combine(appDir, "君则A3集成开发工具.exe");
             if (File.Exists(exe2))
             {
@@ -1068,38 +1785,10 @@ public partial class MainForm : Form, IToolContext
                 }
                 else
                 {
-                    Process? p;
-                    // 开发工具自动登录：两步登录
-                    // 步骤 1：复用 ServerUsername + ServerPassword（客户端登录）
-                    // 步骤 2：从 Settings.DevToolsPassword 读开发工具密码（仅填密码，开发账号默认记住）
-                    // 受 Settings.DevToolsAutoLogin 开关控制
-                    var appSettings = _dataService.LoadSettings();
-                    string devToolsPassword = appSettings.DevToolsPassword;
-                    if (appSettings.DevToolsAutoLogin
-                        && !string.IsNullOrEmpty(account.ServerPassword)
-                        && !string.IsNullOrEmpty(account.ServerUsername)
-                        && !string.IsNullOrEmpty(devToolsPassword))
-                    {
-                        p = Win32AutoLoginHelper.LaunchAndAutoLoginDevTools(
-                            exe2,
-                            windowTitleContains: "IDE授权登录",  // 兼容保留（内部不使用）
-                            accountName: account.Name,
-                            clientUsername: account.ServerUsername,
-                            clientPassword: account.ServerPassword,
-                            devPassword: devToolsPassword,
-                            stepTimeoutMs: 30000,
-                            transitionDelayMs: 100);
-                    }
-                    else
-                    {
-                        p = Process.Start(new ProcessStartInfo { FileName = exe2, WorkingDirectory = appDir, UseShellExecute = true });
-                    }
-
-                    if (p != null)
-                    {
-                        _processIds.Add(p.Id);
-                        RecordProcess(account.Code, p.Id, "dev");
-                    }
+                    // ★ 2026-07-28 重构：devtools 启动逻辑抽出到 LaunchDevToolsForAccount，
+                    // 场景 2 重启后 RelaunchDevToolsForAccount 也能复用同一份代码
+                    var devSettings = _dataService.LoadSettings();
+                    LaunchDevToolsForAccount(account, appDir, devSettings);
                 }
             }
         }
@@ -1117,6 +1806,172 @@ public partial class MainForm : Form, IToolContext
         {
             this.BeginInvoke(new Action(() => HideToTray()));
         }
+    }
+
+    /// <summary>
+    /// ★ 2026-08-01 从 LaunchSelectedAccount 抽出启 client 的逻辑,返回 client PID(用于升级序列化场景)。
+    /// 逻辑跟现状一致:账套已在跑→切前台;否则 Process.Start(含自动登录)。
+    /// </summary>
+    private int? LaunchClientOnly(Account account, string appDir, AppSettings settings)
+    {
+        string exe1 = Path.Combine(appDir, "君则A3.exe");
+        if (!File.Exists(exe1)) return null;
+
+        // 按账套判断：A3 客户端进程名都一样，全局去重会误伤其他账套
+        // 改为查「这个账套 Code」是否已经启动过客户端 → 有则只切到前台
+        if (TryBringAccountProcessesToFront(account.Code, "client"))
+        {
+            ShowToast($"账套【{account.Name}】客户端已在运行，已切到前台");
+            // 拿已运行 client 的 PID(给升级序列化用)
+            return GetAccountClientPid(account.Code);
+        }
+
+        Process? p;
+        // 客户端自动登录：复用 ServerUsername + ServerPassword
+        // 受 Settings.ClientAutoLogin 开关控制
+        var appSettingsClient = _dataService.LoadSettings();
+        if (appSettingsClient.ClientAutoLogin
+            && !string.IsNullOrEmpty(account.ServerPassword)
+            && !string.IsNullOrEmpty(account.ServerUsername))
+        {
+            p = Win32AutoLoginHelper.LaunchAndAutoLogin(
+                exe1,
+                windowTitleContains: "君则A3",
+                accountName: account.Name,
+                username: account.ServerUsername,
+                password: account.ServerPassword,
+                timeoutMs: 30000);
+        }
+        else
+        {
+            p = Process.Start(new ProcessStartInfo { FileName = exe1, WorkingDirectory = appDir, UseShellExecute = true });
+        }
+
+        if (p != null)
+        {
+            _processIds.Add(p.Id);
+            RecordProcess(account.Code, p.Id, "client");
+            // ★ 2026-07-28 监视 A3 客户端是否弹出“更新提示”窗，模拟点默认按钮
+            TryAutoConfirmUpdateDialog(p.Id);
+            return p.Id;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// ★ 2026-08-01 拿某账套当前 client PID(给升级序列化用)。
+    /// client 升级时 PID 会变,这个方法总返回最新的 PID。
+    /// </summary>
+    private int? GetAccountClientPid(string accountCode)
+    {
+        if (!_accountStatuses.TryGetValue(accountCode, out var st)) return null;
+        foreach (var pid in st.ClientProcessIds)
+        {
+            try
+            {
+                var p = Process.GetProcessById(pid);
+                if (!p.HasExited) return pid;
+            }
+            catch { /* 死 PID,跳过 */ }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// ★ 2026-08-01 升级序列化:等 client 升级完成。
+    /// 完成信号 = A3 弹「升级完成」确认框被点掉 + client 主窗体出现且稳定 5s(无新弹窗)。
+    /// 超时 5min 降级返 false,不影响 launcher 主流程。
+    /// 陛下 09:47 明确:点完确认按钮才弹登录界面,所以检测登录窗体最准。
+    /// </summary>
+    private bool WaitForClientUpgradeComplete(int originalClientPid, int timeoutMs)
+    {
+        var startTime = DateTime.Now;
+        int stableCount = 0;  // 连续稳定次数(达到 5 次 = 5 秒)
+        int lastSeenPid = originalClientPid;
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[UpgradeSerialize] 开始等 client 升级完成 (PID={originalClientPid}, timeout={timeoutMs/1000}s)");
+
+        while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
+        {
+            // 1. client 升级时会自启,PID 会变 → 找同账套当前 client PID
+            //    (目前传的是 LaunchClientOnly 返回的 PID,可能已死)
+            var currentPid = GetAccountClientPid(_pendingAccountCode);
+            if (currentPid.HasValue) lastSeenPid = currentPid.Value;
+
+            // 2. 尝试点掉「升级完成」确认框(可能 client 重启后第一时间就弹)
+            if (currentPid.HasValue)
+            {
+                TryAutoConfirmUpdateDialog(currentPid.Value);
+            }
+            else
+            {
+                // PID 拿不到(client 升级中 / 死) → 也试一下用最后已知的 PID
+                TryAutoConfirmUpdateDialog(lastSeenPid);
+            }
+
+            // 3. 检测 client 主窗体(登录页)是否出现
+            if (IsClientLoginWindowVisible(lastSeenPid))
+            {
+                stableCount++;
+                if (stableCount >= 5)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[UpgradeSerialize] client 升级完成,登录窗体稳定 5s (PID={lastSeenPid})");
+                    return true;
+                }
+            }
+            else
+            {
+                stableCount = 0;
+            }
+
+            Thread.Sleep(1000);
+        }
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[UpgradeSerialize] 超时 {timeoutMs/1000}s,client 升级未完成 (lastSeenPid={lastSeenPid})");
+        return false;
+    }
+
+    /// <summary>
+    /// ★ 2026-08-01 判定 client 是否已升级完成并进入登录页。
+    /// 判定标准:同 PID 有可见窗体 + 标题是「登录页」(包含"君则A3"且不含升级相关字)。
+    /// 注意:即使老 PID 死了,升级后的新 PID 也会有同样的登录窗体。
+    /// </summary>
+    private bool IsClientLoginWindowVisible(int clientPid)
+    {
+        IntPtr loginHwnd = IntPtr.Zero;
+        EnumWindows((h, l) =>
+        {
+            GetWindowThreadProcessId(h, out uint pid);
+            if ((int)pid != clientPid) return true;
+            if (!IsWindowVisible(h)) return true;
+
+            int len = GetWindowTextLengthW(h);
+            if (len == 0) return true;
+
+            var sb = new System.Text.StringBuilder(len + 1);
+            GetWindowTextW(h, sb, sb.Capacity);
+            var title = sb.ToString();
+
+            // 登录页特征:标题含「君则A3」,且不含升级相关字
+            bool isLoginLike = title.Contains("君则A3", StringComparison.OrdinalIgnoreCase)
+                               && !title.Contains("升级", StringComparison.OrdinalIgnoreCase)
+                               && !title.Contains("更新", StringComparison.OrdinalIgnoreCase)
+                               && !title.Contains("检测", StringComparison.OrdinalIgnoreCase)
+                               && !title.Contains("完成", StringComparison.OrdinalIgnoreCase)
+                               && !title.Contains("确认", StringComparison.OrdinalIgnoreCase);
+
+            if (isLoginLike)
+            {
+                loginHwnd = h;
+                return false;  // 找到了
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return loginHwnd != IntPtr.Zero;
     }
 
     private void LaunchWebBrowser(string url, string browser, string accountCode, Account? account = null)
@@ -2830,17 +3685,9 @@ public partial class MainForm : Form, IToolContext
         }
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
+    // SetForegroundWindow / AllowSetForegroundWindow / GetForegroundWindow /
+    // GetWindowThreadProcessId 等 P/Invoke 已在文件上方「A3 更新弹窗处理」区定义（避免重复声明）。
 
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool AllowSetForegroundWindow(int dwProcessId);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr GetForegroundWindow();
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     /// <summary>
     /// 拦截窗体消息，处理托盘模式下的最小化
     /// </summary>
