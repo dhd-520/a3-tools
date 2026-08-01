@@ -499,26 +499,19 @@ public partial class MainForm : Form, IToolContext
 
         if (scenario == UpdateScenario.External)
         {
-            // 场景 3：检测到「其他 A3 客户端/开发工具」在跑 → 弹框问陛下
-            // (默认升级可能让其他实例的未保存修改丢失,所以必须问)
+            // ★ 2026-08-01 20:35 陛下反馈修复:
+            //   External 场景不再弹「检测到更新」框。
+            //   原逻辑误导:launcher 启动账套时,只要检测到其他 A3 客户端/开发工具在跑就弹框,
+            //   但 launcher 本身根本没要升级 (A3 升级是 A3 自己的事,launcher 只负责自动点
+            //   A3 自己弹的「升级文件检测」框)。launcher 没新版本时,其他 A3 进程共存不冲突,
+            //   不需要弹框问是否关闭。
+            //   修:External 只 toast 提示,不弹框。A3 启动后 launcher 自动点 A3 自己弹的升级弹框
+            //   (「升级文件检测」→「升级完成!」)。
             var extNames = GetExternalProcessDisplayNames();
-            if (extNames.Count == 0) return true;  // 其他判断变了，防胏
-            var msg = "检测到更新，同时发现其他 A3 客户端或开发工具正在运行：\n\n" +
-                      string.Join("、", extNames.Select(n => "「" + n + "」")) +
-                      "\n\n选「是」→ launcher 会先关外部进程再启动 A3，按【是】升级。\n" +
-                      "选「否」→ launcher 跳过更新，A3 客户端/开发工具按账套照常启动（客户端自己弹的更新提示我们会按你这次选择自动点【是/否】）。\n\n" +
-                      "是否继续 launcher 升级？";
-            if (MessageBox.Show(this, msg, "发现更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-            {
-                // 选「否」→ 覆盖默认 null → false → A3 弹框时 launcher 自动按【否】。
-                _userUpdateChoice = false;
-                System.Diagnostics.Debug.WriteLine("[UpdateScenario] External 选「否」→ launcher 跳过更新，照常启动 A3 进程");
-                return true;
-            }
-            // 选「是」：覆盖默认 null → true → A3 弹框按【是】。
-            _userUpdateChoice = true;
-            System.Diagnostics.Debug.WriteLine("[UpdateScenario] External 选「是」→ 关外部进程后启动 A3, _userUpdateChoice=true");
-            CloseExternalA3Processes();
+            if (extNames.Count == 0) return true;
+            System.Diagnostics.Debug.WriteLine(
+                $"[UpdateScenario] External 场景不弹框,只 toast 提示: {string.Join("、", extNames)}");
+            ShowToast($"其他 A3 进程正在运行: {string.Join("、", extNames)}");
             return true;
         }
 
