@@ -33,6 +33,7 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Markdig" Version="0.34.0" />
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />
     <PackageReference Include="NPinyin" Version="0.2.6321.26573" />
   </ItemGroup>

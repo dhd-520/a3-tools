@@ -17,7 +17,7 @@ partial class UpdateForm
         this.lblDate = new System.Windows.Forms.Label();
         this.lblCurrent = new System.Windows.Forms.Label();
         this.lblSize = new System.Windows.Forms.Label();
-        this.txtBody = new System.Windows.Forms.TextBox();
+        this.txtBody = new System.Windows.Forms.WebBrowser();
         this.progressBar = new System.Windows.Forms.ProgressBar();
         this.lblProgress = new System.Windows.Forms.Label();
         this.btnUpdate = new System.Windows.Forms.Button();
@@ -67,22 +67,18 @@ partial class UpdateForm
         this.lblSize.Name = "lblSize";
         this.lblSize.Size = new System.Drawing.Size(180, 17);
         this.lblSize.Text = "更新包大小：75 MB";
-        // 
-        // txtBody
-        // 
+        //
+        // txtBody (WebBrowser 渲染 Markdown → GitHub 风格)
+        //
         this.txtBody.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
-        this.txtBody.BackColor = System.Drawing.Color.White;
-        this.txtBody.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-        this.txtBody.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
         this.txtBody.Location = new System.Drawing.Point(20, 150);
-        this.txtBody.Multiline = true;
+        this.txtBody.MinimumSize = new System.Drawing.Size(0, 100);
         this.txtBody.Name = "txtBody";
-        this.txtBody.ReadOnly = true;
-        this.txtBody.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
         this.txtBody.Size = new System.Drawing.Size(540, 280);
         this.txtBody.TabIndex = 0;
+        this.txtBody.ScrollBarsEnabled = false; // 自己控制滚动条 via HTML body overflow
         // 
         // progressBar
         // 
@@ -177,7 +173,7 @@ partial class UpdateForm
     private System.Windows.Forms.Label lblDate;
     private System.Windows.Forms.Label lblCurrent;
     private System.Windows.Forms.Label lblSize;
-    private System.Windows.Forms.TextBox txtBody;
+    private System.Windows.Forms.WebBrowser txtBody;
     private System.Windows.Forms.ProgressBar progressBar;
     private System.Windows.Forms.Label lblProgress;
     private System.Windows.Forms.Button btnUpdate;

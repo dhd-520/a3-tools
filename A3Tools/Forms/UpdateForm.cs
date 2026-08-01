@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using A3Tools.Services;
+using Markdig;
 
 namespace A3Tools.Forms;
 
@@ -34,12 +35,9 @@ public partial class UpdateForm : Form
         lblDate.Text = $"发布时间：{_update.PublishedAt.LocalDateTime:yyyy-MM-dd HH:mm}  ·  来源：{sourceText}";
         lblCurrent.Text = $"当前版本：{UpdateService.CurrentVersion}";
 
-        // 把 markdown 风格的 body 简单转一下（去掉 # ## 等）
-        var body = _update.Body ?? "";
-        body = body.Replace("\r\n", "\n")
-                   .Replace("**", "")
-                   .Replace("`", "");
-        txtBody.Text = body;
+        // 渲染 markdown → HTML → WebBrowser
+        var markdown = _update.Body ?? "";
+        txtBody.DocumentText = RenderMarkdownAsHtml(markdown);
 
         // 大小
         if (_update.AssetSize > 0)
@@ -57,6 +55,79 @@ public partial class UpdateForm : Form
         if (bytes > 1024 * 1024) return $"{bytes / 1024.0 / 1024.0:0.0} MB";
         if (bytes > 1024) return $"{bytes / 1024.0:0.0} KB";
         return $"{bytes} B";
+    }
+
+    /// <summary>
+    /// ★ 2026-08-01 11:18 陛下要求:更新窗体展示更新内容的地方支持 markdown。
+    /// 用 Markdig 解析 markdown → HTML,套上 GitHub 风格 CSS,塞进 WebBrowser。
+    /// Markdig 支持 GFM(表格/任务列表/代码块)以及 CommonMark(标题/列表/代码/粗体/斜体/链接/引用)。
+    /// </summary>
+    private static string RenderMarkdownAsHtml(string markdown)
+    {
+        // 1) Markdig 解析 markdown 为 HTML body (启用 GFM + 自动链接)
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()  // GFM 表格、任务列表、自动链接等
+            .Build();
+        string bodyHtml = Markdown.ToHtml(markdown ?? "", pipeline);
+
+        // 2) 完整 HTML 文档,套 GitHub 风格 CSS
+        string html = @"<!DOCTYPE html>
+<html><head><meta charset=""utf-8""><style>
+body {
+    font-family: 'Microsoft YaHei UI', 'Segoe UI', -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #24292f;
+    background: #ffffff;
+    padding: 12px 16px;
+    margin: 0;
+}
+h1, h2, h3, h4, h5, h6 { margin: 16px 0 8px 0; font-weight: 600; line-height: 1.25; }
+h1 { font-size: 22px; padding-bottom: 6px; border-bottom: 1px solid #d0d7de; }
+h2 { font-size: 18px; padding-bottom: 4px; border-bottom: 1px solid #d0d7de; }
+h3 { font-size: 16px; }
+h4 { font-size: 14px; }
+p { margin: 0 0 10px 0; }
+ul, ol { margin: 0 0 10px 0; padding-left: 24px; }
+li { margin: 2px 0; }
+li > p { margin: 0; }
+blockquote {
+    margin: 0 0 10px 0;
+    padding: 0 12px;
+    color: #57606a;
+    border-left: 4px solid #d0d7de;
+    background: #f6f8fa;
+}
+code {
+    font-family: 'Consolas', 'Cascadia Code', monospace;
+    font-size: 13px;
+    background: rgba(175, 184, 193, 0.2);
+    padding: 1px 4px;
+    border-radius: 4px;
+    color: #24292f;
+}
+pre {
+    background: #f6f8fa;
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0 0 10px 0;
+    line-height: 1.45;
+}
+pre code { background: transparent; padding: 0; font-size: 13px; }
+strong { font-weight: 600; color: #24292f; }
+em { font-style: italic; }
+a { color: #0969da; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: none; border-top: 1px solid #d0d7de; margin: 16px 0; }
+table { border-collapse: collapse; margin: 0 0 10px 0; }
+table th, table td { border: 1px solid #d0d7de; padding: 4px 10px; }
+table th { background: #f6f8fa; font-weight: 600; }
+input[type='checkbox'] { margin-right: 4px; vertical-align: middle; }
+.task-list-item { list-style: none; padding-left: 0; }
+img { max-width: 100%; }
+</style></head><body>" + bodyHtml + @"</body></html>";
+        return html;
     }
 
     private async void BtnUpdate_Click(object? sender, EventArgs e)
