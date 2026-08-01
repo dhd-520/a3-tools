@@ -88,6 +88,34 @@ public partial class GenericCopyToolForm : Form
         };
     }
 
+    /// <summary>
+    /// 「缺失数据」按钮：跨源/目标库对主键，列出"源有目标无"的行（最多 TOP 500）。
+    /// 不依赖 txtSearchKeyword，独立按钮直接调。
+    /// </summary>
+    private async void BtnMissingData_Click(object? sender, EventArgs e)
+    {
+        if (!ValidateTableName(_config.MainTable) || !ValidateFieldName(_config.PrimaryKey))
+        {
+            MessageBox.Show("配置里的主表或复制关键字不合法。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (_tgtAccount == null)
+        {
+            MessageBox.Show("请先选择【目标数据库】！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (_srcAccount == null)
+        {
+            MessageBox.Show("请先选择【源数据库】！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (IsHttpMode)
+            await RunMissingDataSearchHttpAsync();
+        else
+            await RunMissingDataSearchAsync();
+    }
+
     private string BuildConfigInfoText()
     {
         var related = _config.RelatedTableList;
@@ -341,6 +369,144 @@ public partial class GenericCopyToolForm : Form
         }
         finally
         {
+            btnSearch.Enabled = true;
+        }
+    }
+
+    // ==================== 「缺失数据」按钮：源库存在但目标库不存在 ====================
+
+    /// <summary>
+    /// 「缺失数据」- 直连：从源库读 TOP 500 候选行，从目标库读主键 HashSet，
+    /// 应用层过滤出"源有目标无"的行，绑定到 DataGridView。
+    /// </summary>
+    private async Task RunMissingDataSearchAsync()
+    {
+        var srcConnStr = BuildConnStr(txtSourceServer.Text.Trim(), txtSourceDbName.Text.Trim(), txtSourceUser.Text.Trim(), txtSourcePassword.Text);
+        var tgtConnStr = BuildConnStr(txtTargetServer.Text.Trim(), txtTargetDbName.Text.Trim(), txtTargetUser.Text.Trim(), txtTargetPassword.Text);
+        if (!TestConn(srcConnStr)) { MessageBox.Show("源数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+        if (!TestConn(tgtConnStr)) { MessageBox.Show("目标数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+
+        lblSearchProgress.Text = "查询缺失数据中...";
+        lblSearchProgress.ForeColor = Color.FromArgb(228, 88, 38);
+        dgvSearchResults.DataSource = null;
+        btnMissingData.Enabled = false;
+        btnSearch.Enabled = false;
+
+        try
+        {
+            _searchResults = await Task.Run(() =>
+            {
+                using var srcConn = new SqlConnection(srcConnStr);
+                using var tgtConn = new SqlConnection(tgtConnStr);
+                srcConn.Open();
+                tgtConn.Open();
+
+                var table = _config.MainTable;
+                var pk = _config.PrimaryKey;
+
+                // 1. 目标端主键集合（top 100000 防爆内存）
+                var tgtPks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using (var tgtCmd = new SqlCommand($"SELECT TOP 100000 [{pk}] FROM dbo.[{table}]", tgtConn))
+                using (var rdr = tgtCmd.ExecuteReader())
+                {
+                    while (rdr.Read())
+                    {
+                        var v = rdr[0];
+                        if (v != null && v != DBNull.Value) tgtPks.Add(v.ToString() ?? "");
+                    }
+                }
+                // 2. 源端 TOP 500 候选行（无需输入关键字）
+                var srcDt = new System.Data.DataTable();
+                using (var srcCmd = new SqlCommand($"SELECT TOP 500 * FROM dbo.[{table}] ORDER BY [{pk}]", srcConn))
+                {
+                    using var adapter = new SqlDataAdapter(srcCmd);
+                    adapter.Fill(srcDt);
+                }
+                // 3. 应用层求差
+                var missingDt = srcDt.Clone();
+                foreach (System.Data.DataRow row in srcDt.Rows)
+                {
+                    var key = row[pk]?.ToString();
+                    if (key == null || tgtPks.Contains(key)) continue;
+                    missingDt.ImportRow(row);
+                }
+                return missingDt;
+            });
+
+            BindSearchResults(_searchResults);
+            lblSearchProgress.Text = $"缺失查询完成：源有/目标无 共 {_searchResults.Rows.Count} 条。多选后点「添加选中」→「确认复制」。";
+            lblSearchProgress.ForeColor = Color.FromArgb(228, 88, 38);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"缺失查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            lblSearchProgress.Text = "缺失查询失败";
+            lblSearchProgress.ForeColor = Color.Red;
+        }
+        finally
+        {
+            btnMissingData.Enabled = true;
+            btnSearch.Enabled = true;
+        }
+    }
+
+    /// <summary>
+    /// 「缺失数据」- Http 代理：通过 ProxyHelper 同时访问源/目标 IDataAccess，
+    /// 应用层求差。结果与直连模式一致。
+    /// </summary>
+    private async Task RunMissingDataSearchHttpAsync()
+    {
+        if (_srcAccount == null || _tgtAccount == null) return;
+
+        var srcDA = ProxyHelper.CreateDataAccess(_srcAccount)!;
+        var tgtDA = ProxyHelper.CreateDataAccess(_tgtAccount)!;
+
+        lblSearchProgress.Text = "查询缺失数据中...";
+        lblSearchProgress.ForeColor = Color.FromArgb(228, 88, 38);
+        dgvSearchResults.DataSource = null;
+        btnMissingData.Enabled = false;
+        btnSearch.Enabled = false;
+
+        try
+        {
+            _searchResults = await Task.Run(async () =>
+            {
+                var table = _config.MainTable;
+                var pk = _config.PrimaryKey;
+
+                var tgtPks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var tgtDt = await ProxyHelper.ExecuteQueryToDataTableAsync(tgtDA, $"SELECT TOP 100000 [{pk}] FROM dbo.[{table}]");
+                foreach (System.Data.DataRow row in tgtDt.Rows)
+                {
+                    var v = row[0];
+                    if (v != null && v != DBNull.Value) tgtPks.Add(v.ToString() ?? "");
+                }
+
+                var srcDt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, $"SELECT TOP 500 * FROM dbo.[{table}] ORDER BY [{pk}]");
+
+                var missingDt = srcDt.Clone();
+                foreach (System.Data.DataRow row in srcDt.Rows)
+                {
+                    var key = row[pk]?.ToString();
+                    if (key == null || tgtPks.Contains(key)) continue;
+                    missingDt.ImportRow(row);
+                }
+                return missingDt;
+            });
+
+            BindSearchResults(_searchResults);
+            lblSearchProgress.Text = $"缺失查询完成：源有/目标无 共 {_searchResults.Rows.Count} 条。多选后点「添加选中」→「确认复制」。";
+            lblSearchProgress.ForeColor = Color.FromArgb(228, 88, 38);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"缺失查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            lblSearchProgress.Text = "缺失查询失败";
+            lblSearchProgress.ForeColor = Color.Red;
+        }
+        finally
+        {
+            btnMissingData.Enabled = true;
             btnSearch.Enabled = true;
         }
     }
