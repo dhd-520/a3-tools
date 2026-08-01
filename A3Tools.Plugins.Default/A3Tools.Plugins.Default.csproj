@@ -7,7 +7,7 @@
     <!-- 复制到Plugins目录 -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>$(MSBuildThisFileDirectory)..\A3Tools\bin\$(Configuration)\net7.0-windows\Plugins\</OutputPath>
-    <Version>2.4.6</Version>
+    <Version>2.4.6.2</Version>
   </PropertyGroup>
 
   <ItemGroup>
