@@ -72,6 +72,52 @@ public static class SqlObjectSchemaCache
         _dataAccess = dataAccess;
     }
 
+    // ============================================
+    // 事件：IntelliSense 异步加载后重弹
+    // ============================================
+
+    /// <summary>
+    /// 缓存加载完成事件（key 已就绪）。
+    /// 订阅者在事件中可重调 GetSuggestions 拿全部结果。
+    /// 同步调用 (UI 线程) 需谨慎: 事件发布不在 UI 线程。
+    /// </summary>
+    public static event Action<string>? Loaded;
+
+    /// <summary>检查指定连接串缓存是否已加载 (UI 线程快查, 不阻塞)</summary>
+    public static bool IsLoaded(string connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString)) return false;
+        try
+        {
+            var (key, _) = ParseKey(connectionString);
+            return _cache.ContainsKey(key);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// 异步触发缓存加载 (fire-and-forget)。
+    /// 不会阻塞调用线程, 加载完成后触发 Loaded 事件。
+    /// 多线程安全: 内部 _loadingTasks 保证同 key 只加载一次。
+    /// </summary>
+    public static void EnsureLoadingAsync(string connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString)) return;
+        if (IsLoaded(connectionString)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await WarmupAsync(connectionString).ConfigureAwait(false);
+                string key;
+                try { (key, _) = ParseKey(connectionString); } catch { return; }
+                if (_cache.ContainsKey(key))
+                    Loaded?.Invoke(key);
+            }
+            catch { /* 加载失败静默 */ }
+        });
+    }
+
     /// <summary>
     /// 当前是否走 Http 代理
     /// </summary>

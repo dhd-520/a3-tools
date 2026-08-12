@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
@@ -20,6 +21,9 @@ public class SqlEditor : RichTextBox
     private const int SB_HORZ = 0;
     private const int SB_VERT = 1;
     private const int SB_THUMBPOSITION = 4;
+
+    // 2026-08-04 陛下反馈修复: 粘贴 SQL 时去掉原带格式 (颜色/字体/段落)
+    private const int WM_PASTE = 0x0302;
 
     // 冻结重绘：设置重绘抑制标志 + 解除后强制刷新。避免高亮过程中多次
     // Select + SelectionColor 引起的 RichTextBox 闪烁（richEdit 重绘不双缓冲，
@@ -176,6 +180,30 @@ public class SqlEditor : RichTextBox
 
     protected override void WndProc(ref Message m)
     {
+        // 拦截 WM_PASTE: 从剪贴板拿纯文本插入 (不调 base.Paste() 防止带 RTF 格式)
+        if (m.Msg == WM_PASTE)
+        {
+            if (Clipboard.ContainsText())
+            {
+                var text = Clipboard.GetText();
+                // RichTextBox 换行统一为 \n, 转换 \r\n / \r 到 \n 避免混合
+                text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+                _suppressHighlight = true;
+                _suppressIntelliSense = true;
+                try
+                {
+                    SelectedText = text;
+                }
+                catch { /* 控件可能正在销毁 */ }
+                finally
+                {
+                    _suppressHighlight = false;
+                    _suppressIntelliSense = false;
+                }
+            }
+            return; // 吞掉原始消息，不交给 base
+        }
+
         base.WndProc(ref m);
         if (m.Msg == WM_VSCROLL || m.Msg == WM_MOUSEWHEEL || m.Msg == WM_HSCROLL || m.Msg == EM_LINESCROLL)
             ViewChanged?.Invoke(this, EventArgs.Empty);
@@ -319,6 +347,18 @@ public class SqlEditor : RichTextBox
             return;
         }
 
+        // 2026-08-04 陛下反馈修复: Tab 缩进 / Shift+Tab 反缩进
+        // 规则: 
+        //   · 无选区 / 单行选区: Tab 在光标位置插入 4 空格
+        //   · 多行选区: Tab 在每行行首插入 4 空格; Shift+Tab 从每行行首去掉最多 4 空格
+        //   · 在联想 popup 中: 保持原逻辑 (优先选中联想项)
+        if (e.KeyCode == Keys.Tab && !e.Control && !e.Alt)
+        {
+            if (e.Shift) HandleShiftTabIndent(e);
+            else HandleTabIndent(e);
+            return;
+        }
+
         // F5 = 执行（由 SqlQueryForm 主窗体拦截，这里不重复处理）
         // Ctrl+F5 = 执行选中（同上）
         // 只处理 Enter 自动缩进
@@ -397,6 +437,168 @@ public class SqlEditor : RichTextBox
 
         // 3. 阻断 base.OnKeyDown 与后续 WM_CHAR 二次插入
         e.SuppressKeyPress = true;
+    }
+
+    // ============================================
+    // Tab 缩进 / Shift+Tab 反缩进 (2026-08-04)
+    // ============================================
+
+    private const string IndentText = "    ";
+
+    /// <summary>
+    /// Tab 缩进:
+    ///   · 无选区 / 单行选区: 在光标位置插入 4 空格
+    ///   · 多行选区: 每行行首加 4 空格
+    /// 保持与 HandleEnterWithIndent 同一缩进宽度。
+    /// </summary>
+    private void HandleTabIndent(KeyEventArgs e)
+    {
+        int selStart = SelectionStart;
+        int selLen = SelectionLength;
+        int lineStart = GetLineFromCharIndex(selStart);
+        int lineEnd = GetLineFromCharIndex(selStart + Math.Max(0, selLen));
+
+        if (lineStart == lineEnd)
+        {
+            // 单行 / 无选区: 插入 4 空格
+            _suppressHighlight = true;
+            _suppressIntelliSense = true;
+            try { SelectedText = IndentText; }
+            finally
+            {
+                _suppressHighlight = false;
+                _suppressIntelliSense = false;
+            }
+            e.SuppressKeyPress = true;
+            return;
+        }
+
+        // 多行选区: 每行行首插入 4 空格
+        IndentMultipleLines(lineStart, lineEnd, addIndent: true);
+        e.SuppressKeyPress = true;
+    }
+
+    /// <summary>
+    /// Shift+Tab 反缩进:
+    ///   · 多行选区: 每行行首去掉最多 4 个空格 (不是 \t)
+    ///   · 无选区: 上一行一样 (其实只是去 4 空格)
+    ///   · 单行选区: 选区不在行首, 从光标所在行行首开始去 4 空格
+    /// 不动 \t (SQL 不常见, 改起来风险高)
+    /// </summary>
+    private void HandleShiftTabIndent(KeyEventArgs e)
+    {
+        int selStart = SelectionStart;
+        int selLen = SelectionLength;
+        int lineStart = GetLineFromCharIndex(selStart);
+        int lineEnd = GetLineFromCharIndex(selStart + Math.Max(0, selLen));
+
+        if (lineStart == lineEnd)
+        {
+            // 单行 / 无选区: 从光标所在行行首去掉最多 4 空格
+            DedentLine(lineStart);
+            e.SuppressKeyPress = true;
+            return;
+        }
+
+        // 多行选区: 每行行首去 4 空格
+        IndentMultipleLines(lineStart, lineEnd, addIndent: false);
+        e.SuppressKeyPress = true;
+    }
+
+    /// <summary>多行缩进/反缩进 (Tab / Shift+Tab 共享)</summary>
+    private void IndentMultipleLines(int lineStart, int lineEnd, bool addIndent)
+    {
+        if (lineStart < 0 || lineEnd < lineStart) return;
+        // 考虑选区延伸到 lineEnd+1 的下一行 (GetLineFromCharIndex(selStart+selLen) 
+        // 当 selLen>0 且选区末尾正好是 \n 之后的位置时, 会返下一行)。
+        // 逻辑: 如果选区以行尾换行结尾, 跨行范围 -= 1 (避免空行被加缩进)。
+        int realLineEnd = lineEnd;
+        if (addIndent)
+        {
+            int tailCharIdx = SelectionStart + SelectionLength;
+            if (tailCharIdx > 0 && tailCharIdx <= TextLength && Text[tailCharIdx - 1] == '\n')
+                realLineEnd = Math.Max(lineStart, lineEnd - 1);
+        }
+
+        var sb = new StringBuilder();
+        for (int line = lineStart; line <= realLineEnd; line++)
+        {
+            int ci = GetFirstCharIndexFromLine(line);
+            if (ci < 0) continue;
+            int nextCi = GetFirstCharIndexFromLine(line + 1);
+            int lineLen = (nextCi < 0 ? TextLength : nextCi) - ci;
+            if (lineLen <= 0) { sb.Append('\n'); continue; }
+            string lineText = Text.Substring(ci, lineLen);
+            if (addIndent)
+            {
+                sb.Append(IndentText).Append(lineText);
+            }
+            else
+            {
+                int toRemove = 0;
+                int maxRemove = Math.Min(IndentText.Length, lineLen);
+                for (int k = 0; k < maxRemove; k++)
+                {
+                    if (lineText[k] == ' ') toRemove++;
+                    else break;
+                }
+                if (toRemove == 0) { sb.Append(lineText); }
+                else { sb.Append(lineText.Substring(toRemove)); }
+            }
+        }
+
+        int firstCi = GetFirstCharIndexFromLine(lineStart);
+        int endCi = (realLineEnd < GetLineFromCharIndex(TextLength))
+            ? GetFirstCharIndexFromLine(realLineEnd + 1)
+            : TextLength;
+        int replaceLen = endCi - firstCi;
+
+        _suppressHighlight = true;
+        _suppressIntelliSense = true;
+        SuspendLayout();
+        try
+        {
+            Select(firstCi, replaceLen);
+            SelectedText = sb.ToString();
+        }
+        finally
+        {
+            ResumeLayout();
+            _suppressHighlight = false;
+            _suppressIntelliSense = false;
+        }
+    }
+
+    /// <summary>从指定行行首去掉最多 4 空格</summary>
+    private void DedentLine(int line)
+    {
+        int ci = GetFirstCharIndexFromLine(line);
+        if (ci < 0) return;
+        int nextCi = GetFirstCharIndexFromLine(line + 1);
+        int lineLen = (nextCi < 0 ? TextLength : nextCi) - ci;
+        if (lineLen <= 0) return;
+
+        int toRemove = 0;
+        int maxRemove = Math.Min(IndentText.Length, lineLen);
+        for (int k = 0; k < maxRemove; k++)
+        {
+            if (Text[ci + k] == ' ') toRemove++;
+            else break;
+        }
+        if (toRemove == 0) return;
+
+        _suppressHighlight = true;
+        _suppressIntelliSense = true;
+        try
+        {
+            Select(ci, toRemove);
+            SelectedText = "";
+        }
+        finally
+        {
+            _suppressHighlight = false;
+            _suppressIntelliSense = false;
+        }
     }
 
     // ============================================
@@ -543,10 +745,85 @@ public class SqlEditor : RichTextBox
         var matches = SqlIntelliSenseProvider.GetSuggestions(word, ConnectionString, Text, caret, 80).ToList();
         if (matches.Count == 0)
         {
+            // 2026-08-04 陛下反馈修复: 联想会卡顿导致无法编辑/操作。
+            // 原逻辑: GetSuggestions 内部 EnsureLoadedSync 同步等 10s (会冻 UI)。
+            // 新逻辑: GetSuggestions 只读缓存, 未就绪返空。
+            // 修复: 缓存未就绪且在强上下文 (EXEC 后),  fire-and-forget 启动加载,
+            //       加载完成后重弹一次。
+            if (isStrongContext
+                && !string.IsNullOrEmpty(ConnectionString)
+                && !SqlObjectSchemaCache.IsLoaded(ConnectionString))
+            {
+                TryStartAsyncReloadAndRepopup(word, caret);
+            }
             _intelliSense.Hide();
             return;
         }
 
+        ShowIntelliSensePopup(caret, matches);
+    }
+
+    /// <summary>
+    /// 异步重弹: fire-and-forget 启动缓存加载, 加载完后在 UI 线程重弹。
+    /// 只订阅一次 (Loaded 事件中 - 避免重入)。
+    /// </summary>
+    private void TryStartAsyncReloadAndRepopup(string word, int caretAtTrigger)
+    {
+        if (string.IsNullOrEmpty(ConnectionString)) return;
+
+        Action<string>? handler = null;
+        handler = (key) =>
+        {
+            // 重要: 先解绑, 避免后续重入
+            SqlObjectSchemaCache.Loaded -= handler;
+
+            // 控件可能已销毁 (快速切 Tab/关闭)
+            if (IsDisposed || !IsHandleCreated) return;
+
+            // 跳回 UI 线程重弹
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => RepopupIfStillRelevant(word, caretAtTrigger)));
+            }
+            else
+            {
+                RepopupIfStillRelevant(word, caretAtTrigger);
+            }
+        };
+        SqlObjectSchemaCache.Loaded += handler;
+        SqlObjectSchemaCache.EnsureLoadingAsync(ConnectionString);
+    }
+
+    /// <summary>
+    /// 缓存加载完后重弹。只在光标位置 + 上下文 仍相关时重弹。
+    /// 避免: 用户已走开/输入其他字符 后还弹旧的。
+    /// </summary>
+    private void RepopupIfStillRelevant(string word, int caretAtTrigger)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        if (_suppressIntelliSense) return;
+
+        // 用户可能已经移开/输入了别的字符:
+        // 1) 光标位置不同 → 上下文可能变了 → 重新检测
+        // 2) 但只重弹在 "强上下文" 位置 (EXEC/SELECT*/FROM 后) → 避免无脑弹
+        var ctx = SqlIntelliSenseProvider.DetectContext(Text, SelectionStart);
+        bool isStillStrongContext =
+            ctx == SqlIntelliSenseProvider.SqlContextKind.AfterExec ||
+            ctx == SqlIntelliSenseProvider.SqlContextKind.AfterObjectKeyword ||
+            ctx == SqlIntelliSenseProvider.SqlContextKind.AfterColumnKeyword;
+        if (!isStillStrongContext) return;
+
+        // 重取当前位置的 word (用户可能已输入更多字符)
+        var newWord = GetCurrentWord();
+        var matches = SqlIntelliSenseProvider.GetSuggestions(newWord, ConnectionString, Text, SelectionStart, 80).ToList();
+        if (matches.Count == 0) return;
+
+        ShowIntelliSensePopup(SelectionStart, matches);
+    }
+
+    /// <summary>根据光标位置在 DGV 下方显示 popup</summary>
+    private void ShowIntelliSensePopup(int caret, List<string> matches)
+    {
         // 计算 popup 屏幕位置：在光标所在行的"下一行"顶部，X坐标对准当前光标位置！
         // ────────────────────────────────────────────────────────────────
         Point screenPos;

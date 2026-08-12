@@ -90,10 +90,11 @@ public static class SqlIntelliSenseProvider
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<string>(maxResults);
 
-        // 陛下反馈：EXEC 弹不出存储过程 → 原因：缓存未就绪。
-        // 修复：GetSuggestions 入口同步等缓存就绪（最多 10s）。第一次会同步等，后续直接读缓存。
-        if (!string.IsNullOrEmpty(connectionString))
-            SqlObjectSchemaCache.EnsureLoadedSync(connectionString);
+        // 2026-08-04 陛下反馈修复: 取消同步等 10s 的 EnsureLoadedSync（会冻 UI）。
+        // 原同步逻辑会为首次按 EXEC 的联想等最多 10s。
+        // 新逻辑: GetSuggestions 只读缓存, 缓存未就绪返空; 触发端订阅 Loaded 事件后重弹。
+        // 若触发端是 SqlEditor.TriggerIntelliSense, 它会在 IsLoaded=false 时 fire-and-forget
+        // 调 EnsureLoadingAsync + 订阅 Loaded 重弹。
 
         // ===== -2. 上下文检测：光标位置决定弹什么类型（不依赖 prefix） =====
         // 陛下反馈：“EXEC 空格后” / “SELECT * 后” 必须弹（即使 word="" 也不能关 popup）。
