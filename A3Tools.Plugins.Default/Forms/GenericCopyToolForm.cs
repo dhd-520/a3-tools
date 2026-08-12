@@ -20,6 +20,7 @@ public partial class GenericCopyToolForm : Form
     private readonly IToolContext _context;
     private readonly CustomToolConfig _config;
     private System.Data.DataTable? _searchResults;
+    private string _quickFilterText = "";
 
     // 源/目标账套引用（用于判断 Http 模式和创建 IDataAccess）
     private Account? _srcAccount;
@@ -86,11 +87,19 @@ public partial class GenericCopyToolForm : Form
                 }
             }
         };
+
+        // 快速过滤：TextChanged 实时在 DGV 结果上二次过滤
+        txtQuickFilter.TextChanged += (s, e) =>
+        {
+            _quickFilterText = txtQuickFilter.Text.Trim();
+            ApplyQuickFilter();
+        };
     }
 
     /// <summary>
-    /// 「缺失数据」按钮：跨源/目标库对主键，列出"源有目标无"的行（最多 TOP 500）。
-    /// 不依赖 txtSearchKeyword，独立按钮直接调。
+    /// 「缺失数据」按钮：跨源/目标库对主键，列出"源有目标无"的行。
+    ///   · 搜索关键字非空:按关键字过滤源(复用 BuildSearchSql, TOP 5000)+ 应用层差集
+    ///   · 搜索关键字为空:原行为(源 TOP 500 + 应用层差集)
     /// </summary>
     private async void BtnMissingData_Click(object? sender, EventArgs e)
     {
@@ -99,6 +108,10 @@ public partial class GenericCopyToolForm : Form
             MessageBox.Show("配置里的主表或复制关键字不合法。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+
+        // 新查询:清空快速过滤框
+        _quickFilterText = "";
+        txtQuickFilter.Clear();
         if (_tgtAccount == null)
         {
             MessageBox.Show("请先选择【目标数据库】！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -110,10 +123,11 @@ public partial class GenericCopyToolForm : Form
             return;
         }
 
+        var keyword = txtSearchKeyword.Text.Trim();
         if (IsHttpMode)
-            await RunMissingDataSearchHttpAsync();
+            await RunMissingDataSearchHttpAsync(keyword);
         else
-            await RunMissingDataSearchAsync();
+            await RunMissingDataSearchAsync(keyword);
     }
 
     private string BuildConfigInfoText()
@@ -289,6 +303,10 @@ public partial class GenericCopyToolForm : Form
             return;
         }
 
+        // 新查询:清空快速过滤框(二次过滤上下文以新结果为准)
+        _quickFilterText = "";
+        txtQuickFilter.Clear();
+
         var keyword = txtSearchKeyword.Text.Trim();
         if (string.IsNullOrWhiteSpace(keyword))
         {
@@ -324,27 +342,7 @@ public partial class GenericCopyToolForm : Form
                 using var conn = new SqlConnection(srcConnStr);
                 conn.Open();
                 var dbColumns = GetAllColumns(conn, _config.MainTable);
-                var dbSet = new HashSet<string>(dbColumns, StringComparer.OrdinalIgnoreCase);
-                var pk = _config.PrimaryKey;
-                var configuredCols = _config.SearchColumnList;
-                if (configuredCols.Count > 0)
-                {
-                    // 新行为：用配置的列，过滤出数据库中真实存在的列
-                    foreach (var c in configuredCols)
-                        if (dbSet.Contains(c)) validSearchCols.Add(c);
-                    // 保证 PrimaryKey 总是参与搜索（即使没有写在 SearchColumns 中）
-                    if (!string.IsNullOrEmpty(pk) && !validSearchCols.Any(c => string.Equals(c, pk, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        if (dbSet.Contains(pk)) validSearchCols.Insert(0, pk);
-                    }
-                }
-                else
-                {
-                    // 旧行为：主键 + 可选的 NAME
-                    if (!string.IsNullOrEmpty(pk) && dbSet.Contains(pk)) validSearchCols.Add(pk);
-                    if (dbSet.Contains("NAME")) validSearchCols.Add("NAME");
-                }
-
+                validSearchCols.AddRange(ComputeValidSearchCols(dbColumns));
                 if (validSearchCols.Count == 0)
                     throw new InvalidOperationException("未能找到任何可用于搜索的列，请检查搜索列配置。");
 
@@ -376,10 +374,10 @@ public partial class GenericCopyToolForm : Form
     // ==================== 「缺失数据」按钮：源库存在但目标库不存在 ====================
 
     /// <summary>
-    /// 「缺失数据」- 直连：从源库读 TOP 500 候选行，从目标库读主键 HashSet，
+    /// 「缺失数据」- 直连：源端按 keyword(非空)或全表 TOP 500 拉候选行，从目标库读主键 HashSet，
     /// 应用层过滤出"源有目标无"的行，绑定到 DataGridView。
     /// </summary>
-    private async Task RunMissingDataSearchAsync()
+    private async Task RunMissingDataSearchAsync(string keyword)
     {
         var srcConnStr = BuildConnStr(txtSourceServer.Text.Trim(), txtSourceDbName.Text.Trim(), txtSourceUser.Text.Trim(), txtSourcePassword.Text);
         var tgtConnStr = BuildConnStr(txtTargetServer.Text.Trim(), txtTargetDbName.Text.Trim(), txtTargetUser.Text.Trim(), txtTargetPassword.Text);
@@ -415,10 +413,23 @@ public partial class GenericCopyToolForm : Form
                         if (v != null && v != DBNull.Value) tgtPks.Add(v.ToString() ?? "");
                     }
                 }
-                // 2. 源端 TOP 500 候选行（无需输入关键字）
+                // 2. 源端候选行：有关键字 -> 按搜索列过滤(TOP 5000);无关键字 -> 原 TOP 500 全表
                 var srcDt = new System.Data.DataTable();
-                using (var srcCmd = new SqlCommand($"SELECT TOP 500 * FROM dbo.[{table}] ORDER BY [{pk}]", srcConn))
+                if (string.IsNullOrEmpty(keyword))
                 {
+                    using var srcCmd = new SqlCommand($"SELECT TOP 500 * FROM dbo.[{table}] ORDER BY [{pk}]", srcConn);
+                    using var adapter = new SqlDataAdapter(srcCmd);
+                    adapter.Fill(srcDt);
+                }
+                else
+                {
+                    var dbColumns = GetAllColumns(srcConn, _config.MainTable);
+                    var validSearchCols = ComputeValidSearchCols(dbColumns);
+                    if (validSearchCols.Count == 0)
+                        throw new InvalidOperationException("未能找到任何可用于搜索的列，请检查搜索列配置。");
+                    var sql = BuildSearchSql(validSearchCols);
+                    using var srcCmd = new SqlCommand(sql, srcConn);
+                    srcCmd.Parameters.AddWithValue("@keyword", "%" + keyword + "%");
                     using var adapter = new SqlDataAdapter(srcCmd);
                     adapter.Fill(srcDt);
                 }
@@ -452,9 +463,9 @@ public partial class GenericCopyToolForm : Form
 
     /// <summary>
     /// 「缺失数据」- Http 代理：通过 ProxyHelper 同时访问源/目标 IDataAccess，
-    /// 应用层求差。结果与直连模式一致。
+    /// 源端按 keyword 过滤(非空)或全表 TOP 500，应用层求差。结果与直连模式一致。
     /// </summary>
-    private async Task RunMissingDataSearchHttpAsync()
+    private async Task RunMissingDataSearchHttpAsync(string keyword)
     {
         if (_srcAccount == null || _tgtAccount == null) return;
 
@@ -482,7 +493,28 @@ public partial class GenericCopyToolForm : Form
                     if (v != null && v != DBNull.Value) tgtPks.Add(v.ToString() ?? "");
                 }
 
-                var srcDt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, $"SELECT TOP 500 * FROM dbo.[{table}] ORDER BY [{pk}]");
+                var srcDt = new System.Data.DataTable();
+                if (string.IsNullOrEmpty(keyword))
+                {
+                    srcDt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, $"SELECT TOP 500 * FROM dbo.[{table}] ORDER BY [{pk}]");
+                }
+                else
+                {
+                    var dbColumns = await GetAllColumnsHttpAsync(srcDA, _config.MainTable);
+                    var validSearchCols = ComputeValidSearchCols(dbColumns);
+                    if (validSearchCols.Count == 0)
+                        throw new InvalidOperationException("未能找到任何可用于搜索的列，请检查搜索列配置。");
+                    // 去重保持顺序
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var uniqueCols = new List<string>();
+                    foreach (var c in validSearchCols)
+                        if (!string.IsNullOrWhiteSpace(c) && seen.Add(c)) uniqueCols.Add(c);
+                    var whereClauses = uniqueCols
+                        .Select(c => $"CONVERT(NVARCHAR(4000), [{c}]) LIKE '%{ProxyHelper.EscapeSql(keyword)}%'");
+                    var where = string.Join(" OR ", whereClauses);
+                    var sql = $"SELECT TOP 5000 * FROM dbo.[{_config.MainTable}] WHERE {where} ORDER BY [{_config.PrimaryKey}]";
+                    srcDt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, sql);
+                }
 
                 var missingDt = srcDt.Clone();
                 foreach (System.Data.DataRow row in srcDt.Rows)
@@ -538,6 +570,38 @@ WHERE {where}
 ORDER BY [{pk}]";
     }
 
+    /// <summary>
+    /// 根据配置 + 数据库实际列名计算「有效搜索列」。
+    /// 规则:
+    ///   1. 有 SearchColumnList -> 用配置的列, 过滤掉数据库中不存在的
+    ///   2. 无 SearchColumnList -> 旧行为: PrimaryKey + 可选 NAME
+    ///   3. 任何路径下都保证 PrimaryKey 参与(如果数据库里存在)
+    /// 返回的列已按顺序、保留重复(后续 BuildSearchSql 会再去重)。
+    /// </summary>
+    private List<string> ComputeValidSearchCols(IList<string> dbColumns)
+    {
+        var result = new List<string>();
+        var dbSet = new HashSet<string>(dbColumns, StringComparer.OrdinalIgnoreCase);
+        var pk = _config.PrimaryKey;
+        var configuredCols = _config.SearchColumnList;
+
+        if (configuredCols.Count > 0)
+        {
+            foreach (var c in configuredCols)
+                if (dbSet.Contains(c)) result.Add(c);
+            if (!string.IsNullOrEmpty(pk) && !result.Any(c => string.Equals(c, pk, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (dbSet.Contains(pk)) result.Insert(0, pk);
+            }
+        }
+        else
+        {
+            if (!string.IsNullOrEmpty(pk) && dbSet.Contains(pk)) result.Add(pk);
+            if (dbSet.Contains("NAME")) result.Add("NAME");
+        }
+        return result;
+    }
+
     private List<string> GetAllColumns(SqlConnection conn, string tableName)
     {
         const string sql = @"
@@ -557,9 +621,43 @@ WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName";
         if (dgvSearchResults.Columns.Contains("chk"))
             dgvSearchResults.Columns.Remove("chk");
 
-        dgvSearchResults.DataSource = dt;
+        dgvSearchResults.DataSource = dt.DefaultView;
         ApplySearchColumnLayout();
         dgvSearchResults.AutoResizeColumns();
+    }
+
+    /// <summary>
+    /// 快速过滤：按 txtQuickFilter 文本对当前 _searchResults 应用 DataView.RowFilter。
+    /// 作用范围:当前绑定到 DGV 的 DataView 底层 DataTable(仍以 _searchResults 引用保存)。
+    /// 逻辑:对每个可见列(去重)做 OR Like 匹配;空文本 -> 不过滤。
+    /// </summary>
+    private void ApplyQuickFilter()
+    {
+        if (_searchResults == null)
+        {
+            dgvSearchResults.DataSource = null;
+            return;
+        }
+        if (string.IsNullOrEmpty(_quickFilterText))
+        {
+            _searchResults.DefaultView.RowFilter = "";
+            return;
+        }
+        // DataView.RowFilter 中要转义单引号(用 '' 代替一个 ')
+        var escaped = _quickFilterText.Replace("'", "''");
+        // 包含 . 的话避免被解析为子表达式（这里只过滤字符串列）
+        var clauses = new List<string>();
+        foreach (DataGridViewColumn col in dgvSearchResults.Columns)
+        {
+            if (!col.Visible) continue;
+            // 列名包含特殊字符(空格/点)用 []
+            var colName = col.Name;
+            if (colName.Any(c => !char.IsLetterOrDigit(c) && c != '_'))
+                clauses.Add($"CONVERT([{colName}], 'System.String') LIKE '%{escaped}%'");
+            else
+                clauses.Add($"CONVERT([{colName}], 'System.String') LIKE '%{escaped}%'");
+        }
+        _searchResults.DefaultView.RowFilter = clauses.Count == 0 ? "" : string.Join(" OR ", clauses);
     }
 
     /// <summary>
@@ -816,26 +914,8 @@ ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
             // 查 dbColumns（Http 版本，独立于直连 GetAllColumns）
             var dbColumns = await GetAllColumnsHttpAsync(srcDA, _config.MainTable);
 
-            // 计算 validSearchCols（同直连逻辑，独立实现）
-            var validSearchCols = new List<string>();
-            var dbSet = new HashSet<string>(dbColumns, StringComparer.OrdinalIgnoreCase);
-            var pk = _config.PrimaryKey;
-            var configuredCols = _config.SearchColumnList;
-            if (configuredCols.Count > 0)
-            {
-                foreach (var c in configuredCols)
-                    if (dbSet.Contains(c)) validSearchCols.Add(c);
-                if (!string.IsNullOrEmpty(pk) && !validSearchCols.Any(c => string.Equals(c, pk, StringComparison.OrdinalIgnoreCase)))
-                {
-                    if (dbSet.Contains(pk)) validSearchCols.Insert(0, pk);
-                }
-            }
-            else
-            {
-                if (!string.IsNullOrEmpty(pk) && dbSet.Contains(pk)) validSearchCols.Add(pk);
-                if (dbSet.Contains("NAME")) validSearchCols.Add("NAME");
-            }
-
+            // 计算 validSearchCols(复用 helper,与直连逻辑一致)
+            var validSearchCols = ComputeValidSearchCols(dbColumns);
             if (validSearchCols.Count == 0)
                 throw new InvalidOperationException("未能找到任何可用于搜索的列，请检查搜索列配置。");
 

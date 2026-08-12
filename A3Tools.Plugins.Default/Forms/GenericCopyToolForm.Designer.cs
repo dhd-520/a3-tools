@@ -51,6 +51,8 @@ partial class GenericCopyToolForm
     private Label lblSearchProgress;
     private DataGridView dgvSearchResults;
     private Button btnMissingData;
+    private Label lblQuickFilter;
+    private TextBox txtQuickFilter;
 
     protected override void Dispose(bool disposing)
     {
@@ -103,6 +105,8 @@ partial class GenericCopyToolForm
         btnAddSelected = new Button();
         btnClearSelected = new Button();
         lblSearchProgress = new Label();
+        lblQuickFilter = new Label();
+        txtQuickFilter = new TextBox();
         dgvSearchResults = new DataGridView();
         mainLayout.SuspendLayout();
         pnlDatabases.SuspendLayout();
@@ -592,6 +596,8 @@ partial class GenericCopyToolForm
         pnlSearch.Controls.Add(btnAddSelected);
         pnlSearch.Controls.Add(btnClearSelected);
         pnlSearch.Controls.Add(lblSearchProgress);
+        pnlSearch.Controls.Add(lblQuickFilter);
+        pnlSearch.Controls.Add(txtQuickFilter);
         pnlSearch.Controls.Add(dgvSearchResults);
         pnlSearch.Dock = DockStyle.Fill;
         pnlSearch.Location = new Point(3, 589);
@@ -694,14 +700,33 @@ partial class GenericCopyToolForm
         dgvSearchResults.AllowUserToDeleteRows = false;
         dgvSearchResults.BackgroundColor = Color.White;
         dgvSearchResults.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-        dgvSearchResults.Location = new Point(10, 45);
+        dgvSearchResults.Location = new Point(10, 86);
         dgvSearchResults.Name = "dgvSearchResults";
         dgvSearchResults.ReadOnly = true;
         dgvSearchResults.RowHeadersWidth = 72;
         dgvSearchResults.RowTemplate.Height = 25;
         dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvSearchResults.Size = new Size(1225, 297);
+        dgvSearchResults.Size = new Size(1225, 256);
         dgvSearchResults.TabIndex = 7;
+        // 
+        // lblQuickFilter
+        // 
+        lblQuickFilter.AutoSize = true;
+        lblQuickFilter.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblQuickFilter.Location = new Point(10, 52);
+        lblQuickFilter.Name = "lblQuickFilter";
+        lblQuickFilter.Size = new Size(134, 28);
+        lblQuickFilter.TabIndex = 8;
+        lblQuickFilter.Text = "快速过滤：";
+        // 
+        // txtQuickFilter
+        // 
+        txtQuickFilter.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtQuickFilter.Location = new Point(168, 49);
+        txtQuickFilter.Name = "txtQuickFilter";
+        txtQuickFilter.PlaceholderText = "在当前结果中再次过滤（所有列模糊匹配，实时）";
+        txtQuickFilter.Size = new Size(740, 38);
+        txtQuickFilter.TabIndex = 9;
         // 
         // GenericCopyToolForm
         // 
