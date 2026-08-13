@@ -800,6 +800,13 @@ public partial class MainForm : Form, IToolContext
     /// </summary>
     private bool? _userUpdateChoice = null;
 
+    // ★ 2026-08-13 16:03 A3 程序更新选择(本次启动会话内有效)
+    //   launcher 启动 client/devtools 时,如果 A3 弹升级框,场景3 弹自定义窗让陛下选(是/否)。
+    //   选完后保存到本字段,后续 devtools 启动触发的 A3 升级框直接按本字段处理(不重复弹框)。
+    //   与 _userUpdateChoice 区别:本字段仅用于 A3 程序更新,_userUpdateChoice 用于 launcher 自己的更新。
+    //   两者完全独立,陛下 9:43 强调不能混。
+    private bool? _a3ProgramUpdateChoice = null;
+
     /// <summary>时序门: TryFindAndClickUpdateDialog 外部在轮询到 _userUpdateChoice 之前不中动弹窗。</summary>
     public bool? UserUpdateChoice { get => _userUpdateChoice; set => _userUpdateChoice = value; }
 
@@ -907,10 +914,22 @@ public partial class MainForm : Form, IToolContext
         return list;
     }
 
-    /// <summary>拿到正在运行的 A3 进程列表（排除自己），供场景 3 弹确认框用。</summary>
+    /// <summary>
+    /// ★ 2026-08-13 17:23 陛下反馈"单独启 client/devtools 也弹提示框":
+    ///   旧版本只排除 launcher PID 自己,但 launcher 启的 client/devtools 也是 launcher 进程树(子进程)。
+    ///   单独启 client 时,launcher 启的 client 跑了 → 旧版 hasExternalA3=true → 错误弹场景3。
+    ///   新版本:排除 launcher 进程树(myPid + 所有 _processIds),
+    ///     只有 launcher 之外的 A3 进程才算"外部",
+    ///     才需要场景3 弹框让陛下确认(防止 launcher 启 client+devtools 时强行关掉其他账号的 client)。
+    /// </summary>
     private List<string> GetExternalProcessDisplayNames()
     {
-        int myPid = Process.GetCurrentProcess().Id;
+        // launcher 进程树 = launcher 自己 + 所有它启的子进程(client/devtools/web/db/remote 等)
+        var launcherProcessTree = new HashSet<int>(Process.GetCurrentProcess().Id);
+        foreach (var pid in _processIds)
+        {
+            launcherProcessTree.Add(pid);
+        }
         var names = new List<string>();
         foreach (var name in new[] { PROC_CLIENT, PROC_DEVTOOLS })
         {
@@ -919,7 +938,7 @@ public partial class MainForm : Form, IToolContext
             catch { continue; }
             foreach (var p in procs)
             {
-                if (p.Id == myPid) { p.Dispose(); continue; }
+                if (launcherProcessTree.Contains(p.Id)) { p.Dispose(); continue; }
                 names.Add(name);
                 p.Dispose();
             }
@@ -1718,6 +1737,12 @@ public partial class MainForm : Form, IToolContext
             return;
         }
 
+        // ★ 2026-08-13 14:30 关键修复(陛下反馈:启动 devtools 后无反应):
+        //   不管 launcher 走 client / devtools / 切前台哪条路径,先统一启动 A3 程序更新轮询(后台异步)
+        //   旧设计:WaitForA3UpdateAfterStart 在 LaunchClientOnly/LaunchDevToolsForAccount 内部,可能 try/catch 吞了
+        //   新设计:在 LaunchSelectedAccount 入口先启动 StartA3ProgramUpdateWatcher(无 PID 依赖,适合所有路径)
+        StartA3ProgramUpdateWatcher();
+
         string appDir = settings.AppDirectory;
 
         string configPath = Path.Combine(appDir, "AppConfig.xml");
@@ -1876,6 +1901,146 @@ public partial class MainForm : Form, IToolContext
             catch { /* 死 PID,跳过 */ }
         }
         return null;
+    }
+
+    /// <summary>
+    /// ★ 2026-08-13 14:30 关键修复(陛下反馈:启动 devtools 后无反应):
+    ///   不管 launcher 走 client / devtools / 切前台哪条路径,先统一启动 A3 程序更新轮询(后台异步)
+    ///   旧设计:WaitForA3UpdateAfterStart 在 LaunchClientOnly/LaunchDevToolsForAccount 内部,可能 try/catch 吞了
+    ///   新设计:在 LaunchSelectedAccount 入口先启动 StartA3ProgramUpdateWatcher(无 PID 依赖,适合所有路径)
+    /// </summary>
+    private void StartA3ProgramUpdateWatcher(int timeoutMs = 30 * 1000)
+    {
+        // ★ 2026-08-13 16:13 陛下反馈"同时启动不行,单独启动行":
+        //   同时启 client + devtools 时,A3 devtools 启动需要先弹 A3 客户端登录触发升级检测,
+        //   整个 A3 升级流程耗时 10-30 秒,原 5 秒轮询太短,超时退出后 A3 升级框才出现
+        //   修复:默认轮询时间延长到 30 秒,给 A3 启动+检测+弹升级框足够时间
+        // ★ 2026-08-13 17:31 陛下反馈"升级完成后没有点确定":
+        //   A3 升级完成后会弹"升级完成!" / "系统提示" 框,需要自动点掉,否则卡在桌面上。
+        //   原设计:WaitForA3UpdateDialogThenHandle 找到升级框(场景1/2/3)就退出,后续"升级完成"框没人处理。
+        //   新设计:启动后跑两个阶段:
+        //     阶段1(0~timeoutMs): 检测"升级文件检测"框,触发 HandleA3ProgramUpdateFound(场景1/2/3)
+        //     阶段2(timeoutMs 内到超时 5min): 检测"升级完成!"框,自动点掉(WaitAndConfirmUpgradeComplete 循环)
+        //   这样无论 A3 升级是检测到了还是没检测到,后续"升级完成"框都会被处理。
+        System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] StartA3ProgramUpdateWatcher: 异步启动 A3 更新框轮询 timeout={timeoutMs/1000}s");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                // 阶段1: 检测"升级文件检测"框,触发场景1/2/3 处理
+                A3ProgramUpdateChecker.WaitForA3UpdateDialogThenHandle(
+                    timeoutMs: timeoutMs,
+                    onUpdateDetected: (IntPtr hwnd) =>
+                    {
+                        object result = this.Invoke((Func<IntPtr, AppSettings, bool>)HandleA3ProgramUpdateFound, hwnd, _dataService.LoadSettings());
+                        return (bool)result;
+                    });
+
+                // 阶段2: 等 A3 升级完成(检测"升级完成!"框),自动点确定
+                //   超时 5 分钟,通常升级流程几十秒~几分钟
+                //   场景3 选否时场景:不会进这里,因为 HandleA3ProgramUpdateFound 已 ClickNoButton 处理完毕
+                //   场景1/2/3选是 时场景:会进这里,等升级完成框弹出并自动点掉
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 阶段1完成,启动阶段2: 等 A3 升级完成并自动点确定 (timeout=5min)");
+                A3ProgramUpdateChecker.WaitAndConfirmUpgradeComplete(timeoutMs: 5 * 60 * 1000);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] StartA3ProgramUpdateWatcher 异步轮询异常: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// ★ 2026-08-13 10:20 A3 程序更新框回调(完全独立于 launcher 自己的 UpdateService)。
+    /// A3 升级弹窗依赖 A3 进程启动,必须等 A3 启动后才能轮询到。本方法是轮询回调。
+    /// 按陛下 10:03 拍板的 3 种场景处理:
+    ///   场景1: 单启A3程序 + 无其他 A3 在跑 → 自动點是
+    ///   场景2: 同时启客户端+开发工具 + 无其他 A3 在跑 → 自动點是
+    ///   场景3: 有其他 A3 在跑 → 弹 A3UpdateConfirmForm 询问陛下并保存 _a3ProgramUpdateChoice
+    /// ★ 严正承诺:本方法**不碰** launcher 自己的更新(UpdateService / CheckUpdateOnStartupAsync / UpdateForm)
+    /// </summary>
+    private bool HandleA3ProgramUpdateFound(IntPtr updateHwnd, AppSettings settings)
+    {
+        System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 回调触发,处理 A3 程序更新框 (hwnd=" + updateHwnd + ")");
+
+        var externalNames = GetExternalProcessDisplayNames();
+        bool hasExternalA3 = externalNames.Count > 0;
+        System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] GetExternalProcessDisplayNames 返回 {externalNames.Count} 个: [{string.Join(",", externalNames)}]");
+
+        if (hasExternalA3 && _a3ProgramUpdateChoice.HasValue)
+        {
+            System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 场景3: 陛下已选 {(_a3ProgramUpdateChoice == true ? "是" : "否")},不再弹场景3,直接按选择处理");
+            if (_a3ProgramUpdateChoice == true)
+            {
+                CloseExternalA3Processes();
+                A3ProgramUpdateChecker.ClickYesButton(timeoutMs: 2000);
+                return true;
+            }
+            else
+            {
+                if (!A3ProgramUpdateChecker.ClickNoButton(timeoutMs: 3000))
+                {
+                    System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 抓不到「否」按钮,留给陛下手动处理");
+                }
+                return false;
+            }
+        }
+
+        if (hasExternalA3)
+        {
+            var msg = "检测到 A3 程序需要更新,且有以下 A3 进程正在运行:\n\n"
+                      + string.Join("、", externalNames.Select(n => "「" + n + "」"))
+                      + "\n\n升级需要先关闭这些进程（请提前保存未提交的工作）。\n"
+                      + "是否升级？";
+
+            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景3: 准备 ShowDialog A3UpdateConfirmForm (TopMost,任务栏显示,屏中央)");
+            DialogResult r;
+            try
+            {
+                using (var dlg = new A3Tools.Forms.A3UpdateConfirmForm(msg, "A3 程序更新"))
+                {
+                    r = dlg.ShowDialog();
+                }
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景3: A3UpdateConfirmForm 返回, r=" + r);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 场景3: ShowDialog 抛异常! {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+            if (r != DialogResult.Yes)
+            {
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景3-陛下点否 → 模拟点 A3 升级框的「否」按钮");
+                _a3ProgramUpdateChoice = false;
+                if (!A3ProgramUpdateChecker.ClickNoButton(timeoutMs: 3000))
+                {
+                    System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 抓不到「否」按钮,留给陛下手动处理");
+                }
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景3-陛下点否 → _a3ProgramUpdateChoice=false,后续 A3 进程按否处理,终止轮询");
+                return false;
+            }
+            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景3-陛下点否是 → 关闭所有外部 A3 进程");
+            _a3ProgramUpdateChoice = true;
+            CloseExternalA3Processes();
+            A3ProgramUpdateChecker.ClickYesButton(timeoutMs: 2000);
+            return true;
+        }
+
+        bool wantClient = settings.LaunchDesktop;
+        bool wantDevtools = settings.LaunchDevTools;
+        System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 场景判定: wantClient={wantClient}, wantDevtools={wantDevtools}");
+
+        if (wantClient && wantDevtools)
+        {
+            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景2:同时启客户端+开发工具");
+            return true;
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景1:单启A3程序,自动點是");
+            A3ProgramUpdateChecker.ClickYesButton(timeoutMs: 2000);
+            return true;
+        }
     }
 
     /// <summary>

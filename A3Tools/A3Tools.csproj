@@ -19,6 +19,15 @@
 
   <!-- 为Designer.cs 添加嵌套关系（SDK默认已包含，通过Update添加DependentUpon？-->
   <ItemGroup>
+    <!-- ★ 2026-08-13 A3 程序更新配合器(独立于 launcher 自己的 UpdateService) -->
+    <Compile Update="Services\A3ProgramUpdateChecker.cs">
+      <DependentUpon></DependentUpon>
+    </Compile>    <Compile Update="Forms\A3UpdateConfirmForm.cs">
+      <DependentUpon></DependentUpon>
+    </Compile>
+
+  </ItemGroup>
+  <ItemGroup>
     <Compile Update="Forms\MainForm.Designer.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
     </Compile>
