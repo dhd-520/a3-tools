@@ -882,27 +882,40 @@ public partial class MainForm : Form, IToolContext
     }
 
     /// <summary>拿我们跟踪的 devtools 进程及其账套 Code 列表（场景 2 kill 目标）。</summary>
-    private List<(Process Proc, string Code, string AccountName)> GetOurTrackedDevtools()
+    private List<(int Pid, string Code, string AccountName)> GetOurTrackedDevtools()
     {
-        var list = new List<(Process, string, string)>();
+        var list = new List<(int, string, string)>();
         foreach (var status in _accountStatuses.Values)
         {
             // 过滤死进程
             var alive = new List<int>();
             foreach (var pid in status.DevToolsProcessIds)
             {
+                bool isAlive = false;
                 try
                 {
                     var p = Process.GetProcessById(pid);
                     if (p != null && !p.HasExited)
                     {
-                        list.Add((p, status.Code, status.Name));
-                        alive.Add(pid);
+                        isAlive = true;
                     }
+                    p?.Dispose(); // ★ 2026-08-14 09:53 修复: 立刻 Dispose 避免跨调用 HasExited 抛 InvalidOperationException
                 }
                 catch { /* 死了 */ }
+                if (isAlive) alive.Add(pid);
             }
-            status.DevToolsProcessIds = alive;
+            // ★ 2026-08-14 09:53 修复: 只在活进程有变化时才赋值,避免覆写其他线程的引用
+            if (alive.Count != status.DevToolsProcessIds.Count)
+            {
+                status.DevToolsProcessIds = alive;
+            }
+        }
+        foreach (var status in _accountStatuses.Values)
+        {
+            foreach (var pid in status.DevToolsProcessIds)
+            {
+                list.Add((pid, status.Code, status.Name));
+            }
         }
         return list;
     }
@@ -945,18 +958,24 @@ public partial class MainForm : Form, IToolContext
     }
 
     /// <summary>批量 Kill 指定进程列表。等待一定时间确认死亡。</summary>
-    private static void KillProcesses(IEnumerable<(Process Proc, string Code, string AccountName)> procs, int waitMs = 1500)
+    private static void KillProcesses(IEnumerable<(int Pid, string Code, string AccountName)> procs, int waitMs = 1500)
     {
-        foreach (var (p, _, _) in procs)
+        foreach (var (pid, _, _) in procs)
         {
+            // ★ 2026-08-14 09:53 修复:用 PID 重新拿 Process,避免 HasExited 抛 InvalidOperationException
+            Process? p = null;
             try
             {
-                if (!p.HasExited) p.Kill(entireProcessTree: true);
+                p = Process.GetProcessById(pid);
+                if (p != null && !p.HasExited)
+                {
+                    p.Kill(entireProcessTree: true);
+                }
             }
             catch { /* 权限或已死，忽略 */ }
             finally
             {
-                try { p.Dispose(); } catch { }
+                try { p?.Dispose(); } catch { }
             }
         }
         // 等被杀进程释放文件锁
@@ -1783,36 +1802,68 @@ public partial class MainForm : Form, IToolContext
         //   关键步骤:launcher 自己之前启的 devtools 还在跑 → 先杀掉(释放文件锁)
         bool needSerializeUpgrade = settings.LaunchDesktop && settings.LaunchDevTools;
 
-        // ★ 2026-08-14 09:04 陛下反馈:两勾升级序列化时,启 client 前要先杀 launcher 启过的 devtools
-        //   因为 devtools 和 client 共享文件,client 升级时 devtools 在跑会文件占用
-        //   复用 GetOurTrackedDevtools 拿 launcher 自己启的 devtools,然后 kill(在 client 启动前)
+        // ★ 2026-08-14 10:05 陛下反馈:运行账套A 客户端+开发工具都在跑,再双击账套A 启动应该切前台不重启
+        //   旧版:两勾默认序列化升级,杀 launcher 启过的 devtools → 启 client → 升级 → 启 devtools
+        //     → 账套A 已在跑也会被杀重启
+        //   新版:两勾 + 当前账套 client/devtools 都在跑 → 切前台 + return,不杀不重启
+        //     · 只有 client 在跑,devtools 未启 → 走序列化的部分(client 已是最新版,devtools 补启即可)
+        //     · 只有 devtools 在跑,client 未启 → 杀 devtools + 走序列化
+        //     · 都未启 → 走完整序列化(client 升级 → devtools 启动)
         if (needSerializeUpgrade)
         {
-            var trackedDevList = GetOurTrackedDevtools();
-            if (trackedDevList.Count > 0)
+            // ★ 2026-08-14 10:05 陛下反馈:账套A client+devtools 都在跑时不要杀不重启,只切前台
+            bool clientAlreadyRunning = TryBringAccountProcessesToFront(account.Code, "client");
+            bool devtoolsAlreadyRunning = TryBringAccountProcessesToFront(account.Code, "dev");
+            if (clientAlreadyRunning && devtoolsAlreadyRunning)
             {
                 System.Diagnostics.Debug.WriteLine(
-                    $"[UpgradeSerialize] 两勾+launcher 启过 devtools ({trackedDevList.Count} 个) → 先杀(释放文件锁)再启 client");
-                foreach (var (p, code, _) in trackedDevList)
+                    $"[UpgradeSerialize] 账套【{account.Code}】client+devtools 都已在跑 → 切前台,不重启不升级");
+                ShowToast($"账套【{account.Name}】客户端+开发工具已在运行,已切到前台");
+                return;
+            }
+            if (clientAlreadyRunning)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[UpgradeSerialize] 账套【{account.Code}】client 已在跑(devtools 未启) → client 切前台,补启 devtools");
+                ShowToast($"账套【{account.Name}】客户端已在运行,已切到前台");
+            }
+            if (devtoolsAlreadyRunning)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[UpgradeSerialize] 账套【{account.Code}】devtools 已在跑(client 未启) → 杀 devtools 走序列化(client 需升级)");
+            }
+
+            // 杀 launcher 自己启的 devtools(client 未启时,需要杀掉避免文件占用)
+            if (devtoolsAlreadyRunning && !clientAlreadyRunning)
+            {
+                var trackedDevList = GetOurTrackedDevtools();
+                if (trackedDevList.Count > 0)
                 {
-                    try
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[UpgradeSerialize] 两勾+launcher 启过 devtools ({trackedDevList.Count} 个) → 先杀(释放文件锁)再启 client");
+                    foreach (var (pid, code, _) in trackedDevList)
                     {
-                        if (!p.HasExited) p.Kill(entireProcessTree: true);
+                        // ★ 2026-08-14 09:53 修复:用 PID 重新拿 Process(不用 cache 里的旧对象,避免 HasExited 抛 InvalidOperationException)
+                        try
+                        {
+                            var p = Process.GetProcessById(pid);
+                            if (p != null && !p.HasExited)
+                            {
+                                p.Kill(entireProcessTree: true);
+                            }
+                            p?.Dispose();
+                        }
+                        catch { /* 已死/无权限,忽略 */ }
+                        if (_accountStatuses.TryGetValue(code, out var st))
+                        {
+                            st.ProcessIds.Remove(pid);
+                            st.DevToolsProcessIds.Remove(pid);
+                        }
+                        _processIds.Remove(pid);
+                        _processLaunchModes.Remove(pid);
                     }
-                    catch { /* 已死/无权限,忽略 */ }
-                    finally
-                    {
-                        try { p.Dispose(); } catch { }
-                    }
-                    if (_accountStatuses.TryGetValue(code, out var st))
-                    {
-                        st.ProcessIds.Remove(p.Id);
-                        st.DevToolsProcessIds.Remove(p.Id);
-                    }
-                    _processIds.Remove(p.Id);
-                    _processLaunchModes.Remove(p.Id);
+                    Thread.Sleep(1200); // 等被杀进程释放文件锁
                 }
-                Thread.Sleep(1200); // 等被杀进程释放文件锁
             }
         }
 
@@ -3807,23 +3858,33 @@ public partial class MainForm : Form, IToolContext
         if (!_accountStatuses[code].ProcessIds.Contains(processId))
             _accountStatuses[code].ProcessIds.Add(processId);
 
-        // 设置运行状态
+        // ★ 2026-08-14 09:49 陛下反馈:同时启 client+devtools 后账套状态没打钩 + 重复打开可启多个
+        //   根因:RecordProcess 只把 PID 加进合并 ProcessIds,没加进类型化 list (ClientProcessIds/DevToolsProcessIds)
+        //   后果:
+        //     · RefreshAccountStatuses 检查 ClientProcessIds 是空 → IsClientRunning 设回 false (状态不打钩)
+        //     · TryBringAccountProcessesToFront 查 GetActiveAccountProcessIds → ClientProcessIds 是空 → return false → 重启 client (重复打开)
+        //   修复:同时把 PID 加进类型化 list
         var status = _accountStatuses[code];
         switch (processType.ToLower())
         {
             case "web":
+                if (!status.WebProcessIds.Contains(processId)) status.WebProcessIds.Add(processId);
                 status.IsWebRunning = true;
                 break;
             case "client":
+                if (!status.ClientProcessIds.Contains(processId)) status.ClientProcessIds.Add(processId);
                 status.IsClientRunning = true;
                 break;
             case "dev":
+                if (!status.DevToolsProcessIds.Contains(processId)) status.DevToolsProcessIds.Add(processId);
                 status.IsDevToolsRunning = true;
                 break;
             case "db":
+                if (!status.DbProcessIds.Contains(processId)) status.DbProcessIds.Add(processId);
                 status.IsDbConnected = true;
                 break;
             case "remote":
+                if (!status.RemoteProcessIds.Contains(processId)) status.RemoteProcessIds.Add(processId);
                 status.IsRemoteConnected = true;
                 break;
         }
