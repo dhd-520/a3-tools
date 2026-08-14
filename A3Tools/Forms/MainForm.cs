@@ -4016,7 +4016,17 @@ public partial class MainForm : Form, IToolContext
     /// </summary>
     public void ShowFromTray()
     {
-        if (!_isHiddenToTray) return;
+        // ★ 2026-08-14 10:24 陛下反馈:快捷键可以从托盘显示,但主窗被其他窗体挡住时不能拉到最前端
+        //   旧版:如果不在托盘状态(已显示) → 直接 return,什么都不做
+        //   新版:如果不在托盘但被其他窗体挡住/最小化 → 拉最前端
+        //     · 在托盘状态 → 从托盘恢复(原逻辑)
+        //     · 不在托盘但窗体被遮挡/最小化 → 拉到最前端
+        if (!_isHiddenToTray)
+        {
+            // 已在桌面 → 检查是否被遮挡/最小化,如果需要拉到最前端
+            BringToFrontIfObscured();
+            return;
+        }
 
         this.WindowState = FormWindowState.Normal;
         this.ShowInTaskbar = true;
@@ -4030,6 +4040,47 @@ public partial class MainForm : Form, IToolContext
 
         // 从托盘恢复时强制拉到最前端（避免需要手动点任务栏）
         ForceForegroundWindow(this.Handle);
+    }
+
+    /// <summary>
+    /// ★ 2026-08-14 10:24 检查主窗是否被其他窗体遮挡/最小化,如果被遮挡则拉最前端。
+    ///   场景:launcher 在桌面但被其他应用(A3 客户端/Excel/浏览器)挡住,
+    ///   陛下按快捷键想拉 launcher 到最前端。
+    ///   判断逻辑:
+    ///     1. 最小化 → 还原 + 拉到最前端
+    ///     2. 被另一个顶层窗口遮挡(Z-order 在 launcher 后面) → 拉到最前端
+    ///     3. 已是前台/未被遮挡 → 什么都不做
+    /// </summary>
+    private void BringToFrontIfObscured()
+    {
+        try
+        {
+            // 最小化 → 还原
+            if (this.WindowState == FormWindowState.Minimized)
+            {
+                this.WindowState = FormWindowState.Normal;
+            }
+
+            // 1. 当前前台窗体是不是 launcher 自己
+            IntPtr fgHwnd = GetForegroundWindow();
+            bool isAlreadyForeground = (fgHwnd == this.Handle);
+
+            // 2. launcher 是否可见且未被遮挡
+            bool isVisible = this.Visible && this.WindowState != FormWindowState.Minimized;
+
+            if (isAlreadyForeground && isVisible)
+            {
+                // 已经是前台且可见 → 不动
+                return;
+            }
+
+            // 3. 被遮挡/未在前台 → 强制拉最前端
+            ForceForegroundWindow(this.Handle);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ShowFromTray] BringToFrontIfObscured 异常: {ex.Message}");
+        }
     }
 
     /// <summary>
