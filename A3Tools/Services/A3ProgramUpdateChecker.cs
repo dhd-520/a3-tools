@@ -74,7 +74,22 @@ namespace A3Tools.Services
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr SendMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll")]
+        private static extern bool AllowSetForegroundWindow(int dwProcessId);
+
         private const uint BM_CLICK = 0x00F5;
+        private const uint WM_KEYDOWN = 0x0100;
+        private const uint WM_KEYUP = 0x0101;
+        private const int VK_RETURN = 0x0D;
 
         #endregion
 
@@ -174,8 +189,112 @@ namespace A3Tools.Services
             return false;
         }
 
-        /// <summary>枚举顶层窗口,找标题包含指定关键字的窗口(首个命中)。</summary>
-                /// <summary>枚举顶层窗口,找标题包含指定关键字的窗口(首个命中)。</summary>
+        /// <summary>
+        /// ★ 2026-08-14 09:04 公开方法:扫一次桌面,找 A3 升级检测框。
+        /// MainForm.StartA3ProgramUpdateWatcher 阶段1持续监听时调用。
+        /// 返回 true=找到(并通过 out 返回窗口句柄),false=没找到。
+        /// </summary>
+        public static bool FindUpdateDialog(out IntPtr hwnd)
+        {
+            return FindDialogByTitle(UPDATE_DIALOG_TITLES, out hwnd);
+        }
+
+        /// <summary>
+        /// ★ 2026-08-14 09:25 公开方法:扫一次桌面,找 A3 升级完成框(标题包含"升级完成"、"系统提示"等)。
+        /// 阶段1也调用这个,避免升级完成框在阶段2启动前出现没人抓。
+        /// </summary>
+        public static bool FindUpgradeCompleteDialog(out IntPtr hwnd)
+        {
+            return FindDialogByTitle(UPGRADE_COMPLETE_TITLES, out hwnd);
+        }
+
+        /// <summary>
+        /// ★ 2026-08-14 09:25 公开方法:点升级完成框的「确定」按钮。
+        /// </summary>
+        public static bool ClickUpgradeCompleteButton(IntPtr hwnd)
+        {
+            // 升级完成框默认按钮是「确定」(=回车),抓不到「确定」就抓第一个 Button
+            if (ClickButtonByText(hwnd, "确定"))
+            {
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 已点升级完成「确定」按钮");
+                return true;
+            }
+            if (ClickFirstButton(hwnd))
+            {
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 已点升级完成框第一个按钮(兜底)");
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// ★ 2026-08-14 09:36 快速版:点升级完成框的「确定」按钮。
+        ///   09:38 修复:不用 PostMessage(VK_RETURN (异步投递,不可靠),改用:
+        ///     1. SetForegroundWindow + BringWindowToTop + ShowWindow(Restore) 抓焦点
+        ///     2. AttachThreadInput 抢焦点权限
+        ///     3. 在窗口里枚举子控件找"确定"按钮(快速版只在标题包含"系统提示"时才枚举,其他走兜底)
+        ///     4. SendMessage(BM_CLICK) 同步点按钮
+        /// </summary>
+        public static bool ClickUpgradeCompleteButtonFast(IntPtr hwnd)
+        {
+            try
+            {
+                SetForegroundWindow(hwnd);
+                BringWindowToTop(hwnd);
+                ShowWindow(hwnd, 9 /* SW_RESTORE */);
+
+                // 抓焦点:AttachThreadInput 让后台线程能向 dialog 发消息
+                uint targetTid = GetWindowThreadProcessId(hwnd, out _);
+                uint myTid = GetCurrentThreadId();
+                bool attached = (myTid != targetTid) && AttachThreadInput(myTid, targetTid, true);
+                try
+                {
+                    // 枚举子控件找"确定"按钮,SendMessage BM_CLICK 同步点
+                    IntPtr btnHwnd = IntPtr.Zero;
+                    EnumChildWindows(hwnd, (h, l) =>
+                    {
+                        int len = GetWindowTextLengthW(h);
+                        if (len == 0) return true;
+                        var sb = new StringBuilder(len + 1);
+                        GetWindowTextW(h, sb, sb.Capacity);
+                        var text = sb.ToString();
+                        if (text == "确定" || text == "OK" || text == "&OK" || text == "Yes" || text == "&Yes")
+                        {
+                            btnHwnd = h;
+                            return false; // 停止枚举
+                        }
+                        return true;
+                    }, IntPtr.Zero);
+
+                    if (btnHwnd != IntPtr.Zero)
+                    {
+                        SendMessageW(btnHwnd, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                        System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 已用 BM_CLICK 点升级完成框「确定」按钮(fast 版)");
+                        return true;
+                    }
+
+                    // 兑底:点第一个 Button
+                    if (ClickFirstButton(hwnd))
+                    {
+                        System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 已点升级完成框第一个按钮(兑底)");
+                        return true;
+                    }
+                    return false;
+                }
+                finally
+                {
+                    if (attached) AttachThreadInput(myTid, targetTid, false);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] ClickUpgradeCompleteButtonFast 异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>枚举顶层窗口，找标题包含指定关键字的窗口（首个命中）。</summary>
+                /// <summary>枚举顶层窗口，找标题包含指定关键字的窗口（首个命中）。</summary>
         private static bool FindWindowByTitleContains(string keyword, out IntPtr hwnd)
         {
             IntPtr[] foundBox = new IntPtr[1];

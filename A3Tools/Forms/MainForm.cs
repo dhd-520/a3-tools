@@ -472,28 +472,10 @@ public partial class MainForm : Form, IToolContext
 
         if (scenario == UpdateScenario.JointSpawn)
         {
-            // 场景 2：客户端 + 开发工具 一起启动 → 先关开发工具进程，用客户端进行更新
-            // launcher 隐含意图「要升级」仅适用于 launcher 自己检测到新版本时
-            // (走 CheckUpdateOnStartupAsync + ShowUpdateForm,独立路径)。
-            // 这里保持 _userUpdateChoice=null,client/devtools 弹框陛下手动。
-            var devList = GetOurTrackedDevtools();
-            if (devList.Count > 0)
-            {
-                // 同步从 _processIds / Status 中清掉，避免后续查活 PID / 重拉
-                foreach (var (p, code, _) in devList)
-                {
-                    try { if (!p.HasExited) p.Kill(entireProcessTree: true); } catch { }
-                    try { p.Dispose(); } catch { }
-                    if (_accountStatuses.TryGetValue(code, out var st))
-                    {
-                        st.ProcessIds.Remove(p.Id);
-                        st.DevToolsProcessIds.Remove(p.Id);
-                    }
-                    _processIds.Remove(p.Id);
-                    _processLaunchModes.Remove(p.Id);
-                }
-                Thread.Sleep(1200); // 等被杀进程释放文件锁
-            }
+            // ★ 2026-08-14 09:04 陛下反馈:杀 launcher 启的 devtools 的逻辑统一到 LaunchSelectedAccount 里
+            //   (根据 needSerializeUpgrade 判断要不要杀)这里只做场景识别+返回,不做杀动作
+            //   原因:之前这里会杀,但新逻辑下(两勾)也会杀,重复 Thread.Sleep 1200ms × 2 体验差
+            System.Diagnostics.Debug.WriteLine("[UpdateScenario] JointSpawn 场景识别完成,杀 devtools 动作由 LaunchSelectedAccount 序列化逻辑负责");
             return true;
         }
 
@@ -807,6 +789,17 @@ public partial class MainForm : Form, IToolContext
     //   两者完全独立,陛下 9:43 强调不能混。
     private bool? _a3ProgramUpdateChoice = null;
 
+    // ★ 2026-08-14 09:04 陛下的场景3序列化设计:
+    //   阶段1改为持续监听(覆盖 client+devtools 启动+升级整个流程),
+    //   StopA3ProgramUpdateWatcher 在 launcher 启动流程结束时调用,让阶段1退出进入阶段2
+    private CancellationTokenSource? _a3WatcherCts = null;
+
+    // ★ 2026-08-14 09:16 修复:同步等后台任务完成,不阻塞 main thread 消息泵
+    //   用 ManualResetEvent(原生 OS 事件)而不是 ManualResetEventSlim(Slim 有 spin 阶段会卡消息泵)
+    //   后台 Task.Run 跑 WaitForClientUpgradeCompleteAsync,完成后 Set()
+    //   main thread WaitOne() 完全 OS 阻塞,消息泵能跑,后台阶段1 的 Invoke 能 marshal 进去
+    private readonly ManualResetEvent _clientUpgradeCompleteEvent = new(false);
+
     /// <summary>时序门: TryFindAndClickUpdateDialog 外部在轮询到 _userUpdateChoice 之前不中动弹窗。</summary>
     public bool? UserUpdateChoice { get => _userUpdateChoice; set => _userUpdateChoice = value; }
 
@@ -931,18 +924,23 @@ public partial class MainForm : Form, IToolContext
             launcherProcessTree.Add(pid);
         }
         var names = new List<string>();
+        var debugLines = new List<string>();
         foreach (var name in new[] { PROC_CLIENT, PROC_DEVTOOLS })
         {
             Process[] procs;
             try { procs = Process.GetProcessesByName(name); }
             catch { continue; }
+            debugLines.Add($"扫描 {name}: 找到 {procs.Length} 个");
             foreach (var p in procs)
             {
-                if (launcherProcessTree.Contains(p.Id)) { p.Dispose(); continue; }
+                bool isLauncher = launcherProcessTree.Contains(p.Id);
+                debugLines.Add($"  PID={p.Id} {name} → {(isLauncher ? "launcher 进程树(排除)" : "外部(加入)")}");
+                if (isLauncher) { p.Dispose(); continue; }
                 names.Add(name);
                 p.Dispose();
             }
         }
+        System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] GetExternalProcessDisplayNames 调试:\n  " + string.Join("\n  ", debugLines));
         return names;
     }
 
@@ -1775,10 +1773,48 @@ public partial class MainForm : Form, IToolContext
         if (!string.IsNullOrEmpty(account.ServerPassword))
             Clipboard.SetText(account.ServerPassword);
 
-        // ★ 2026-08-01 09:44 升级序列化触发条件(陛下明确:两勾+要升级→先 client 后 devtools)
-        bool needSerializeUpgrade = _userUpdateChoice == true
-                                    && settings.LaunchDesktop
-                                    && settings.LaunchDevTools;
+        // ★ 2026-08-14 09:04 升级序列化触发条件(陛下反馈修正):
+        //   旧版:needSerializeUpgrade = _userUpdateChoice == true && 两勾
+        //     → 08-01 11:07 陛下反馈默认 _userUpdateChoice=null 后,这个条件永远 false,
+        //       序列化逻辑失效,A3 client 和 devtools 同时升级时会文件占用冲突
+        //   新版:两勾就触发序列化(不管 _userUpdateChoice)
+        //     · 两勾 → 必须先启 client 等升级完成 → 再启 devtools
+        //     · 单勾 → 不强制序列化,让 A3 自己弹框让陛下选
+        //   关键步骤:launcher 自己之前启的 devtools 还在跑 → 先杀掉(释放文件锁)
+        bool needSerializeUpgrade = settings.LaunchDesktop && settings.LaunchDevTools;
+
+        // ★ 2026-08-14 09:04 陛下反馈:两勾升级序列化时,启 client 前要先杀 launcher 启过的 devtools
+        //   因为 devtools 和 client 共享文件,client 升级时 devtools 在跑会文件占用
+        //   复用 GetOurTrackedDevtools 拿 launcher 自己启的 devtools,然后 kill(在 client 启动前)
+        if (needSerializeUpgrade)
+        {
+            var trackedDevList = GetOurTrackedDevtools();
+            if (trackedDevList.Count > 0)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[UpgradeSerialize] 两勾+launcher 启过 devtools ({trackedDevList.Count} 个) → 先杀(释放文件锁)再启 client");
+                foreach (var (p, code, _) in trackedDevList)
+                {
+                    try
+                    {
+                        if (!p.HasExited) p.Kill(entireProcessTree: true);
+                    }
+                    catch { /* 已死/无权限,忽略 */ }
+                    finally
+                    {
+                        try { p.Dispose(); } catch { }
+                    }
+                    if (_accountStatuses.TryGetValue(code, out var st))
+                    {
+                        st.ProcessIds.Remove(p.Id);
+                        st.DevToolsProcessIds.Remove(p.Id);
+                    }
+                    _processIds.Remove(p.Id);
+                    _processLaunchModes.Remove(p.Id);
+                }
+                Thread.Sleep(1200); // 等被杀进程释放文件锁
+            }
+        }
 
         int? clientPid = null;
         if (settings.LaunchDesktop)
@@ -1790,15 +1826,39 @@ public partial class MainForm : Form, IToolContext
         {
             if (needSerializeUpgrade && clientPid.HasValue)
             {
-                // ★ 等 client 升级完成再启 devtools(避免 devtools 走自己的升级覆盖 client 的更新)
+                // ★ 2026-08-14 09:21 陛下反馈修正:不卡 main thread 消息泵的可靠方案
+                //   之前所有方案都有问题:
+                //     · Thread.Sleep(1000) 死循环 → 消息泵死,Invoke 永远进不去
+                //     · ManualResetEvent.WaitOne() 是 OS 事件 wait,PostMessage 能唤醒线程但事件不会自动 set,
+                //       main thread 会一直 wait 下去,且 Invoke 依然进不去
+                //     · .GetAwaiter().GetResult() 在 UI 线程同步等会造成 async-over-sync 死锁
+                //   根本问题:WaitOne 是等事件,Invoke 不会 set 这个事件 → main thread 进不去
+                //   ★ 正确方案:Application.DoEvents() 手动跑消息泵 + 后台线程任务状态检查
+                //     · 后台线程跑 WaitForClientUpgradeCompleteAsync(用 Task.Delay 不占线程)
+                //     · 后台线程完成后 set ManualResetEvent(只用于通知,不用于同步等待)
+                //     · main thread 在前台循环:Application.DoEvents() + 检查 ManualResetEvent 状态
+                //     · main thread 不真正"等",而是主动跑消息泵 → Invoke 能 marshal 进去
+                //     · 当 ManualResetEvent.Set() 后,main thread 检测到 → 退出循环 → 启 devtools
                 System.Diagnostics.Debug.WriteLine(
-                    $"[UpgradeSerialize] Launcher 要升级且两勾 → 等 client (PID={clientPid.Value}) 升级完成");
-                bool ok = WaitForClientUpgradeComplete(clientPid.Value, timeoutMs: 5 * 60 * 1000);
-                if (!ok)
+                    $"[UpgradeSerialize] Launcher 要升级且两勾 → main thread 循环跑消息泵等 client (PID={clientPid.Value}) 升级完成");
+                _clientUpgradeCompleteEvent.Reset();
+                _ = Task.Run(async () =>
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        "[UpgradeSerialize] 等 client 升级完成超时 5min → 降级照常启 devtools");
+                    bool ok = await WaitForClientUpgradeCompleteAsync(clientPid.Value, timeoutMs: 5 * 60 * 1000);
+                    if (!ok)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            "[UpgradeSerialize] 后台:等 client 升级完成超时 5min → set 事件让 main thread 退出循环");
+                    }
+                    _clientUpgradeCompleteEvent.Set();
+                });
+                // main thread 循环:跑消息泵 + 检查事件(不阻塞,Invoke 能进去)
+                while (!_clientUpgradeCompleteEvent.WaitOne(0))
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(50);
                 }
+                System.Diagnostics.Debug.WriteLine("[UpgradeSerialize] main thread 检测到 client 升级完成,继续启 devtools");
             }
 
             string exe2 = Path.Combine(appDir, "君则A3集成开发工具.exe");
@@ -1832,6 +1892,17 @@ public partial class MainForm : Form, IToolContext
         {
             this.BeginInvoke(new Action(() => HideToTray()));
         }
+
+        // ★ 2026-08-14 09:34 陛下反馈:单独启 client/devtools 又不行了。
+        //   旧版 StopA3ProgramUpdateWatcher() 立即调,launcher 主流程走得快的话
+        //   阶段1还没等到 A3 启动+弹升级框就被 cancel → 升级框没人处理
+        //   修复:延后 30 秒再 Stop,给 A3 启动+检测+弹升级框足够时间
+        //   延后期间阶段1继续监听,升级框弹出时被自动点
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(30 * 1000);
+            StopA3ProgramUpdateWatcher();
+        });
     }
 
     /// <summary>
@@ -1911,43 +1982,109 @@ public partial class MainForm : Form, IToolContext
     /// </summary>
     private void StartA3ProgramUpdateWatcher(int timeoutMs = 30 * 1000)
     {
-        // ★ 2026-08-13 16:13 陛下反馈"同时启动不行,单独启动行":
-        //   同时启 client + devtools 时,A3 devtools 启动需要先弹 A3 客户端登录触发升级检测,
-        //   整个 A3 升级流程耗时 10-30 秒,原 5 秒轮询太短,超时退出后 A3 升级框才出现
-        //   修复:默认轮询时间延长到 30 秒,给 A3 启动+检测+弹升级框足够时间
-        // ★ 2026-08-13 17:31 陛下反馈"升级完成后没有点确定":
-        //   A3 升级完成后会弹"升级完成!" / "系统提示" 框,需要自动点掉,否则卡在桌面上。
-        //   原设计:WaitForA3UpdateDialogThenHandle 找到升级框(场景1/2/3)就退出,后续"升级完成"框没人处理。
-        //   新设计:启动后跑两个阶段:
-        //     阶段1(0~timeoutMs): 检测"升级文件检测"框,触发 HandleA3ProgramUpdateFound(场景1/2/3)
-        //     阶段2(timeoutMs 内到超时 5min): 检测"升级完成!"框,自动点掉(WaitAndConfirmUpgradeComplete 循环)
-        //   这样无论 A3 升级是检测到了还是没检测到,后续"升级完成"框都会被处理。
+        // 取消上一个 watcher(如果有)避免多个轮询冲突
+        _a3WatcherCts?.Cancel();
+        _a3WatcherCts?.Dispose();
+        _a3WatcherCts = new CancellationTokenSource();
+        var cts = _a3WatcherCts;
+
         System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] StartA3ProgramUpdateWatcher: 异步启动 A3 更新框轮询 timeout={timeoutMs/1000}s");
+
+        // ★ 2026-08-14 09:36 陛下反馈:升级完成框处理太慢。
+        //   旧版一个 while 循环同时检查两种框,轮询间隔 500ms,
+        //   升级完成框是默认按钮 (Enter 键=点确定),要快点处理
+        //   新版拆成两个独立后台线程:
+        //     · 升级文件检测框线程:轮询 500ms(足够,A3 启动到弹框几秒-十几秒)
+        //     · 升级完成框线程:轮询 100ms(快速响应,避免升级完成框久置不点)
+        var fileCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var completeCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+
+        // 升级文件检测框 watcher
         _ = Task.Run(() =>
         {
             try
             {
-                // 阶段1: 检测"升级文件检测"框,触发场景1/2/3 处理
-                A3ProgramUpdateChecker.WaitForA3UpdateDialogThenHandle(
-                    timeoutMs: timeoutMs,
-                    onUpdateDetected: (IntPtr hwnd) =>
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 阶段1(升级文件检测)启动: 持续监听(500ms 轮询)");
+                while (!fileCts.IsCancellationRequested)
+                {
+                    if (A3ProgramUpdateChecker.FindUpdateDialog(out var hwnd))
                     {
-                        object result = this.Invoke((Func<IntPtr, AppSettings, bool>)HandleA3ProgramUpdateFound, hwnd, _dataService.LoadSettings());
-                        return (bool)result;
-                    });
-
-                // 阶段2: 等 A3 升级完成(检测"升级完成!"框),自动点确定
-                //   超时 5 分钟,通常升级流程几十秒~几分钟
-                //   场景3 选否时场景:不会进这里,因为 HandleA3ProgramUpdateFound 已 ClickNoButton 处理完毕
-                //   场景1/2/3选是 时场景:会进这里,等升级完成框弹出并自动点掉
-                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 阶段1完成,启动阶段2: 等 A3 升级完成并自动点确定 (timeout=5min)");
-                A3ProgramUpdateChecker.WaitAndConfirmUpgradeComplete(timeoutMs: 5 * 60 * 1000);
+                        System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] ★ 监听到 A3 升级文件检测框,触发回调");
+                        bool continueLoop;
+                        try
+                        {
+                            continueLoop = (bool)this.Invoke((Func<IntPtr, AppSettings, bool>)HandleA3ProgramUpdateFound, hwnd, _dataService.LoadSettings());
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 回调异常: {ex.Message}");
+                            continueLoop = true;
+                        }
+                        // 场景3 陛下选否时 HandleA3ProgramUpdateFound 返回 false -> 终止轮询
+                        if (!continueLoop)
+                        {
+                            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景3-陛下点否 -> 终止监听");
+                            fileCts.Cancel();
+                            completeCts.Cancel();
+                            return;
+                        }
+                        Thread.Sleep(500);
+                        continue;
+                    }
+                    Thread.Sleep(500);
+                }
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 升级文件检测 watcher 被取消");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] StartA3ProgramUpdateWatcher 异步轮询异常: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 升级文件检测 watcher 异常: {ex.Message}");
             }
         });
+
+        // 升级完成框 watcher (独立线程,100ms 轮询,VK_RETURN 快速点确定)
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 升级完成框 watcher 启动: 持续监听(100ms 轮询,VK_RETURN 快速点确定)");
+                while (!completeCts.IsCancellationRequested)
+                {
+                    if (A3ProgramUpdateChecker.FindUpgradeCompleteDialog(out var hwnd))
+                    {
+                        System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] ★ 监听到 A3 升级完成框,VK_RETURN 点确定");
+                        try
+                        {
+                            A3ProgramUpdateChecker.ClickUpgradeCompleteButtonFast(hwnd);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 点升级完成框异常: {ex.Message}");
+                        }
+                        Thread.Sleep(100);
+                        continue;
+                    }
+                    Thread.Sleep(100);
+                }
+                System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 升级完成框 watcher 被取消");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 升级完成框 watcher 异常: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// ★ 2026-08-14 09:04 停止 A3 程序升级监听(launcher 启动流程结束时调用)。
+    /// 让阶段1退出,进入阶段2(等升级完成)。
+    /// </summary>
+    private void StopA3ProgramUpdateWatcher()
+    {
+        if (_a3WatcherCts != null && !_a3WatcherCts.IsCancellationRequested)
+        {
+            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] StopA3ProgramUpdateWatcher: 通知阶段1停止监听");
+            _a3WatcherCts.Cancel();
+        }
     }
 
     /// <summary>
@@ -2030,9 +2167,15 @@ public partial class MainForm : Form, IToolContext
         bool wantDevtools = settings.LaunchDevTools;
         System.Diagnostics.Debug.WriteLine($"[A3ProgramUpdate] 场景判定: wantClient={wantClient}, wantDevtools={wantDevtools}");
 
+        // ★ 2026-08-14 09:04 陛下反馈:两勾默认升级+序列化。
+        //   旧版场景2 只 return true 不点「是」,A3 升级框卡在桌面没人点 → 升级流程不开始
+        //   新版:两勾场景也自动点「是」(场景1/2 统一行为),让 A3 开始升级
+        //   序列化由 LaunchSelectedAccount 的 WaitForClientUpgradeComplete 保证:
+        //   client 先升级完成 → 才启 devtools
         if (wantClient && wantDevtools)
         {
-            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景2:同时启客户端+开发工具");
+            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 场景2:同时启客户端+开发工具,自动點是 → client 先升级,devtools 等 client 完成后启动");
+            A3ProgramUpdateChecker.ClickYesButton(timeoutMs: 2000);
             return true;
         }
         else
@@ -2048,8 +2191,13 @@ public partial class MainForm : Form, IToolContext
     /// 完成信号 = A3 弹「升级完成」确认框被点掉 + client 主窗体出现且稳定 5s(无新弹窗)。
     /// 超时 5min 降级返 false,不影响 launcher 主流程。
     /// 陛下 09:47 明确:点完确认按钮才弹登录界面,所以检测登录窗体最准。
+    /// ★ 2026-08-14 09:12 陛下反馈:升级框卡桌面不点。
+    ///   旧版用 Thread.Sleep(1000) 阻塞 main thread 同步等 client 升级完成,
+    ///   但 Thread.Sleep 会阻塞 main thread 的消息泵,后台阶段1线程的 Invoke()
+    ///   无法 marshal 到 main thread → HandleA3ProgramUpdateFound 永远不执行 → A3 升级框卡桌面。
+    ///   修复:改成 async + Task.Delay,不阻塞消息泵,后台阶段1的 Invoke() 能正常 marshal。
     /// </summary>
-    private bool WaitForClientUpgradeComplete(int originalClientPid, int timeoutMs)
+    private async Task<bool> WaitForClientUpgradeCompleteAsync(int originalClientPid, int timeoutMs)
     {
         var startTime = DateTime.Now;
         int stableCount = 0;  // 连续稳定次数(达到 5 次 = 5 秒)
@@ -2092,7 +2240,9 @@ public partial class MainForm : Form, IToolContext
                 stableCount = 0;
             }
 
-            Thread.Sleep(1000);
+            // ★ 2026-08-14 09:12 修复:用 Task.Delay 异步 sleep,不阻塞 main thread 消息泵,
+            //   让后台阶段1线程的 Invoke() 能正常 marshal 到 main thread
+            await Task.Delay(1000);
         }
 
         System.Diagnostics.Debug.WriteLine(
