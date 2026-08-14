@@ -1723,19 +1723,22 @@ public partial class MainForm : Form, IToolContext
         }
 
         // 检查是否需要弹出启动选项对话框
-        // 条件：勾选了"弹出"选项，或者从未保存过设置（首次使用）
+        // ★ 2026-08-14 11:47 陛下反馈:应该按设置里的勾选控制是否弹 dialog(不是只看首次)
+        //   逻辑:ShowLaunchOptionsDialog=true 或首次使用 → 弹
         bool shouldShowDialog = settings.ShowLaunchOptionsDialog || !_dataService.HasSettings();
 
         if (shouldShowDialog)
         {
             // 弹出启动选项选择对话框
-            using var dialog = new LaunchOptionsDialog(settings.LaunchDesktop, settings.LaunchDevTools, settings.LaunchWeb, settings.SelectedBrowser, account.Name, account.Code);
+            using var dialog = new LaunchOptionsDialog(settings.LaunchDesktop, settings.LaunchDevTools, settings.LaunchWeb, settings.SelectedBrowser, account.Name, account.Code, settings.LaunchErp, settings.LaunchWechatWork);
             if (dialog.ShowDialog() != DialogResult.OK) return;
 
             // 保存用户的选择
             settings.LaunchDesktop = dialog.LaunchDesktop;
             settings.LaunchDevTools = dialog.LaunchDevTools;
             settings.LaunchWeb = dialog.LaunchWeb;
+            settings.LaunchErp = dialog.LaunchErp;             // ★ 2026-08-14 10:48 ERP
+            settings.LaunchWechatWork = dialog.LaunchWechatWork; // ★ 2026-08-14 10:48 企业微信
             settings.SelectedBrowser = dialog.SelectedBrowser;
             // 如果是首次使用且用户选择了保存，下次不再弹出
             if (!_dataService.HasSettings())
@@ -1758,7 +1761,17 @@ public partial class MainForm : Form, IToolContext
         //   不管 launcher 走 client / devtools / 切前台哪条路径,先统一启动 A3 程序更新轮询(后台异步)
         //   旧设计:WaitForA3UpdateAfterStart 在 LaunchClientOnly/LaunchDevToolsForAccount 内部,可能 try/catch 吞了
         //   新设计:在 LaunchSelectedAccount 入口先启动 StartA3ProgramUpdateWatcher(无 PID 依赖,适合所有路径)
-        StartA3ProgramUpdateWatcher();
+        // ★ 2026-08-14 11:58 陛下反馈:网页版登录不要检查更新
+        //   web 是浏览器进程,与 A3 client/devtools 升级无关,不需要启动 A3 升级监听
+        //   修复:只有启了 client 或 devtools 才启动 A3 升级监听
+        if (settings.LaunchDesktop || settings.LaunchDevTools)
+        {
+            StartA3ProgramUpdateWatcher();
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine("[A3ProgramUpdate] 仅 web 启动,跳过 A3 升级监听(web 与升级无关)");
+        }
 
         string appDir = settings.AppDirectory;
 
@@ -1930,9 +1943,18 @@ public partial class MainForm : Form, IToolContext
             }
         }
 
-        if (settings.LaunchWeb && !string.IsNullOrEmpty(account.Server))
+        if (settings.LaunchErp && !string.IsNullOrEmpty(account.Server))
         {
+            // ★ 2026-08-14 10:48 陛下反馈:ERP 网页版(/h5comerp/#/login),默认勾选
             string url = account.Server.TrimEnd('/') + "/h5comerp/#/login";
+            LaunchWebBrowser(url, settings.SelectedBrowser, account.Code, account);
+        }
+
+        // ★ 2026-08-14 10:48 陛下反馈:企业微信网页版(/h5apperp/#/index/home)
+        //   账号密码复用 ERP(同一账套同一服务端),原 LaunchWebBrowser 的CDP自动登录逻辑复用
+        if (settings.LaunchWechatWork && !string.IsNullOrEmpty(account.Server))
+        {
+            string url = account.Server.TrimEnd('/') + "/h5apperp/#/index/home";
             LaunchWebBrowser(url, settings.SelectedBrowser, account.Code, account);
         }
 
@@ -2358,10 +2380,12 @@ public partial class MainForm : Form, IToolContext
             try
             {
                 CdpHelper.CdpLog($"Tab 模式：ShellExecute 跳板打开 {url}（不启动新进程，不自动登录）");
+                // ★ 2026-08-14 11:12 陛下反馈:explorer.exe 处理 URL 时会丢失 fragment(# 及后面)
+                //   如 /h5apperp/#/index/home 被变成 /h5apperp/(没 #)
+                //   修复:FileName 直接用 URL,让 ShellExecute 自己用默认浏览器打开
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = "explorer.exe",
-                    Arguments = "\"" + url + "\"",
+                    FileName = url,
                     UseShellExecute = true
                 });
             }
@@ -2598,9 +2622,14 @@ public partial class MainForm : Form, IToolContext
         {
             // 从设置中读取选择器配置
             var settings = _dataService.LoadSettings();
-            string usernameSel = settings.WebUsernameSelector;
-            string passwordSel = settings.WebPasswordSelector;
-            string submitSel = settings.WebSubmitSelector;
+            // ★ 2026-08-14 10:48 根据 URL 判断是 ERP 还是企业微信,选对应选择器
+            bool isWechatWork = url.Contains("/h5apperp", StringComparison.OrdinalIgnoreCase);
+            string usernameSel = isWechatWork ? settings.WechatWorkUsernameSelector : settings.WebUsernameSelector;
+            string passwordSel = isWechatWork ? settings.WechatWorkPasswordSelector : settings.WebPasswordSelector;
+            string submitSel = isWechatWork ? settings.WechatWorkSubmitSelector : settings.WebSubmitSelector;
+            CdpHelper.CdpLog(isWechatWork
+                ? "使用企业微信选择器(/h5apperp)"
+                : "使用 ERP 选择器(/h5comerp)");
             string username = account.ServerUsername;
             string password = account.ServerPassword;
 

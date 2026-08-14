@@ -26,6 +26,16 @@ public partial class SettingsDialog : Form
     private TextBox txtDevToolsPassword = null!;
     private Label hintDevTools = null!;
 
+    // ★ 2026-08-14 11:34 陛下反馈:SettingsDialog 需要加企业微信选择器配置项
+    //   ERP 和企业微信布局不同,placeholder 文案不同,需要独立配置
+    private Label lblWechatWorkSelectorTitle = null!;
+    private Label lblWechatWorkUsernameSel = null!;
+    private TextBox txtWechatWorkUsernameSel = null!;
+    private Label lblWechatWorkPasswordSel = null!;
+    private TextBox txtWechatWorkPasswordSel = null!;
+    private Label lblWechatWorkSubmitSel = null!;
+    private TextBox txtWechatWorkSubmitSel = null!;
+
     public string AppDirectory { get; private set; } = string.Empty;
     public string TrayShowHotkey { get; private set; } = "Ctrl+Shift+Z";
 
@@ -51,6 +61,10 @@ public partial class SettingsDialog : Form
         txtUsernameSel.Text = settings.WebUsernameSelector;
         txtPasswordSel.Text = settings.WebPasswordSelector;
         txtSubmitSel.Text = settings.WebSubmitSelector;
+        // ★ 2026-08-14 11:34 企业微信选择器
+        txtWechatWorkUsernameSel.Text = settings.WechatWorkUsernameSelector;
+        txtWechatWorkPasswordSel.Text = settings.WechatWorkPasswordSelector;
+        txtWechatWorkSubmitSel.Text = settings.WechatWorkSubmitSelector;
         chkClientAutoLogin.Checked = settings.ClientAutoLogin;
         chkDevToolsAutoLogin.Checked = settings.DevToolsAutoLogin;
         txtDevToolsPassword.Text = settings.DevToolsPassword;  // LoadSettings 已自动解密
@@ -116,6 +130,10 @@ public partial class SettingsDialog : Form
         settings.WebUsernameSelector = txtUsernameSel.Text.Trim();
         settings.WebPasswordSelector = txtPasswordSel.Text.Trim();
         settings.WebSubmitSelector = txtSubmitSel.Text.Trim();
+        // ★ 2026-08-14 11:34 企业微信选择器
+        settings.WechatWorkUsernameSelector = txtWechatWorkUsernameSel.Text.Trim();
+        settings.WechatWorkPasswordSelector = txtWechatWorkPasswordSel.Text.Trim();
+        settings.WechatWorkSubmitSelector = txtWechatWorkSubmitSel.Text.Trim();
         settings.ClientAutoLogin = chkClientAutoLogin.Checked;
         settings.DevToolsAutoLogin = chkDevToolsAutoLogin.Checked;
         settings.DevToolsPassword = txtDevToolsPassword.Text;  // 明文，SaveSettings 自动加密

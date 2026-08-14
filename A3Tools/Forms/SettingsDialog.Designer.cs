@@ -33,6 +33,14 @@ partial class SettingsDialog
         lblSubmitSel = new Label();
         txtSubmitSel = new TextBox();
         hintWebSel = new Label();
+        // ★ 2026-08-14 11:34 企业微信选择器
+        lblWechatWorkSelectorTitle = new Label();
+        lblWechatWorkUsernameSel = new Label();
+        txtWechatWorkUsernameSel = new TextBox();
+        lblWechatWorkPasswordSel = new Label();
+        txtWechatWorkPasswordSel = new TextBox();
+        lblWechatWorkSubmitSel = new Label();
+        txtWechatWorkSubmitSel = new TextBox();
         sepAutoLogin = new Panel();
         chkClientAutoLogin = new CheckBox();
         chkDevToolsAutoLogin = new CheckBox();
@@ -106,6 +114,14 @@ partial class SettingsDialog
         mainPanel.Controls.Add(lblSubmitSel);
         mainPanel.Controls.Add(txtSubmitSel);
         mainPanel.Controls.Add(hintWebSel);
+        // ★ 2026-08-14 11:34 企业微信选择器控件
+        mainPanel.Controls.Add(lblWechatWorkSelectorTitle);
+        mainPanel.Controls.Add(lblWechatWorkUsernameSel);
+        mainPanel.Controls.Add(txtWechatWorkUsernameSel);
+        mainPanel.Controls.Add(lblWechatWorkPasswordSel);
+        mainPanel.Controls.Add(txtWechatWorkPasswordSel);
+        mainPanel.Controls.Add(lblWechatWorkSubmitSel);
+        mainPanel.Controls.Add(txtWechatWorkSubmitSel);
         mainPanel.Controls.Add(sepAutoLogin);
         mainPanel.Controls.Add(chkClientAutoLogin);
         mainPanel.Controls.Add(chkDevToolsAutoLogin);
@@ -121,7 +137,7 @@ partial class SettingsDialog
         mainPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         mainPanel.Location = new Point(0, 60);
         mainPanel.Name = "mainPanel";
-        mainPanel.AutoScrollMinSize = new Size(0, 1260);
+        mainPanel.AutoScrollMinSize = new Size(0, 1450);
         mainPanel.Padding = new Padding(0, 0, 0, 12);
         mainPanel.Size = new Size(1152, 582);
         mainPanel.TabIndex = 1;
@@ -407,11 +423,67 @@ partial class SettingsDialog
         hintWebSel.Size = new Size(600, 30);
         hintWebSel.TabIndex = 21;
         hintWebSel.Text = "用浏览器 F12 → Elements 面板查看登录页 input 元素的 id/class/name";
+
+        //
+        // ★ 2026-08-14 11:34 企业微信选择器 (h5apperp)
+        //
+        lblWechatWorkSelectorTitle.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
+        lblWechatWorkSelectorTitle.ForeColor = Color.FromArgb(24, 145, 176);
+        lblWechatWorkSelectorTitle.Location = new Point(40, 840);
+        lblWechatWorkSelectorTitle.Name = "lblWechatWorkSelectorTitle";
+        lblWechatWorkSelectorTitle.Size = new Size(600, 32);
+        lblWechatWorkSelectorTitle.TabIndex = 22;
+        lblWechatWorkSelectorTitle.Text = "企业微信网页版登录选择器 (/h5apperp/#/login)";
+
+        lblWechatWorkUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblWechatWorkUsernameSel.Location = new Point(40, 880);
+        lblWechatWorkUsernameSel.Name = "lblWechatWorkUsernameSel";
+        lblWechatWorkUsernameSel.Size = new Size(170, 32);
+        lblWechatWorkUsernameSel.TabIndex = 23;
+        lblWechatWorkUsernameSel.Text = "用户名选择器：";
+
+        txtWechatWorkUsernameSel.BackColor = Color.FromArgb(248, 248, 248);
+        txtWechatWorkUsernameSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtWechatWorkUsernameSel.Location = new Point(220, 875);
+        txtWechatWorkUsernameSel.Name = "txtWechatWorkUsernameSel";
+        txtWechatWorkUsernameSel.PlaceholderText = "例:input[placeholder=\"请输入登录用户账号\"]";
+        txtWechatWorkUsernameSel.Size = new Size(500, 38);
+        txtWechatWorkUsernameSel.TabIndex = 24;
+
+        lblWechatWorkPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblWechatWorkPasswordSel.Location = new Point(40, 920);
+        lblWechatWorkPasswordSel.Name = "lblWechatWorkPasswordSel";
+        lblWechatWorkPasswordSel.Size = new Size(170, 32);
+        lblWechatWorkPasswordSel.TabIndex = 25;
+        lblWechatWorkPasswordSel.Text = "密码选择器：";
+
+        txtWechatWorkPasswordSel.BackColor = Color.FromArgb(248, 248, 248);
+        txtWechatWorkPasswordSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtWechatWorkPasswordSel.Location = new Point(220, 915);
+        txtWechatWorkPasswordSel.Name = "txtWechatWorkPasswordSel";
+        txtWechatWorkPasswordSel.PlaceholderText = "例:input[type=\"password\"]";
+        txtWechatWorkPasswordSel.Size = new Size(500, 38);
+        txtWechatWorkPasswordSel.TabIndex = 26;
+
+        lblWechatWorkSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblWechatWorkSubmitSel.Location = new Point(40, 960);
+        lblWechatWorkSubmitSel.Name = "lblWechatWorkSubmitSel";
+        lblWechatWorkSubmitSel.Size = new Size(170, 32);
+        lblWechatWorkSubmitSel.TabIndex = 27;
+        lblWechatWorkSubmitSel.Text = "登录按钮选择器：";
+
+        txtWechatWorkSubmitSel.BackColor = Color.FromArgb(248, 248, 248);
+        txtWechatWorkSubmitSel.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtWechatWorkSubmitSel.Location = new Point(220, 955);
+        txtWechatWorkSubmitSel.Name = "txtWechatWorkSubmitSel";
+        txtWechatWorkSubmitSel.PlaceholderText = "例:.btn-login-1";
+        txtWechatWorkSubmitSel.Size = new Size(500, 38);
+        txtWechatWorkSubmitSel.TabIndex = 28;
         // 
         // sepAutoLogin
         // 
         sepAutoLogin.BackColor = Color.FromArgb(220, 220, 220);
-        sepAutoLogin.Location = new Point(36, 830);
+        sepAutoLogin.Location = new Point(36, 1020);
         sepAutoLogin.Name = "sepAutoLogin";
         sepAutoLogin.Size = new Size(1080, 1);
         sepAutoLogin.TabIndex = 25;
@@ -422,7 +494,7 @@ partial class SettingsDialog
         chkClientAutoLogin.CheckState = CheckState.Checked;
         chkClientAutoLogin.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         chkClientAutoLogin.ForeColor = Color.FromArgb(24, 145, 176);
-        chkClientAutoLogin.Location = new Point(36, 845);
+        chkClientAutoLogin.Location = new Point(36, 1035);
         chkClientAutoLogin.Name = "chkClientAutoLogin";
         chkClientAutoLogin.Size = new Size(500, 36);
         chkClientAutoLogin.TabIndex = 26;
@@ -435,7 +507,7 @@ partial class SettingsDialog
         chkDevToolsAutoLogin.CheckState = CheckState.Checked;
         chkDevToolsAutoLogin.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         chkDevToolsAutoLogin.ForeColor = Color.FromArgb(24, 145, 176);
-        chkDevToolsAutoLogin.Location = new Point(36, 885);
+        chkDevToolsAutoLogin.Location = new Point(36, 1075);
         chkDevToolsAutoLogin.Name = "chkDevToolsAutoLogin";
         chkDevToolsAutoLogin.Size = new Size(500, 36);
         chkDevToolsAutoLogin.TabIndex = 27;
@@ -446,7 +518,7 @@ partial class SettingsDialog
         // 
         lblDevToolsPassword.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         lblDevToolsPassword.ForeColor = Color.FromArgb(24, 145, 176);
-        lblDevToolsPassword.Location = new Point(36, 940);
+        lblDevToolsPassword.Location = new Point(36, 1130);
         lblDevToolsPassword.Name = "lblDevToolsPassword";
         lblDevToolsPassword.Size = new Size(341, 30);
         lblDevToolsPassword.TabIndex = 22;
@@ -457,7 +529,7 @@ partial class SettingsDialog
         // 
         txtDevToolsPassword.BackColor = Color.FromArgb(248, 248, 248);
         txtDevToolsPassword.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        txtDevToolsPassword.Location = new Point(36, 980);
+        txtDevToolsPassword.Location = new Point(36, 1170);
         txtDevToolsPassword.Name = "txtDevToolsPassword";
         txtDevToolsPassword.PlaceholderText = "集成开发工具密码(AES 加密存储,所有账套共用)";
         txtDevToolsPassword.Size = new Size(500, 38);
@@ -468,7 +540,7 @@ partial class SettingsDialog
         // 
         hintDevTools.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintDevTools.ForeColor = Color.FromArgb(150, 150, 150);
-        hintDevTools.Location = new Point(36, 1020);
+        hintDevTools.Location = new Point(36, 1210);
         hintDevTools.Name = "hintDevTools";
         hintDevTools.Size = new Size(900, 60);
         hintDevTools.TabIndex = 24;
@@ -477,7 +549,7 @@ partial class SettingsDialog
         // sepHubConfig (Root 专属分隔线)
         // 
         sepHubConfig.BackColor = Color.FromArgb(220, 220, 220);
-        sepHubConfig.Location = new Point(36, 1090);
+        sepHubConfig.Location = new Point(36, 1280);
         sepHubConfig.Name = "sepHubConfig";
         sepHubConfig.Size = new Size(1080, 1);
         sepHubConfig.TabIndex = 28;
@@ -486,7 +558,7 @@ partial class SettingsDialog
         // 
         lblHubConfigTitle.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
         lblHubConfigTitle.ForeColor = Color.FromArgb(24, 145, 176);
-        lblHubConfigTitle.Location = new Point(36, 1095);
+        lblHubConfigTitle.Location = new Point(36, 1285);
         lblHubConfigTitle.Name = "lblHubConfigTitle";
         lblHubConfigTitle.Size = new Size(400, 30);
         lblHubConfigTitle.TabIndex = 29;
@@ -496,7 +568,7 @@ partial class SettingsDialog
         // 
         hintHubConfig.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         hintHubConfig.ForeColor = Color.FromArgb(150, 150, 150);
-        hintHubConfig.Location = new Point(36, 1125);
+        hintHubConfig.Location = new Point(36, 1315);
         hintHubConfig.Name = "hintHubConfig";
         hintHubConfig.Size = new Size(900, 30);
         hintHubConfig.TabIndex = 30;
@@ -505,7 +577,7 @@ partial class SettingsDialog
         // lblHubConfigDir
         // 
         lblHubConfigDir.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        lblHubConfigDir.Location = new Point(36, 1155);
+        lblHubConfigDir.Location = new Point(36, 1345);
         lblHubConfigDir.Name = "lblHubConfigDir";
         lblHubConfigDir.Size = new Size(220, 50);
         lblHubConfigDir.TabIndex = 31;
@@ -516,7 +588,7 @@ partial class SettingsDialog
         // 
         txtHubConfigDir.BackColor = Color.FromArgb(248, 248, 248);
         txtHubConfigDir.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtHubConfigDir.Location = new Point(36, 1200);
+        txtHubConfigDir.Location = new Point(36, 1390);
         txtHubConfigDir.Name = "txtHubConfigDir";
         txtHubConfigDir.ReadOnly = true;
         txtHubConfigDir.Size = new Size(800, 41);
@@ -529,7 +601,7 @@ partial class SettingsDialog
         btnHubConfigBrowse.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
         btnHubConfigBrowse.FlatStyle = FlatStyle.Flat;
         btnHubConfigBrowse.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        btnHubConfigBrowse.Location = new Point(844, 1200);
+        btnHubConfigBrowse.Location = new Point(844, 1390);
         btnHubConfigBrowse.Name = "btnHubConfigBrowse";
         btnHubConfigBrowse.Size = new Size(150, 41);
         btnHubConfigBrowse.TabIndex = 33;
@@ -543,7 +615,7 @@ partial class SettingsDialog
         bottom.Controls.Add(btnCancel);
         bottom.Controls.Add(btnOK);
         bottom.Dock = DockStyle.Bottom;
-        bottom.Location = new Point(0, 1350);
+        bottom.Location = new Point(0, 1540);
         bottom.Name = "bottom";
         bottom.Size = new Size(1152, 78);
         bottom.TabIndex = 0;

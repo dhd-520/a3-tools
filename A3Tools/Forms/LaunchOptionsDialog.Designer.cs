@@ -32,7 +32,8 @@ namespace A3Tools.Forms
         private Label lblHint;
         private CheckBox chkDesktop;
         private CheckBox chkDevTools;
-        private CheckBox chkWeb;
+        private CheckBox chkErp;
+        private CheckBox chkWechatWork;
         private Label lblBrowser;
         private ComboBox cboBrowser;
         private Panel bottom;
@@ -49,7 +50,8 @@ namespace A3Tools.Forms
             lblHint = new Label();
             chkDesktop = new CheckBox();
             chkDevTools = new CheckBox();
-            chkWeb = new CheckBox();
+            chkErp = new CheckBox();
+            chkWechatWork = new CheckBox();
             lblBrowser = new Label();
             cboBrowser = new ComboBox();
             bottom = new Panel();
@@ -115,7 +117,8 @@ namespace A3Tools.Forms
             content.Controls.Add(lblHint);
             content.Controls.Add(chkDesktop);
             content.Controls.Add(chkDevTools);
-            content.Controls.Add(chkWeb);
+            content.Controls.Add(chkErp);
+            content.Controls.Add(chkWechatWork);
             content.Controls.Add(lblBrowser);
             content.Controls.Add(cboBrowser);
             content.Dock = DockStyle.Fill;
@@ -156,33 +159,44 @@ namespace A3Tools.Forms
             chkDevTools.TabIndex = 2;
             chkDevTools.Text = "启动开发工具（君则A3集成开发工具.exe）";
             // 
-            // chkWeb
-            // 
-            chkWeb.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-            chkWeb.Location = new Point(26, 212);
-            chkWeb.Margin = new Padding(4, 5, 4, 5);
-            chkWeb.Name = "chkWeb";
-            chkWeb.Size = new Size(638, 56);
-            chkWeb.TabIndex = 3;
-            chkWeb.Text = "启动网页版";
+            // chkErp
+            //
+            chkErp.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            chkErp.Location = new Point(26, 280);
+            chkErp.Margin = new Padding(4, 5, 4, 5);
+            chkErp.Name = "chkErp";
+            chkErp.Size = new Size(638, 56);
+            chkErp.TabIndex = 6;
+            chkErp.Text = "启动ERP网页版（h5comerp）";
+
+            //
+            // chkWechatWork
+            //
+            chkWechatWork.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            chkWechatWork.Location = new Point(26, 345);
+            chkWechatWork.Margin = new Padding(4, 5, 4, 5);
+            chkWechatWork.Name = "chkWechatWork";
+            chkWechatWork.Size = new Size(638, 56);
+            chkWechatWork.TabIndex = 7;
+            chkWechatWork.Text = "启动企业微信网页版（h5apperp）";
             // 
             // lblBrowser
             // 
             lblBrowser.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-            lblBrowser.Location = new Point(43, 277);
+            lblBrowser.Location = new Point(43, 212);
             lblBrowser.Margin = new Padding(4, 0, 4, 0);
             lblBrowser.Name = "lblBrowser";
             lblBrowser.Size = new Size(173, 56);
             lblBrowser.TabIndex = 4;
             lblBrowser.Text = "选择浏览器：";
             lblBrowser.TextAlign = ContentAlignment.MiddleLeft;
-            // 
+            //
             // cboBrowser
-            // 
+            //
             cboBrowser.DropDownStyle = ComboBoxStyle.DropDownList;
             cboBrowser.FlatStyle = FlatStyle.Flat;
             cboBrowser.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-            cboBrowser.Location = new Point(217, 280);
+            cboBrowser.Location = new Point(217, 215);
             cboBrowser.Margin = new Padding(4, 5, 4, 5);
             cboBrowser.Name = "cboBrowser";
             cboBrowser.Size = new Size(403, 43);

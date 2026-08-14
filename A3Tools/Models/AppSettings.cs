@@ -42,6 +42,19 @@ public class AppSettings
     public bool LaunchWeb { get; set; } = false;
 
     /// <summary>
+    /// ★ 2026-08-14 10:48 陛下反馈:ERP + 企业微信拆为两个独立选项
+    ///   · LaunchErp = 原网页版(/h5comerp/#/login),默认勾选,账号密码复用 ERP
+    ///   · LaunchWechatWork = 企业微信(/h5apperp/#/index/home),账号密码复用 ERP
+    ///   · LaunchWeb 保留向后兼容(等价于 LaunchErp)
+    /// </summary>
+    public bool LaunchErp { get; set; } = true;
+
+    /// <summary>
+    /// ★ 2026-08-14 10:48 是否启动企业微信 h5 版
+    /// </summary>
+    public bool LaunchWechatWork { get; set; } = false;
+
+    /// <summary>
     /// 选择的浏览器 (chrome, msedge, firefox, 360se, default)
     /// </summary>
     public string SelectedBrowser { get; set; } = "chrome";
@@ -94,14 +107,33 @@ public class AppSettings
     public string RefreshHotkey { get; set; } = "F5";
 
     // ===== 网页版自动登录选择器（设置中配置）=====
-    /// <summary>网页登录用户名输入框 CSS 选择器</summary>
-    public string WebUsernameSelector { get; set; } = "#username";
+    // ★ 2026-08-14 11:15 臣在 111 账套实测 ERP 登录页(/h5comerp/#/login):
+    //   用户名 placeholder = "请输入登录用户名", 密码 input[type="password"],
+    //   登录按钮 .btn-login-1(div,不是 button)
 
-    /// <summary>网页登录密码输入框 CSS 选择器</summary>
-    public string WebPasswordSelector { get; set; } = "#password";
+    /// <summary>ERP 网页登录用户名输入框 CSS 选择器</summary>
+    public string WebUsernameSelector { get; set; } = "input[placeholder=\"请输入登录用户名\"]";
 
-    /// <summary>网页登录按钮 CSS 选择器</summary>
-    public string WebSubmitSelector { get; set; } = "button[type=submit]";
+    /// <summary>ERP 网页登录密码输入框 CSS 选择器</summary>
+    public string WebPasswordSelector { get; set; } = "input[type=\"password\"]";
+
+    /// <summary>ERP 网页登录按钮 CSS 选择器(其实是 div.btn-login-1)</summary>
+    public string WebSubmitSelector { get; set; } = ".btn-login-1";
+
+    // ===== ★ 2026-08-14 11:15 企业微信网页版自动登录选择器(臣直接抓取) =====
+    //   111 账套实测:登录页 placeholder 与 ERP 不同
+    //   ERP 用户名 placeholder = "请输入登录用户名"
+    //   企业微信用户名 placeholder = "请输入登录用户账号"
+    //   密码都是 input[type="password"],登录按钮都是 .btn-login-1
+
+    /// <summary>企业微信登录用户名输入框 CSS 选择器(/h5apperp/#/login)</summary>
+    public string WechatWorkUsernameSelector { get; set; } = "input[placeholder=\"请输入登录用户账号\"]";
+
+    /// <summary>企业微信登录密码输入框 CSS 选择器</summary>
+    public string WechatWorkPasswordSelector { get; set; } = "input[type=\"password\"]";
+
+    /// <summary>企业微信登录按钮 CSS 选择器(其实是 div.btn-login-1)</summary>
+    public string WechatWorkSubmitSelector { get; set; } = ".btn-login-1";
 
     // ===== 集成开发工具自动登录 =====
     /// <summary>启动 A3 客户端时是否自动登录（默认 true）</summary>

@@ -9,12 +9,20 @@ namespace A3Tools.Forms;
 ///   修复:控件初始化全部拆到 LaunchOptionsDialog.Designer.cs(标准 WinForms 模式),
 ///     本文件只留业务代码(属性/构造函数/事件方法)。
 ///   设计器可正常打开,所见即所得。
+/// ★ 2026-08-14 10:48 陛下反馈:增加 ERP + 企业微信两个独立复选框
+///   · LaunchErp(原 chkWeb):启动 /h5comerp/#/login,默认勾选
+///   · LaunchWechatWork:启动 /h5apperp/#/index/home,账号密码复用 ERP
+///   · LaunchWeb 字段保留(向后兼容,等价 LaunchErp)
 /// </summary>
 public partial class LaunchOptionsDialog : Form
 {
     public bool LaunchDesktop { get; private set; }
     public bool LaunchDevTools { get; private set; }
     public bool LaunchWeb { get; private set; }
+    /// <summary>★ 2026-08-14 10:48 是否启动 ERP 网页版(/h5comerp/#/login),默认勾选</summary>
+    public bool LaunchErp { get; private set; }
+    /// <summary>★ 2026-08-14 10:48 是否启动企业微信网页版(/h5apperp/#/index/home)</summary>
+    public bool LaunchWechatWork { get; private set; }
     public string SelectedBrowser { get; private set; } = "chrome";
     public string AccountName { get; }
     public string AccountCode { get; }
@@ -31,11 +39,16 @@ public partial class LaunchOptionsDialog : Form
     /// <summary>
     /// 使用上次的设置作为默认值
     /// </summary>
-    public LaunchOptionsDialog(bool defaultDesktop, bool defaultDevTools, bool defaultWeb, string defaultBrowser = "chrome", string accountName = "", string accountCode = "")
+    public LaunchOptionsDialog(bool defaultDesktop, bool defaultDevTools, bool defaultWeb, string defaultBrowser = "chrome", string accountName = "", string accountCode = "", bool defaultErp = true, bool defaultWechatWork = false)
     {
         LaunchDesktop = defaultDesktop;
         LaunchDevTools = defaultDevTools;
         LaunchWeb = defaultWeb;
+        // ★ 2026-08-14 11:52 陛下反馈:应该保留上次勾选状态
+        //   旧版硬编码 LaunchErp=true / LaunchWechatWork=false,不管上次选择如何
+        //   新版:构造函数接受 defaultErp / defaultWechatWork,从 settings 读取上次状态
+        LaunchErp = defaultErp;
+        LaunchWechatWork = defaultWechatWork;
         SelectedBrowser = defaultBrowser;
         AccountName = accountName ?? string.Empty;
         AccountCode = accountCode ?? string.Empty;
@@ -60,7 +73,12 @@ public partial class LaunchOptionsDialog : Form
                 break;
             case Keys.D3:
             case Keys.NumPad3:
-                chkWeb.Checked = !chkWeb.Checked;
+                chkErp.Checked = !chkErp.Checked;
+                e.SuppressKeyPress = true;
+                break;
+            case Keys.D4:
+            case Keys.NumPad4:
+                chkWechatWork.Checked = !chkWechatWork.Checked;
                 e.SuppressKeyPress = true;
                 break;
         }
@@ -70,7 +88,8 @@ public partial class LaunchOptionsDialog : Form
     {
         chkDesktop.Checked = LaunchDesktop;
         chkDevTools.Checked = LaunchDevTools;
-        chkWeb.Checked = LaunchWeb;
+        chkErp.Checked = LaunchErp;
+        chkWechatWork.Checked = LaunchWechatWork;
 
         // 账套信息文本（例：账套：测试账套 (0001)）
         if (!string.IsNullOrEmpty(AccountName) || !string.IsNullOrEmpty(AccountCode))
@@ -110,7 +129,10 @@ public partial class LaunchOptionsDialog : Form
     {
         LaunchDesktop = chkDesktop.Checked;
         LaunchDevTools = chkDevTools.Checked;
-        LaunchWeb = chkWeb.Checked;
+        LaunchErp = chkErp.Checked;
+        LaunchWechatWork = chkWechatWork.Checked;
+        // ★ 2026-08-14 10:48 LaunchWeb 保留向后兼容(等价 LaunchErp)
+        LaunchWeb = LaunchErp;
 
         if (cboBrowser.SelectedItem is BrowserItem browser)
         {
