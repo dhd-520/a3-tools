@@ -201,31 +201,60 @@ if (-not $SkipEmbedNotes -and $ReleaseNotes) {
     Ok ("  RELEASE_NOTES.md embedded (zip now " + $newSize + " MB)")
 }
 
-# 8) 推送 tag
-$tag = "v" + $Version
-Info ("Pushing tag " + $tag + " to remotes")
+# 7.7) 推送 master commit 到源仓库 ★ 2026-08-19 拆分
+#       源仓库 (origin / github) 只推 master 代码，不打 tag。
+#       tag 是发布仓库 (A3ToolsRelease) 的事——保证别人拉 master 能拉到最新代码。
+Info "Pushing master commit to source repos (origin + github, NO tag)"
 try {
-    & git tag -d $tag 2>$null | Out-Null
-    & git tag $tag
-    # 2026-07-08：只推 Gitee remote（GitHub 国内连接不稳）
-    $remotes = (& git remote)
-    foreach ($remote in $remotes) {
+    foreach ($remote in (& git remote)) {
         $url = (& git remote get-url $remote)
-        if ($url -notmatch 'gitee\.com') {
-            Info ("  skip " + $remote + " (not gitee)")
+        # 跳过发布仓库（A3ToolsRelease），它只接 tag 和 zip
+        if ($remote -eq 'A3ToolsRelease' -or $url -match 'A3ToolsRelease') {
+            Info ("  skip " + $remote + " (release repo, only receives tag+zip)")
             continue
         }
         try {
-            Info ("  pushing tag to " + $remote + "...")
-            & git push $remote $tag --force
+            Info ("  pushing master to " + $remote + "...")
+            & git push $remote master
         } catch {
             Err ("  push to " + $remote + " failed: " + $_.Exception.Message)
             throw
         }
     }
+    Ok "master pushed to source repos"
+} catch {
+    Err ("master push failed: " + $_.Exception.Message)
+    Err "不能继续 release 流程——源仓库 master 状态不一致，请人工检查后重试"
+    exit 1
+}
+
+# 8) 推送 tag（只到 A3ToolsRelease 发布仓库）
+$tag = "v" + $Version
+Info ("Pushing tag " + $tag + " to A3ToolsRelease only")
+try {
+    & git tag -d $tag 2>$null | Out-Null
+    & git tag $tag
+    # ★ 2026-08-19 拆分：只推 A3ToolsRelease。源仓库不打 tag（污染列表）。
+    $releaseRemote = "A3ToolsRelease"
+    $found = $false
+    foreach ($r in (& git remote)) {
+        $u = (& git remote get-url $r)
+        if ($r -eq $releaseRemote -or $u -match 'A3ToolsRelease') { $releaseRemote = $r; $found = $true; break }
+    }
+    if (-not $found) {
+        Err "找不到 A3ToolsRelease remote，跳过 tag push（不影响 zip 上传）"
+    } else {
+        try {
+            Info ("  pushing tag to " + $releaseRemote + "...")
+            & git push $releaseRemote $tag --force
+        } catch {
+            Err ("  push to " + $releaseRemote + " failed: " + $_.Exception.Message)
+            throw
+        }
+    }
 
     # 8.5) 验证 tag 指向 ★ 2026-07-17 v2.4.5 踩坑自动化
-    #       Gitee release API 创建 release 时，如果 tag 已存在会“自动创建”一个指向
+    #       Gitee release API 创建 release 时，如果 tag 已存在会"自动创建"一个指向
     #       target_commitish 分支 HEAD 的 tag——本意是好的，但如果 API 误用了【A3ToolsRelease 仓库】
     #       master 分支的 HEAD（那边 master 仍指向 aafca3d=v2.4.4），创建的 tag 会指向错 commit。
     #       验证：local tag 指向的 commit 必须 = 当前 HEAD，不一致就 force push 修。
@@ -236,11 +265,7 @@ try {
         if ($expectedSha -ne $actualSha) {
             Err ("tag " + $tag + " 指向错 commit: " + $actualSha + " (期望 " + $expectedSha + ")")
             Err "force push 修正..."
-            foreach ($remote in $remotes) {
-                $url = (& git remote get-url $remote)
-                if ($url -notmatch 'gitee\.com') { continue }
-                & git push $remote $tag --force
-            }
+            & git push $releaseRemote $tag --force
             $actualSha = (& git rev-parse "$tag^{}" 2>$null).Trim()
             if ($actualSha -eq $expectedSha) {
                 Ok ("tag 修正完成 -> " + $expectedSha.Substring(0, 7))
@@ -252,7 +277,7 @@ try {
             Ok ("tag 指向正确 -> " + $expectedSha.Substring(0, 7))
         }
     }
-    Ok "tag pushed to Gitee remotes"
+    Ok "tag pushed to A3ToolsRelease only"
 } catch {
     Err ("tag push failed: " + $_.Exception.Message)
     Err "不能继续 release 流程——tag 状态不一致，请人工检查后重试"

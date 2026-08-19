@@ -12,6 +12,27 @@ compile_only*/
 compile_v246*/
 compile_only2/
 *.log
+TestForm/
+diag/
+
+# Windows cmd 副作用：echo > nul 创建的空文件
+nul
+
+# plugin dll / 工具产物
+A3Tools/Plugins/*.dll
+plugins/*.dll
+
+# 一次性构建工具 / 安装包
+tools/ILRepack/
+tools/*.exe
+tools/*/out/
+tools/*/bin/
+tools/*/obj/
+
+# worklist 临时文件（_ 前缀是 diff/orig/backup 副本，提交 .md 即可）
+worklist/_*.cs
+worklist/_*.txt
+worklist/_*.ps1
 
 # OS / IDE
 .vs/
