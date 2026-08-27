@@ -15,6 +15,9 @@ namespace A3Tools.Forms;
 
 public partial class MainForm : Form, IToolContext
 {
+    /// <summary>当前进程唯一 MainForm 实例（供 AI Action 调用）</summary>
+    public static MainForm? Instance { get; private set; }
+
     private readonly DataService _dataService;
     private readonly ToolsConfigService _toolsConfigService;
     private readonly ToolExecutorService _toolExecutorService;
@@ -230,6 +233,7 @@ public partial class MainForm : Form, IToolContext
     [Obsolete("场景 2 重启后自动重拉 devtools 的设计被陛下取消，保留仅为不破坏调用方")]
     public MainForm(string[]? startupArgs)
     {
+        Instance = this; // ★ 2026-08-26 AI Action 调用入口
         _dataService = new DataService();
         _toolsConfigService = new ToolsConfigService();
         _toolExecutorService = new ToolExecutorService();
@@ -1224,6 +1228,9 @@ public partial class MainForm : Form, IToolContext
         this.menuHotkeySettings.Click += MenuHotkeySettings_Click;
         this.menuAbout.Click += MenuAbout_Click;
         this.menuCheckUpdate.Click += MenuCheckUpdate_Click;
+        // ★ 2026-08-26 AI 助理入口
+        this.menuAiChat.Click += MenuAiChat_Click;
+        this.menuAiSettings.Click += MenuAiSettings_Click;
         this.lblTitle.Click += LblTitle_Click;
 
         this.KeyDown += MainForm_KeyDown;
@@ -1703,6 +1710,49 @@ public partial class MainForm : Form, IToolContext
         if (this.dgvAccounts.SelectedRows.Count == 0) return;
         var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
         if (account == null) return;
+        _LaunchAccountInternal(account);
+    }
+
+    /// <summary>
+    /// ★ 2026-08-26 AI Action 入口：按账套编码启动
+    /// </summary>
+    /// <param name="code">账套编码</param>
+    /// <param name="target">"client" / "devtools" / "web" / null(默认启 client + web，跳过选择弹窗)</param>
+    public bool LaunchAccountByCode(string code, string? target = null)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"[AI Action] LaunchAccountByCode 入口: code={code}, target={target ?? "null"}");
+            var account = _dataService.FindAccount(code);
+            if (account == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AI Action] 启动账套 [{code}] 失败：账套不存在");
+                return false;
+            }
+
+            // ★ 2026-08-27 陛下要求：AI 启动时陛下已明确说要启什么，跳过 LaunchOptionsDialog
+            //   target=null → 默认启 client + web（陛下日常组合）
+            //   target="client" / "devtools" / "web" → 只启那个
+            //   target="all" → 全启
+            string actualTarget = target?.ToLower() ?? "client+web";
+            System.Diagnostics.Debug.WriteLine($"[AI Action] LaunchAccountByCode 调用 _LaunchAccountInternal, forceTarget={actualTarget}");
+            _LaunchAccountInternal(account, skipLaunchDialog: true, forceTarget: actualTarget);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AI Action] 启动账套 [{code}] 异常: {ex.Message}\n{ex.StackTrace}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 共享启动逻辑（LaunchSelectedAccount + LaunchAccountByCode 都走这里）
+    /// </summary>
+    /// <param name="skipLaunchDialog">true = 跳过 LaunchOptionsDialog 选择（AI 调用时陛下已明确指定）</param>
+    /// <param name="forceTarget">"client" / "devtools" / "web" / "client+web" / "all" - 强制覆盖 settings</param>
+    private void _LaunchAccountInternal(Account account, bool skipLaunchDialog = false, string? forceTarget = null)
+    {
 
         // ★ 2026-08-01 升级序列化场景:记下账套 Code 给 WaitForClientUpgradeComplete 用
         _pendingAccountCode = account.Code;
@@ -1725,7 +1775,16 @@ public partial class MainForm : Form, IToolContext
         // 检查是否需要弹出启动选项对话框
         // ★ 2026-08-14 11:47 陛下反馈:应该按设置里的勾选控制是否弹 dialog(不是只看首次)
         //   逻辑:ShowLaunchOptionsDialog=true 或首次使用 → 弹
-        bool shouldShowDialog = settings.ShowLaunchOptionsDialog || !_dataService.HasSettings();
+        // ★ 2026-08-27 陛下要求:AI 启动账套时陛下已明确说启什么,跳过 dialog
+        bool shouldShowDialog = !skipLaunchDialog && (settings.ShowLaunchOptionsDialog || !_dataService.HasSettings());
+
+        // ★ 2026-08-27 forceTarget 强制覆盖 settings（AI 明确指定启什么）
+        if (forceTarget != null)
+        {
+            settings.LaunchDesktop = forceTarget.Contains("client");
+            settings.LaunchDevTools = forceTarget.Contains("devtools");
+            settings.LaunchWeb = forceTarget.Contains("web") || forceTarget.Contains("all");
+        }
 
         if (shouldShowDialog)
         {
@@ -3564,6 +3623,46 @@ public partial class MainForm : Form, IToolContext
     private void MenuExit_Click(object? sender, EventArgs e)
     {
         this.Close();
+    }
+
+    // ★ 2026-08-26 AI 助理入口（点击「帮助 -> AI 助理」打开聊天窗口）
+    private AiChatForm? _aiChatForm;
+
+    private void MenuAiChat_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_aiChatForm == null || _aiChatForm.IsDisposed)
+            {
+                _aiChatForm = new AiChatForm
+                {
+                    Owner = this
+                };
+            }
+            _aiChatForm.Show();
+            _aiChatForm.BringToFront();
+            _aiChatForm.Activate();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"打开 AI 助理失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void MenuAiSettings_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            using var dlg = new AiSettingsForm
+            {
+                Owner = this
+            };
+            dlg.ShowDialog(this);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"打开 AI 助理设置失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void MenuAbout_Click(object? sender, EventArgs e)

@@ -20,6 +20,9 @@ partial class MainForm
     private ToolStripMenuItem menuExit = null!;
     private ToolStripMenuItem menuAbout = null!;
     private ToolStripMenuItem menuCheckUpdate = null!;
+    // ★ 2026-08-26 AI 助理入口（陛下放在「帮助」菜单下）
+    private ToolStripMenuItem menuAiChat = null!;
+    private ToolStripMenuItem menuAiSettings = null!;
     private ToolStripMenuItem menuCopyAccount = null!;
     private ContextMenuStrip addMenu = null!;
     private ToolStripMenuItem miManualAdd = null!;
@@ -88,6 +91,8 @@ partial class MainForm
         menuHelp = new ToolStripMenuItem();
         menuAbout = new ToolStripMenuItem();
         menuCheckUpdate = new ToolStripMenuItem();
+        menuAiChat = new ToolStripMenuItem();
+        menuAiSettings = new ToolStripMenuItem();
         tabControl = new TabControl();
         tabLaunch = new TabPage();
         tabTools = new TabPage();
@@ -179,7 +184,7 @@ partial class MainForm
         // 
         // menuHelp
         // 
-        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuCheckUpdate, menuAbout });
+        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuAiChat, menuAiSettings, menuCheckUpdate, menuAbout });
         menuHelp.Name = "menuHelp";
         menuHelp.Size = new Size(111, 32);
         menuHelp.Text = "帮助(_H)";
@@ -195,6 +200,18 @@ partial class MainForm
         menuCheckUpdate.Name = "menuCheckUpdate";
         menuCheckUpdate.Size = new Size(171, 40);
         menuCheckUpdate.Text = "检查更新(_U)";
+        //
+        // menuAiChat
+        //
+        menuAiChat.Name = "menuAiChat";
+        menuAiChat.Size = new Size(210, 40);
+        menuAiChat.Text = "AI 助理(_A)";
+        //
+        // menuAiSettings
+        //
+        menuAiSettings.Name = "menuAiSettings";
+        menuAiSettings.Size = new Size(210, 40);
+        menuAiSettings.Text = "AI 助理设置";
         // 
         // tabControl
         // 

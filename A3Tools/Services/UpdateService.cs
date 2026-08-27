@@ -463,6 +463,32 @@ pause
         string backupDir = Path.Combine(Path.GetDirectoryName(currentDir)!, "A3Tools_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
         string logPath = Path.Combine(currentDir, "_update.log");
 
+        // 0. 清理旧备份 ★ 2026-08-19 陛下要求：只保留最后一份备份。
+        //    每次升级都会创建 A3Tools_backup_yyyyMMdd_HHmmss/ 目录（~70MB），
+        //    升几次就积几份，磁盘吃紧。升级前统一删掉，只留本次新建的这一份。
+        //    exe.bak 不受影响（PerformUpdate 里本来就会覆盖旧 bak，天然只有一份）。
+        try
+        {
+            string parentDir = Path.GetDirectoryName(currentDir)!;
+            foreach (var oldBackup in Directory.GetDirectories(parentDir, "A3Tools_backup_*"))
+            {
+                try
+                {
+                    Directory.Delete(oldBackup, recursive: true);
+                    Debug.WriteLine($"[UpdateService] 已清理旧备份: {Path.GetFileName(oldBackup)}");
+                }
+                catch (Exception delEx)
+                {
+                    // 清理失败不阻止升级，记录日志继续
+                    Debug.WriteLine($"[UpdateService] 旧备份清理失败（忽略）: {Path.GetFileName(oldBackup)} - {delEx.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[UpdateService] 备份目录扫描失败（忽略）: {ex.Message}");
+        }
+
         // 1. 备份当前整个目录（深度 1）
         CopyDirectory(currentDir, backupDir);
 

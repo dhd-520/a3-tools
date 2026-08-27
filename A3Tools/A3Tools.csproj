@@ -26,6 +26,31 @@
       <DependentUpon></DependentUpon>
     </Compile>
 
+    <!-- ★ 2026-08-26 AI 助力模块（Models + Services + ChatStore + Forms） -->
+    <Compile Update="Models\AiProviderConfig.cs" />
+    <Compile Update="Models\AiChatConfig.cs" />
+    <Compile Update="Models\ChatMessage.cs" />
+    <Compile Update="Services\AiConfigService.cs" />
+    <Compile Update="Services\OpenAiCompatibleBackend.cs" />
+    <Compile Update="Services\ChatStore\LocalChatStore.cs" />
+    <Compile Update="Services\ChatStore\MemoryChatStore.cs" />
+    <Compile Update="Forms\AiChatForm.cs" />
+    <Compile Update="Forms\AiChatForm.Designer.cs">
+      <DependentUpon>AiChatForm.cs</DependentUpon>
+    </Compile>
+    <Compile Update="Forms\AiSettingsForm.cs" />
+    <Compile Update="Forms\AiSettingsForm.Designer.cs">
+      <DependentUpon>AiSettingsForm.cs</DependentUpon>
+    </Compile>
+    <Compile Update="Models\AiAction.cs" />
+    <Compile Update="Services\AiActions\AiActions.cs" />
+    <Compile Update="Services\AiActions\ActionRegistry.cs" />
+    <Compile Update="Forms\ConfirmActionForm.cs" />
+    <None Update="Resources\A3ToolsKnowledge.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Forms\MainForm.Designer.cs">
