@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -54,9 +54,9 @@ public partial class AiChatForm : Form
         btnCancel.Click += (_, _) => _cts?.Cancel();
 
         // pnlMessages Dock=None，需手动同步宽度以填满 splitChat.Panel1
-        Resize += (_, _) => SyncMessagesWidth();
-        pnlMessagesScroll.Resize += (_, _) => SyncMessagesWidth();
-        splitChat.Panel1.Resize += (_, _) => SyncMessagesWidth();
+        //   ★ 2026-08-29 方案 A：flpMessages Dock=Top，会自动跟 pnlMessagesScroll 宽度走，不需要手同步
+        Resize += (_, _) => ScrollToBottom();
+        pnlMessagesScroll.Resize += (_, _) => ScrollToBottom();
 
         // ★ 2026-08-27 修陛下反馈「打开聊天框后不自动滚动到最下方」：
         //   窗体完全显示后 + layout 完成后才滚到底（构造函数里 RenderMessages 时控件还没 layout 完，Maximum=0 滚不动）
@@ -67,7 +67,14 @@ public partial class AiChatForm : Form
         splitChat.Panel2MinSize = 160;
         splitChat.SplitterDistance = Math.Max(200, splitChat.Height - 160 - splitChat.SplitterWidth);
 
-        // ★ 立即调一次 SyncMessagesWidth，确保首次渲染前 pnlMessages.Width 已等于 Panel1 宽度
+        // ★ 2026-08-29 方案 A：flpMessages 自己管 Padding=(22,14,22,4)，splitChat.Panel1 还原为默认
+        splitChat.Panel1.Padding = new Padding(0);
+        // ★ 2026-08-29 修复「聊天记录空白」：之前误删了 splitChat.Panel1.Controls.Add(pnlMessagesScroll)
+        //   现在 pnlMessagesScroll 装 flpMessages，flpMessages 装气泡
+        if (splitChat.Panel1.Controls.Contains(pnlMessagesScroll) == false)
+            splitChat.Panel1.Controls.Add(pnlMessagesScroll);
+
+        // 兼容保留 SyncMessagesWidth（现在是空操作）
         SyncMessagesWidth();
 
         LoadConfig();
@@ -81,14 +88,9 @@ public partial class AiChatForm : Form
 
     private void SyncMessagesWidth()
     {
-        // ★ 单一宽度源 = splitChat.Panel1.ClientSize.Width（这是 SplitContainer 上下分后的消息区真实宽度）
-        // pnlMessages.AutoSize=false，必须手动设 Width 和 Height 才能正确布局
-        int vScroll = SystemInformation.VerticalScrollBarWidth;
-        int w = splitChat.Panel1.ClientSize.Width - vScroll;
-        if (w > 0 && pnlMessages.Width != w)
-        {
-            pnlMessages.Width = w;
-        }
+        // ★ 2026-08-28 终极修法：row 直接挂在 pnlMessagesScroll（ScrollableControl）上
+        //   不再有中间层 FlowLayoutPanel → 什么都不能手动设宽了，SyncMessagesWidth 变成了"空操作"
+        //   ScrollableControl 会随客户端宽度自动 layout，row 自己的 width 在 CreateBubbleRow 里取 pnlMessagesScroll.ClientSize.Width
     }
 
     // ========== 数据初始化 ==========
@@ -227,178 +229,212 @@ public partial class AiChatForm : Form
 
     private void RenderMessages()
     {
-        pnlMessages.Controls.Clear();
+        flpMessages.Controls.Clear();
         if (_currentSession == null) return;
 
-        // 先同步 pnlMessages.Width，避免消息渲染时用旧宽度
+        // 先同步宽度
         SyncMessagesWidth();
 
-        // ★ 2026-08-27 重写：绝对定位累加 Y 坐标，pnlMessages.AutoSize=false 所以手动设 Height
-        int y = 12;
-        int totalHeight = 24; // 上下边距各 12
-
+        // ★ 2026-08-29 方案 A：陛下原话「不能根据内容自动撑开么」
+        //   flpMessages.AutoSize=true + Dock=Top → 按内容自动撑高
+        //   pnlMessagesScroll.AutoScroll=true → 负责滚动条
+        //   完全不需要算高度 / y / AutoScrollMinSize
         foreach (var msg in _currentSession.Messages)
         {
-            var row = CreateBubbleRow(msg, y);
-            y += row.Height + 14;  // ★ row 间距加大
-            totalHeight += row.Height + 14;
+            var bubble = CreateBubbleRow(msg, source: "Render");
+            flpMessages.Controls.Add(bubble);
         }
 
-        // 设 pnlMessages.Height + ScrollableControl.AutoScrollMinSize（触发垂直滚动条出现）
-        pnlMessages.Height = totalHeight;
-        pnlMessagesScroll.AutoScrollMinSize = new System.Drawing.Size(0, totalHeight);
+        // ★ 2026-08-29 诊断日志：加载历史/重画时记录 flp 高度 vs 滚动容器高度
+        System.Diagnostics.Debug.WriteLine(
+            $"[RenderDone] msgCount={_currentSession.Messages.Count} flpH={flpMessages.Height} pnlScrollClientH={pnlMessagesScroll.ClientSize.Height} " +
+            $"(溢出需要滚动={flpMessages.Height > pnlMessagesScroll.ClientSize.Height})");
 
         ScrollToBottom();
     }
 
     /// <summary>
-    /// 创建一条消息气泡 row（绝对定位）
-    /// ★ 2026-08-27 重写：单一宽度源 = pnlMessages.ClientSize.Width（已 SyncMessagesWidth 同步），不再用中间变量 availWidth
-    ///   row.Width = pnlMessages.ClientSize.Width，row 撑满消息区
-    ///   AI气泡靠左Dock=Left， 用户气泡靠右Dock=Right
-    ///   气泡 MaximumSize.Width = rowWidth * 0.85 限制最大宽度
+    /// 创建一条消息气泡 row（方案 A v4：Label 直接当气泡）
+    /// ★ 2026-08-29 陛下灵魂拷问「你一直算不明白，到底哪种方式能改好」：
+    ///   - **Label 直接当气泡（AutoSize=true 100% 可靠）**
+    ///   - Label.MaximumSize.Width 限制最大宽 → 自动换行
+    ///   - Label.Padding 直接生效（背景包含 padding）
+    ///   - Label.AutoSize 包含 Padding 的尺寸计算
+    ///   - **row = 简单 Panel，Width 锁定 flp.ClientSize.Width，高度 = bubble.PreferredSize.Height + Margin**
+    ///   - AI/用户靠左/靠右：row.Width - bubble.Width - padding
+    ///   - 这是唯一需要计算的量（二哈诚承认这一点）
     /// </summary>
-    private Panel CreateBubbleRow(ChatMessage msg, int y)
+    private Panel CreateBubbleRow(ChatMessage msg, string source = "AddNew")
     {
         bool isUser = msg.Role == ChatRole.User;
         bool isError = msg.IsError;
         bool isSystem = msg.Role == ChatRole.System;
 
-        // ★ 单一宽度源 = pnlMessages.ClientSize.Width（已同步，真实宽度）
-        int rowWidth = pnlMessages.ClientSize.Width;
-        if (rowWidth < 200) rowWidth = 600;
+        // flp 撑满父容器后，气泡可用最大宽度 = flp.ClientSize.Width - flp Padding
+        int flpClientW = Math.Max(400, flpMessages.ClientSize.Width - flpMessages.Padding.Horizontal);
+        const int sidePadding = 24;
+        const int cornerRadius = 10;
 
-        // ★ 2026-08-27 美化：加大间距，圆角气泡
-        const int sidePadding = 24;      // row 左右边距（原来 12）
-        const int gap = 10;             // 头像与气泡间隔（原来 8）
-        const int verticalPadding = 10;  // row 上下边距（原来 4）
-        const int cornerRadius = 14;     // 圆角半径
-        const int rowSpacing = 14;       // row 间距（在 RenderMessages 里用了 4）
+        // 气泡最大宽度 = 可用宽度的 85%（陛下要求加宽）
+        int bubbleMaxW = (int)((flpClientW - sidePadding * 2) * 0.85);
 
-        // 气泡最大宽度 = row 宽度的 85%（陛下要求加宽）
-        int bubbleMaxW = (int)((rowWidth - sidePadding * 2) * 0.85);
-        int labelMaxW = bubbleMaxW - 24;  // -24 = 气泡 Padding(12+12)
-
-        // 头像
-        var avatar = new Label
-        {
-            Text = isUser ? "B" : (isError ? "!" : "AI"),
-            Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold),
-            AutoSize = true,
-            ForeColor = isUser ? System.Drawing.Color.FromArgb(24, 144, 255) : System.Drawing.Color.Gray,
-            BackColor = System.Drawing.Color.Transparent,
-            TextAlign = System.Drawing.ContentAlignment.MiddleCenter
-        };
-
-        // 气泡内容 Label
+        // 处理文本内容
         string displayContent = isSystem ? "" : msg.Content;
-        Label contentLabel;
-        if (isUser)
+        if (!isUser && !isSystem)
         {
-            contentLabel = new Label
+            var html = Markdown.ToHtml(displayContent ?? string.Empty, _mdPipeline);
+            var sb = new StringBuilder();
+            bool inTag = false;
+            foreach (char c in html)
             {
-                Text = displayContent,
-                Font = new System.Drawing.Font("Microsoft YaHei UI", 10F),
-                ForeColor = System.Drawing.Color.White,
-                AutoSize = true,
-                MaximumSize = new System.Drawing.Size(labelMaxW, 10000)
-            };
+                if (c == '<') inTag = true;
+                else if (c == '>') { inTag = false; sb.Append(' '); }
+                else if (!inTag) sb.Append(c);
+            }
+            displayContent = DecodeHtmlEntities(sb.ToString()).Trim();
         }
         else
         {
-            contentLabel = RenderMarkdownLabel(displayContent, isError, labelMaxW);
+            displayContent = (displayContent ?? string.Empty).Trim();
         }
 
-        // ★ 关键：Label 保持 AutoSize=true + MaximumSize=labelMaxW，让它自动按 labelMaxW 渲染多行
-        //   （之前 AutoSize=false + 手动 Size 会导致 Label 不读 MaximumSize，变成单行渲染被截断）
-        //   PreferredSize 只是提示高度，这里不手动设 Size
-
-        // 气泡 Panel
-        var bubble = new Panel
+        // ★★★ Label 直接当气泡（AutoSize=true 100% 可靠）
+        var bubble = new Label
         {
+            AutoSize = true,
+            MaximumSize = new System.Drawing.Size(bubbleMaxW, int.MaxValue),
             BackColor = isError ? System.Drawing.Color.FromArgb(254, 240, 240)
                   : isUser ? System.Drawing.Color.FromArgb(24, 144, 255)
                   : System.Drawing.Color.FromArgb(245, 245, 245),
+            ForeColor = isUser ? System.Drawing.Color.White : (isError ? System.Drawing.Color.FromArgb(180, 30, 30) : System.Drawing.Color.FromArgb(50, 50, 50)),
+            Font = new System.Drawing.Font("Microsoft YaHei UI", 10F),
             Padding = new Padding(12, 10, 12, 10),
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            MaximumSize = new System.Drawing.Size(bubbleMaxW, 10000)
+            Text = displayContent,
+            Cursor = Cursors.IBeam,
+            Margin = new Padding(0),
+            // ★ 关联 ChatMessage，方便后续流式更新查找
+            Tag = msg,
         };
-        bubble.Controls.Add(contentLabel);
+        // 选中复制：Ctrl + 点击 复制到剪贴板（陛下 13:55 拍板方案 B）
+        bubble.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left) return;
+            if (!ModifierKeys.HasFlag(Keys.Control)) return;
+            if (string.IsNullOrEmpty(bubble.Text)) return;
+            Clipboard.SetText(bubble.Text);
+            // ★ 给个反馈：气泡闪烁一下（2px 边框红→白）
+            var originalColor = bubble.BackColor;
+            bubble.BackColor = System.Drawing.Color.FromArgb(255, 200, 200);
+            var t = new System.Windows.Forms.Timer { Interval = 150 };
+            t.Tick += (_, _) =>
+            {
+                bubble.BackColor = originalColor;
+                t.Stop();
+                t.Dispose();
+            };
+            t.Start();
+        };
 
-        // ★ 2026-08-27 美化：圆角气泡 + 随 AutoSize 实时重设 Region（防止圆角被截断）
-        bubble.Resize += (_, _) => bubble.SetRoundRect(cornerRadius);
-        bubble.SetRoundRect(cornerRadius);  // 首次设一次
+        // ★ 头像 Label（AI/Error/User 全部显示，用户头像 = "B" 蓝色）
+        Label? avatar = null;
+        if (!isSystem)
+        {
+            avatar = new Label
+            {
+                AutoSize = true,
+                Text = isUser ? "B" : (isError ? "!" : "AI"),
+                Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold),
+                ForeColor = isUser ? System.Drawing.Color.FromArgb(24, 144, 255) : (isError ? System.Drawing.Color.FromArgb(180, 30, 30) : System.Drawing.Color.Gray),
+                BackColor = System.Drawing.Color.Transparent,
+                TextAlign = System.Drawing.ContentAlignment.MiddleCenter,
+                Margin = new Padding(0),
+            };
+        }
 
-        // ★ 不需要 Add/Remove bubble 自身，只需 GetPreferredSize 触发计算
-        //   （之前 bubble.Controls.Add(bubble) 是错误，会引发循环控件引用）
-
-        int bubbleWidth = bubble.PreferredSize.Width;
-        int bubbleHeight = bubble.PreferredSize.Height;
-        int avatarWidth = avatar.PreferredSize.Width;
-        int avatarHeight = avatar.PreferredSize.Height;
-        int rowHeight = System.Math.Max(bubbleHeight, avatarHeight) + verticalPadding * 2;
-
-        // ★ row 撑满 pnlMessages
+        // ★ row = Panel，锁定宽度，按内容高度撑开，AI/用户靠左/靠右
+        const int gap = 10;
         var row = new Panel
         {
-            Location = new System.Drawing.Point(0, y),
-            Size = new System.Drawing.Size(rowWidth, rowHeight),
-            BackColor = System.Drawing.Color.Transparent
+            Width = flpMessages.ClientSize.Width,  // ★ 已含 flp.Padding.Right=17 预留滚动条位置
+            BackColor = System.Drawing.Color.Transparent,
+            Margin = new Padding(0, 0, 0, 14),  // 行间距
         };
-
-        if (isUser)
-        {
-            // 靠右（与 AI 镜像）：气泡在左、头像在右
-            int avatarX = rowWidth - sidePadding - avatarWidth;
-            int bubbleX = avatarX - gap - bubbleWidth;
-            bubble.Location = new System.Drawing.Point(bubbleX, verticalPadding);
-            avatar.Location = new System.Drawing.Point(avatarX, verticalPadding + (bubbleHeight - avatarHeight) / 2);
-        }
-        else
-        {
-            // 靠左：头像在左，气泡在头像右边
-            int avatarX = sidePadding;
-            int bubbleX = avatarX + avatarWidth + gap;
-            avatar.Location = new System.Drawing.Point(avatarX, verticalPadding + (bubbleHeight - avatarHeight) / 2);
-            bubble.Location = new System.Drawing.Point(bubbleX, verticalPadding);
-        }
-
+        // ★ 布局：先把 bubble + avatar 加进 row，row.Layout() 后 PreferredSize 才准确
+        if (avatar != null) row.Controls.Add(avatar);
         row.Controls.Add(bubble);
-        row.Controls.Add(avatar);
+        row.PerformLayout();  // 强制 layout，让 PreferredSize 准
 
-        pnlMessages.Controls.Add(row);
+        // ★ 手算布局：bubble 位置 + row 高度
+        //   AI 消息：[avatar (auto)][gap][bubble (auto, 左)]
+        //   用户消息：                    [bubble (auto, 右)]
+        row.SizeChanged += (_, _) =>
+        {
+            // ★ 修复「用户气泡截断」：用 bubble.Width（实际渲染宽度）而不是 PreferredSize.Width
+            //   Label.AutoSize=true 时，PreferredSize 可能比实际 Width 略小，导致右侧贴边
+            int avatarW = avatar?.Width ?? 0;
+            int avatarH = avatar?.Height ?? 0;
+            int bubbleW = bubble.Width;   // ★ 用实际 Width 代替 PreferredSize.Width
+            int bubbleH = bubble.Height;
+
+            // row 高度 = max(avatarH, bubbleH)
+            int rowH = Math.Max(avatarH, bubbleH);
+            row.Height = rowH;
+
+            // 头像位置
+            int avatarX;
+            int avatarY = rowH / 2 - avatarH / 2;
+            if (isUser)
+            {
+                // 用户头像靠右：预留 17px 滚动条位置 + sidePadding + 10
+                avatarX = flpMessages.ClientSize.Width - avatarW - sidePadding - 17 - 10;
+            }
+            else
+            {
+                // AI/Error 头像靠左
+                avatarX = sidePadding;
+            }
+            if (avatar != null) avatar.Location = new System.Drawing.Point(avatarX, avatarY);
+
+            // 气泡位置
+            int bubbleX;
+            if (isUser)
+            {
+                // 用户气泡靠右：在头像左边（头像 - gap - 气泡宽），加 8px 缓冲
+                bubbleX = Math.Max(sidePadding, avatarX - gap - bubbleW - 8);
+            }
+            else
+            {
+                // AI 气泡靠左：头像 + gap
+                bubbleX = avatarX + avatarW + gap;
+            }
+            int bubbleY = rowH / 2 - bubbleH / 2;
+            bubble.Location = new System.Drawing.Point(bubbleX, bubbleY);
+        };
+        // 立即触发一次 SizeChanged
+        row.Size = new System.Drawing.Size(row.Width, 1);
+
+        // ★ 诊断日志（验证用，测试后可删）
+        System.Diagnostics.Debug.WriteLine(
+            $"[Bubble:{msg.Role}|{source}] contentLen={displayContent?.Length ?? 0} " +
+            $"flpClientW={flpClientW} bubbleMaxW={bubbleMaxW} bubble=({bubble.PreferredSize.Width}x{bubble.PreferredSize.Height}) " +
+            $"avatar={(avatar?.PreferredSize.Width ?? 0)}x{(avatar?.PreferredSize.Height ?? 0)}");
+
         return row;
     }
 
     /// <summary>
-    /// ★ 2026-08-27 统一接口：发消息时也调用 CreateBubbleRow 新代码
-    ///   解决了旧 AddMessageBubble 写死 640/600 导致 AI 气泡宽度恒为 600 的问题
+    /// ★ 2026-08-29 方案 A 简化版：在 flpMessages 末尾追加一个 row
     /// </summary>
     private void AddMessageBubbleNew(ChatMessage msg)
     {
         if (_currentSession == null) return;
-        SyncMessagesWidth();
-
-        // 拼接到末尾：下一个 row 的 Y = pnlMessages.Height - pnlMessages.Padding.Bottom
-        int currentBottom = pnlMessages.Height; // 含 Padding
-        int y = currentBottom - pnlMessages.Padding.Bottom;
-
-        var row = CreateBubbleRow(msg, y);
-
-        // 重设总高 + ScrollableControl.AutoScrollMinSize（触发滚动条）
-        // ★ 底部预留 80px 缓冲，防止最后一条消息贴底被输入框遮
-        int newBottom = row.Bottom + 80;
-        if (newBottom > pnlMessages.Height)
-        {
-            pnlMessages.Height = newBottom;
-        }
-        pnlMessagesScroll.AutoScrollMinSize = new System.Drawing.Size(0, newBottom);
+        var row = CreateBubbleRow(msg, source: "AddNew");
+        flpMessages.Controls.Add(row);
     }
 
-    private Label RenderMarkdownLabel(string markdown, bool isError, int labelMaxW)
+    private TextBox RenderMarkdownTextBox(string markdown, bool isError, int labelMaxW)
     {
-        // 简化渲染：把 Markdown 转成 HTML 再剥出来给 Label（Label 不支持 HTML，所以做最简单的替换）
+        // 简化渲染：把 Markdown 转成 HTML 再剥出来给 TextBox（TextBox 不支持富文本，所以做最简单的替换）
         var html = Markdown.ToHtml(markdown ?? string.Empty, _mdPipeline);
         // 简单提取文本（去掉 HTML 标签，但保留换行）
         var sb = new StringBuilder();
@@ -411,15 +447,70 @@ public partial class AiChatForm : Form
         }
         var text = DecodeHtmlEntities(sb.ToString()).Trim();
 
-        return new Label
+        var backColor = isError
+            ? System.Drawing.Color.FromArgb(254, 240, 240)
+            : System.Drawing.Color.FromArgb(245, 245, 245);
+        return CreateSelectableTextBox(
+            text: text,
+            font: new System.Drawing.Font("Microsoft YaHei UI", 10F),
+            foreColor: isError ? System.Drawing.Color.FromArgb(180, 30, 30) : System.Drawing.Color.FromArgb(50, 50, 50),
+            backColor: backColor,
+            maxW: labelMaxW);
+    }
+
+    /// <summary>
+    /// 创建一个只读但可选中复制的 TextBox，代替 Label 作为气泡内容控件。
+    /// ★ 2026-08-27 陛下反馈：AI 聊天内容不能复制，现在用 TextBox(Multiline+ReadOnly+NoBorder) 作为气泡容器。
+    /// - ReadOnly=true → 不能编辑修改
+    /// - TabStop=false + BorderStyle=None → 看起来跟 Label 一样（无框）
+    /// - BackColor 硬编码父气泡的底色（TextBox 不能真正透明，手动配色）
+    /// - Cursor=IBeam → 鼠标进入时光标变成 I 字，提示可以选中
+    /// - 高度/宽度 按 TextRenderer.MeasureText 计算（TextBox 没 AutoSize）
+    /// </summary>
+    private static TextBox CreateSelectableTextBox(string text, System.Drawing.Font font, System.Drawing.Color foreColor, System.Drawing.Color backColor, int maxW)
+    {
+        // ★ 2026-08-28 终极修法 关键点：把 text 中的换行符都替换为空格
+        //   原因：Graphics.MeasureString 按 maxW WordBreak 测算高度；TextBox 遇到 \n 强制换行 + 再 WordBreak
+        //   → 测量高度 < 实际占用高度 → TextBox MinimumSize 撑爆 bubble → 出现空白
+        //   解决方案：去掉 \n，让 TextBox 完全依赖 Width + WordWrap 走，跟 Graphics 测量一致
+        var normalized = System.Text.RegularExpressions.Regex.Replace(
+            text ?? string.Empty, @"[\r\n]+", " ");
+
+        // ★ 2026-08-28 用 Graphics.MeasureString 真实测量，避开 TextRenderer 中文测高 bug
+        int w, h;
+        using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
         {
-            Text = text,
-            Font = new System.Drawing.Font("Microsoft YaHei UI", 10F),
-            ForeColor = isError ? System.Drawing.Color.FromArgb(180, 30, 30) : System.Drawing.Color.FromArgb(50, 50, 50),
-            AutoSize = true,
-            // ★ 陛下要求 AI 气泡也撑宽，不再写死 600
-            MaximumSize = new System.Drawing.Size(labelMaxW, 10000)
+            var measured = ControlExtensions.MeasureTextRobust(g, normalized, font, maxW);
+            // TextBox 内部边框约 2~3px，左右上下各加 4 保守值（避免被裁字）
+            w = Math.Min(maxW, measured.Width + 4);
+            h = measured.Height + 4;
+        }
+
+        var tb = new TextBox
+        {
+            Text = normalized,
+            Font = font,
+            ForeColor = foreColor,
+            BackColor = backColor,
+            BorderStyle = BorderStyle.None,
+            ReadOnly = true,
+            Multiline = true,
+            WordWrap = true,
+            ScrollBars = ScrollBars.None,
+            Cursor = Cursors.IBeam,
+            TabStop = false,
+            // ★ 不设 MinimumSize / MaximumSize：让 TextBox 尺寸完全由 Graphics 测量决定
+            //   前版 MinimumSize = (maxW, measured.Height+4) 当 \n 存在时会让 measured.Height 偏小
+            //   但 TextBox 实际占用偏大 → MinimumSize 反而成了"撑高"工具，导致底部空白
+            Width = w,
+            Height = h,
         };
+        // ★ 2026-08-29 诊断：TextBox 设 Size 后 PreferredSize 是什么？
+        //   陛下反馈修复 #3 完全没生效 → 推测 TextBox 自动撑高到实际渲染高度，忽略我设的 Height
+        Size actualPreferred = tb.GetPreferredSize(new Size(int.MaxValue, int.MaxValue));
+        System.Diagnostics.Debug.WriteLine(
+            $"[TextBoxSize] setH={h} preferredH={actualPreferred.Height} preferredW={actualPreferred.Width} (Δ={actualPreferred.Height - h})");
+        return tb;
     }
 
     private static string DecodeHtmlEntities(string s)
@@ -430,13 +521,16 @@ public partial class AiChatForm : Form
 
     private void ScrollToBottom()
     {
-        // ★ 防御：未创建 Handle 直接返回，避免 BeginInvoke 报「在创建窗口句柄之前，不能在控件上调用 Invoke 或 BeginInvoke」
+        // ★ 2026-08-29 方案 A：现在滚动容器是 pnlMessagesScroll（不是 splitChat.Panel1）
+        //   pnlMessagesScroll 装 flpMessages，flpMessages 装气泡 row
+        //   滚到底 = pnlMessagesScroll.VerticalScroll.Value = Maximum
         if (!pnlMessagesScroll.IsHandleCreated) return;
 
         pnlMessagesScroll.InvokeIfNeeded(() =>
         {
-            // PerformLayout 后再读 Maximum
+            // ★ 强制 layout，让 flpMessages 高度最新
             pnlMessagesScroll.PerformLayout();
+            flpMessages.PerformLayout();
             int max = pnlMessagesScroll.VerticalScroll.Maximum;
             if (max > 0)
             {
@@ -585,6 +679,9 @@ public partial class AiChatForm : Form
 
     /// <summary>
     /// 流式显示文本到 AI 占位气泡（打字机效果）
+    /// ★ 2026-08-29 方案 A：现在是 Label 流式更新
+    ///   Label.AutoSize=true + MaximumSize 限制最大宽 → 自动换行、自动撑高
+    ///   不用手算高度、不用 TextBox PreferredSize
     /// </summary>
     private async Task StreamDisplayAsync(ChatMessage aiMsg, string fullText)
     {
@@ -598,8 +695,8 @@ public partial class AiChatForm : Form
         _currentSession.Messages.Add(aiMsg);
 
         // 找到这个气泡对应的 Label
-        Label? label = FindBubbleLabel(aiMsg);
-        if (label == null)
+        Label? bubble = FindBubbleLabel(aiMsg);
+        if (bubble == null)
         {
             // 兜底：直接全量显示
             aiMsg.Content = fullText;
@@ -619,7 +716,9 @@ public partial class AiChatForm : Form
             await pnlMessagesScroll.InvokeAsync(() =>
             {
                 aiMsg.Content = currentText;
-                label.Text = display;
+                bubble.Text = display;
+                // ★ Label.AutoSize=true + MaximumSize.Width 限制最大宽 → Label 自己撑开宽高
+                //   row.SizeChanged 会自动重算布局（气泡 + 头像位置）
                 ScrollToBottom();
             });
 
@@ -634,22 +733,20 @@ public partial class AiChatForm : Form
     }
 
     /// <summary>
-    /// 找出指定消息对应的 Label（用于流式追加）
+    /// 找出指定消息对应的 Label 气泡（用于流式追加）
+    /// ★ 2026-08-29 方案 A：现在气泡是 Label（不是 TextBox），Tag=msg 关联
+    ///   检索路径：flpMessages.Controls (row) → row.Controls (avatar + bubble)
     /// </summary>
     private Label? FindBubbleLabel(ChatMessage msg)
     {
-        // 倒序找：最后一个 row 的 Label
-        for (int i = pnlMessages.Controls.Count - 1; i >= 0; i--)
+        for (int i = flpMessages.Controls.Count - 1; i >= 0; i--)
         {
-            if (pnlMessages.Controls[i] is Panel row && row.Controls.Count > 0)
+            if (flpMessages.Controls[i] is Panel row)
             {
-                if (row.Controls[0] is FlowLayoutPanel hbox)
+                foreach (Control c in row.Controls)
                 {
-                    foreach (Control c in hbox.Controls)
-                    {
-                        if (c is Panel bubble && bubble.Controls.Count > 0 && bubble.Controls[0] is Label lbl)
-                            return lbl;
-                    }
+                    if (c is Label lbl && lbl.Tag is ChatMessage cm && cm == msg)
+                        return lbl;
                 }
             }
         }
@@ -694,7 +791,7 @@ public partial class AiChatForm : Form
     private async Task<bool> OnToolNeedsConfirmAsync(string toolName, string impact, string? confirmText)
     {
         bool result = false;
-        await pnlMessages.InvokeAsync(() =>
+        await pnlMessagesScroll.InvokeAsync(() =>
         {
             using var dlg = new ConfirmActionForm(
                 actionName: toolName,
@@ -860,6 +957,63 @@ internal static class ControlExtensions
         var tcs = new TaskCompletionSource();
         c.BeginInvoke(new Action(() => { try { action(); tcs.SetResult(); } catch (Exception ex) { tcs.SetException(ex); } }));
         return tcs.Task;
+    }
+
+    /// <summary>
+    /// ★ 2026-08-28 终极修法（陛下反馈「AI 回复气泡下方有空白」）：
+    /// 替代 TextRenderer.MeasureText 在中文/英文/标点混排 + WordBreak 时高度算爆的 bug。
+    /// 用 Graphics.MeasureString 真实测量，输出宽高均按真实行/字符宽度计算。
+    /// </summary>
+    /// <param name="g">从控件 CreateGraphics() 或 Paint 事件拿到的 Graphics</param>
+    /// <param name="text">待测文本</param>
+    /// <param name="font">气泡字体（微软雅黑 10pt）</param>
+    /// <param name="maxWidth">单行最大宽度（超过自动换行）</param>
+    /// <returns>Size：Width=最长一行的字符像素宽；Height=多行总高（含行距）</returns>
+        public static Size MeasureTextRobust(object referenceControl, string text, Font font, int maxWidth)
+    {
+        if (string.IsNullOrEmpty(text)) return new Size(0, font.Height);
+
+        // ★ 2026-08-28 终极修法：Graphics.MeasureString 在高 DPI 下中文包容性边距导致多行时高度算少 30~50px
+        //   TextBox 实际渲染高度 > Graphics 测量值 → TextBox 撑爆 bubble → 下方留白
+        //   改用临时 TextBox.GetPreferredSize（走 GDI+ 真实 DPI 渲染，零偏差）
+        var probe = new TextBox
+        {
+            Font = font,
+            BorderStyle = BorderStyle.None,
+            Multiline = true,
+            WordWrap = true,
+            Visible = false,
+            Width = maxWidth,
+            Text = text,
+        };
+        try
+        {
+            Size preferred = probe.GetPreferredSize(new Size(maxWidth, 0));
+            // ★ 2026-08-29 诊断：font.Height (含 ascender+descender) vs font.GetHeight() (实际行高)
+            //   陛下日志反馈"气泡内空白和内容高度差不多"，推测是 preferred.Height 用了 font.Height 而非 GetHeight()
+            //   理论上 preferred.Height 应该 = font.GetHeight() * 行数 + padding
+            //   但 WinForms TextBox.GetPreferredSize 可能在某些条件下用了 font.Height，导致每行多算 ~14px
+            float realLineHeight = font.GetHeight();  // 实际行高
+            int expectedLines = preferred.Height > 0 ? preferred.Height / Math.Max(1, (int)realLineHeight) : 0;
+            System.Diagnostics.Debug.WriteLine(
+                $"[MeasureRobust] textLen={text.Length} fontH={font.Height} realLineH={realLineHeight:F1} " +
+                $"preferred=({preferred.Width}x{preferred.Height}) expectedLines={expectedLines}");
+
+            // ★ 2026-08-29 修复尝试 #3：preferred.Height 可能多算（用 font.Height 而非 GetHeight()）
+            //   临时实验：改用 preferred.Height * (realLineHeight / font.Height) 重新计算
+            //   如果 realLineHeight/font.Height ≈ 0.5，preferred.Height 会减半，匹配 TextBox 实际渲染
+            float scale = font.Height > 0 ? realLineHeight / font.Height : 1f;
+            int correctedH = (int)(preferred.Height * scale) + 2;
+
+            // GetPreferredSize 偶发少 1~2px，加 2px 安全量防字被裁
+            int w = Math.Min(maxWidth, Math.Max(1, preferred.Width));
+            int h = Math.Max(font.Height + 2, correctedH);
+            return new Size(w, h);
+        }
+        finally
+        {
+            probe.Dispose();
+        }
     }
 
     /// <summary>

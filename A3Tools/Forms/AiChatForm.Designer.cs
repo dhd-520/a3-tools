@@ -30,7 +30,6 @@ partial class AiChatForm
         pnlChatArea = new Panel();
         splitChat = new SplitContainer();
         pnlMessagesScroll = new Panel();
-        pnlMessages = new FlowLayoutPanel();
         pnlInput = new Panel();
         lblStatus = new Label();
         btnCancel = new Button();
@@ -207,6 +206,9 @@ partial class AiChatForm
         // 
         // splitChat.Panel1
         // 
+        splitChat.Panel1.AutoScroll = true;
+        splitChat.Panel1.BackColor = Color.White;
+        splitChat.Panel1.Padding = new Padding(22);
         splitChat.Panel1.Controls.Add(pnlMessagesScroll);
         splitChat.Panel1MinSize = 0;
         // 
@@ -223,27 +225,40 @@ partial class AiChatForm
         // 
         pnlMessagesScroll.AutoScroll = true;
         pnlMessagesScroll.BackColor = Color.White;
-        pnlMessagesScroll.Controls.Add(pnlMessages);
         pnlMessagesScroll.Dock = DockStyle.Fill;
         pnlMessagesScroll.Location = new Point(0, 0);
         pnlMessagesScroll.Margin = new Padding(0);
         pnlMessagesScroll.Name = "pnlMessagesScroll";
+        // ★ 2026-08-29 修复滚动条遮挡气泡：右侧加 17px 预留滚动条位置
+        pnlMessagesScroll.Padding = new Padding(0, 0, 17, 0);
         pnlMessagesScroll.Size = new Size(1597, 955);
         pnlMessagesScroll.TabIndex = 0;
         // 
         // pnlMessages
         // 
-        pnlMessages.AutoSize = false;
-        pnlMessages.BackColor = Color.White;
-        pnlMessages.FlowDirection = FlowDirection.TopDown;
-        pnlMessages.Location = new Point(0, 0);
-        pnlMessages.Margin = new Padding(0);
-        pnlMessages.Name = "pnlMessages";
-        pnlMessages.Padding = new Padding(22);
-        pnlMessages.Size = new Size(44, 44);
-        pnlMessages.TabIndex = 0;
-        pnlMessages.WrapContents = false;
+        // ★ 2026-08-29 思路转变（陛下原话「为什么气泡要算呢，不能根据内容自动撑开么」）：
+        //   恢复中间层 FlowLayoutPanel，但用法完全不同：flp 只管「垂直排列」，bubble AutoSize 自己管宽高
+        //   - flpMessages.AutoSize=true + AutoSizeMode=GrowAndShrink：按内容撑高
+        //   - flpMessages.Dock=Top：跟着内容缩，宽度 = pnlMessagesScroll.ClientSize.Width
+        //   - bubble AutoSize=true + MaximumSize 控制最大宽 0.85*rowWidth
+        //   - pnlMessagesScroll.AutoScroll=true 负责滚动条
+        //   - 完全不用算高度 / y / AutoScrollMinSize
         // 
+        flpMessages = new FlowLayoutPanel();
+        flpMessages.AutoScroll = false;
+        flpMessages.AutoSize = true;
+        flpMessages.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+        flpMessages.BackColor = Color.White;
+        flpMessages.Dock = DockStyle.Top;
+        flpMessages.FlowDirection = FlowDirection.TopDown;
+        flpMessages.Location = new Point(0, 0);
+        flpMessages.Margin = new Padding(0);
+        flpMessages.Name = "flpMessages";
+        flpMessages.Padding = new Padding(22, 14, 22 + 17, 4);  // 右侧 +17 给滚动条预留位置
+        flpMessages.Size = new Size(1597, 60);
+        flpMessages.TabIndex = 0;
+        flpMessages.WrapContents = false;
+        pnlMessagesScroll.Controls.Add(flpMessages); 
         // pnlInput
         // 
         pnlInput.BackColor = Color.FromArgb(245, 245, 245);
@@ -382,7 +397,7 @@ partial class AiChatForm
     private Panel pnlTopBar;
     private Label lblCurrentProvider;
     private Panel pnlMessagesScroll;
-    private FlowLayoutPanel pnlMessages;
+    private FlowLayoutPanel flpMessages;
     private Panel pnlInput;
     private TextBox txtInput;
     private Button btnSend;
