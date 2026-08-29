@@ -299,14 +299,40 @@ public partial class AiChatForm : Form
         }
 
         // ★★★ Label 直接当气泡（AutoSize=true 100% 可靠）
+        // 颜色：根据角色选 2 种颜色用于线性渐变（顶亮 → 底暗）
+        Color bubbleTop, bubbleBottom, borderColor, textColor;
+        if (isError)
+        {
+            bubbleTop = System.Drawing.Color.FromArgb(254, 242, 242);
+            bubbleBottom = System.Drawing.Color.FromArgb(248, 220, 220);
+            borderColor = System.Drawing.Color.FromArgb(220, 80, 80);
+            textColor = System.Drawing.Color.FromArgb(180, 30, 30);
+        }
+        else if (isUser)
+        {
+            // 用户气泡：蓝色渐变
+            bubbleTop = System.Drawing.Color.FromArgb(64, 169, 255);   // 亮蓝
+            bubbleBottom = System.Drawing.Color.FromArgb(24, 144, 255);  // 深蓝
+            borderColor = System.Drawing.Color.FromArgb(15, 110, 220);
+            textColor = System.Drawing.Color.White;
+        }
+        else
+        {
+            // AI 气泡：白色渐变
+            bubbleTop = System.Drawing.Color.FromArgb(252, 252, 252);  // 接近白
+            bubbleBottom = System.Drawing.Color.FromArgb(238, 238, 238); // 浅灰
+            borderColor = System.Drawing.Color.FromArgb(220, 220, 220);
+            textColor = System.Drawing.Color.FromArgb(50, 50, 50);
+        }
+
         var bubble = new Label
         {
             AutoSize = true,
             MaximumSize = new System.Drawing.Size(bubbleMaxW, int.MaxValue),
-            BackColor = isError ? System.Drawing.Color.FromArgb(254, 240, 240)
-                  : isUser ? System.Drawing.Color.FromArgb(24, 144, 255)
-                  : System.Drawing.Color.FromArgb(245, 245, 245),
-            ForeColor = isUser ? System.Drawing.Color.White : (isError ? System.Drawing.Color.FromArgb(180, 30, 30) : System.Drawing.Color.FromArgb(50, 50, 50)),
+            // ★ 2026-08-29 修复「四角黑色残留」：BackColor 设为父背景色 White，
+            //   g.Clear 才能真的清除干净；圆角外的部分跟外背景同色看不到
+            BackColor = System.Drawing.Color.White,
+            ForeColor = textColor,
             Font = new System.Drawing.Font("Microsoft YaHei UI", 10F),
             Padding = new Padding(12, 10, 12, 10),
             Text = displayContent,
@@ -315,6 +341,62 @@ public partial class AiChatForm : Form
             // ★ 关联 ChatMessage，方便后续流式更新查找
             Tag = msg,
         };
+
+        // ★ 关键：注册 OnPaintBackground 事件代替 Paint
+        //   Label 默认 OnPaintBackground 填充矩形背景，然后 OnPaint 画文字
+        //   我们的渐变必须画在 OnPaintBackground 阶段（文字之前）
+        //   注：Label.OnPaintBackground 事件无公开订阅，需要继承或用 WndProc
+        //   最简方案：直接重设 BackColor 为透明，然后 在 Paint 里画背景 + 文字
+        //   Label 默认 OnPaint 后才调用 Paint 事件，所以我们订阅 Paint + 重画文字
+        bubble.Paint += (sender, e) =>
+        {
+            if (sender is not Label lbl || lbl.Width <= 0 || lbl.Height <= 0) return;
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            // ★ Label 默认已画过背景和文字（在我们订阅之前），现在清除重画
+            g.Clear(lbl.BackColor);  // 清除为透明
+
+            // 1. 圆角矩形路径
+            const int radius = 12;
+            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+            int d = radius * 2;
+            path.AddArc(0, 0, d, d, 180, 90);
+            path.AddArc(lbl.Width - d, 0, d, d, 270, 90);
+            path.AddArc(lbl.Width - d, lbl.Height - d, d, d, 0, 90);
+            path.AddArc(0, lbl.Height - d, d, d, 90, 90);
+            path.CloseFigure();
+
+            // 2. 线性渐变填充（顶亮 → 底暗）
+            using var brush = new System.Drawing.Drawing2D.LinearGradientBrush(
+                new System.Drawing.Point(0, 0),
+                new System.Drawing.Point(0, lbl.Height),
+                bubbleTop, bubbleBottom);
+            g.FillPath(brush, path);
+
+            // 3. 描边
+            using var pen = new System.Drawing.Pen(borderColor, 1f);
+            g.DrawPath(pen, path);
+
+            // ★ 4. 重画文字（g.Clear 把默认文字也擦掉了）
+            var textRect = new System.Drawing.Rectangle(
+                lbl.Padding.Left, lbl.Padding.Top,
+                lbl.Width - lbl.Padding.Horizontal,
+                lbl.Height - lbl.Padding.Vertical);
+            using var textBrush = new System.Drawing.SolidBrush(lbl.ForeColor);
+            g.DrawString(lbl.Text, lbl.Font, textBrush, textRect,
+                new System.Drawing.StringFormat
+                {
+                    Alignment = System.Drawing.StringAlignment.Near,
+                    LineAlignment = System.Drawing.StringAlignment.Near
+                });
+
+            // ★ 5. 裁剪到圆角路径（防止 g.Clear 范围超出圆角部分）
+            g.SetClip(path);
+            g.DrawRectangle(new System.Drawing.Pen(System.Drawing.Color.White, 0.5f),
+                0, 0, lbl.Width - 1, lbl.Height - 1);
+        };
         // 选中复制：Ctrl + 点击 复制到剪贴板（陛下 13:55 拍板方案 B）
         bubble.MouseDown += (_, e) =>
         {
@@ -322,17 +404,40 @@ public partial class AiChatForm : Form
             if (!ModifierKeys.HasFlag(Keys.Control)) return;
             if (string.IsNullOrEmpty(bubble.Text)) return;
             Clipboard.SetText(bubble.Text);
-            // ★ 给个反馈：气泡闪烁一下（2px 边框红→白）
-            var originalColor = bubble.BackColor;
-            bubble.BackColor = System.Drawing.Color.FromArgb(255, 200, 200);
-            var t = new System.Windows.Forms.Timer { Interval = 150 };
-            t.Tick += (_, _) =>
+            // ★ 给个反馈：气泡闪一下（临时改变描边颜色 150ms）
+            //   由于 BackColor 已设为透明 + Paint 里手画，修改 BackColor 无效
+            //   这里直接订阅一次性 Paint 事件画亮色边框
+            System.Action<System.Drawing.Color, System.Drawing.Color> flashOnce = null;
+            flashOnce = (origTop, origBottom) =>
             {
-                bubble.BackColor = originalColor;
-                t.Stop();
-                t.Dispose();
+                bubble.Paint += (s, pe) =>
+                {
+                    if (s is not Label lbl2 || lbl2.Width <= 0) return;
+                    var g2 = pe.Graphics;
+                    g2.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    using var p = new System.Drawing.Drawing2D.GraphicsPath();
+                    const int r = 12;
+                    int dd = r * 2;
+                    p.AddArc(0, 0, dd, dd, 180, 90);
+                    p.AddArc(lbl2.Width - dd, 0, dd, dd, 270, 90);
+                    p.AddArc(lbl2.Width - dd, lbl2.Height - dd, dd, dd, 0, 90);
+                    p.AddArc(0, lbl2.Height - dd, dd, dd, 90, 90);
+                    p.CloseFigure();
+                    // 闪色边框：亮黄
+                    using var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(255, 200, 0), 3f);
+                    g2.DrawPath(pen, p);
+                };
+                bubble.Invalidate();
+                var t = new System.Windows.Forms.Timer { Interval = 150 };
+                t.Tick += (_, _) =>
+                {
+                    bubble.Invalidate();  // 触发原 Paint 重画（背景画返回原色）
+                    t.Stop();
+                    t.Dispose();
+                };
+                t.Start();
             };
-            t.Start();
+            flashOnce(bubbleTop, bubbleBottom);
         };
 
         // ★ 头像 Label（AI/Error/User 全部显示，用户头像 = "B" 蓝色）
@@ -364,52 +469,13 @@ public partial class AiChatForm : Form
         row.Controls.Add(bubble);
         row.PerformLayout();  // 强制 layout，让 PreferredSize 准
 
-        // ★ 手算布局：bubble 位置 + row 高度
+        // ★ 手算布局：bubble 位置 + row 高度（抽出为 LayoutBubbleRow 方法）
         //   AI 消息：[avatar (auto)][gap][bubble (auto, 左)]
         //   用户消息：                    [bubble (auto, 右)]
-        row.SizeChanged += (_, _) =>
-        {
-            // ★ 修复「用户气泡截断」：用 bubble.Width（实际渲染宽度）而不是 PreferredSize.Width
-            //   Label.AutoSize=true 时，PreferredSize 可能比实际 Width 略小，导致右侧贴边
-            int avatarW = avatar?.Width ?? 0;
-            int avatarH = avatar?.Height ?? 0;
-            int bubbleW = bubble.Width;   // ★ 用实际 Width 代替 PreferredSize.Width
-            int bubbleH = bubble.Height;
-
-            // row 高度 = max(avatarH, bubbleH)
-            int rowH = Math.Max(avatarH, bubbleH);
-            row.Height = rowH;
-
-            // 头像位置
-            int avatarX;
-            int avatarY = rowH / 2 - avatarH / 2;
-            if (isUser)
-            {
-                // 用户头像靠右：预留 17px 滚动条位置 + sidePadding + 10
-                avatarX = flpMessages.ClientSize.Width - avatarW - sidePadding - 17 - 10;
-            }
-            else
-            {
-                // AI/Error 头像靠左
-                avatarX = sidePadding;
-            }
-            if (avatar != null) avatar.Location = new System.Drawing.Point(avatarX, avatarY);
-
-            // 气泡位置
-            int bubbleX;
-            if (isUser)
-            {
-                // 用户气泡靠右：在头像左边（头像 - gap - 气泡宽），加 8px 缓冲
-                bubbleX = Math.Max(sidePadding, avatarX - gap - bubbleW - 8);
-            }
-            else
-            {
-                // AI 气泡靠左：头像 + gap
-                bubbleX = avatarX + avatarW + gap;
-            }
-            int bubbleY = rowH / 2 - bubbleH / 2;
-            bubble.Location = new System.Drawing.Point(bubbleX, bubbleY);
-        };
+        // ★ 2026-08-29 修复「流式输出只显示一行」：
+        //   row.SizeChanged 只在 Size 实际变化时触发，bubble.Text 变化不会触发
+        //   所以 StreamDisplayAsync 里直接调用 LayoutBubbleRow() 重算布局
+        row.SizeChanged += (_, _) => LayoutBubbleRow(row, bubble, avatar, isUser);
         // 立即触发一次 SizeChanged
         row.Size = new System.Drawing.Size(row.Width, 1);
 
@@ -423,6 +489,57 @@ public partial class AiChatForm : Form
     }
 
     /// <summary>
+    /// ★ 2026-08-29 抽出的布局方法：重新计算 row 高度、头像位置、气泡位置
+    ///   流式输出时 bubble.Text 变化不会触发 row.SizeChanged，需要手动调用
+    /// </summary>
+    private void LayoutBubbleRow(Panel row, Label bubble, Label? avatar, bool isUser)
+    {
+        const int sidePadding = 24;
+        const int gap = 10;
+        // 强制 bubble 立即重新布局（让 PreferredSize 更新）
+        bubble.PerformLayout();
+        // ★ 用 bubble.Width/Height（实际渲染尺寸）而不是 PreferredSize
+        int avatarW = avatar?.Width ?? 0;
+        int avatarH = avatar?.Height ?? 0;
+        int bubbleW = bubble.Width;
+        int bubbleH = bubble.Height;
+
+        // row 高度 = max(avatarH, bubbleH)
+        int rowH = Math.Max(avatarH, bubbleH);
+        row.Height = rowH;
+
+        // 头像位置
+        int avatarX;
+        int avatarY = rowH / 2 - avatarH / 2;
+        if (isUser)
+        {
+            // 用户头像靠右：预留 17px 滚动条位置 + sidePadding + 10
+            avatarX = flpMessages.ClientSize.Width - avatarW - sidePadding - 17 - 10;
+        }
+        else
+        {
+            // AI/Error 头像靠左
+            avatarX = sidePadding;
+        }
+        if (avatar != null) avatar.Location = new System.Drawing.Point(avatarX, avatarY);
+
+        // 气泡位置
+        int bubbleX;
+        if (isUser)
+        {
+            // 用户气泡靠右：在头像左边（头像 - gap - 气泡宽），加 8px 缓冲
+            bubbleX = Math.Max(sidePadding, avatarX - gap - bubbleW - 8);
+        }
+        else
+        {
+            // AI 气泡靠左：头像 + gap
+            bubbleX = avatarX + avatarW + gap;
+        }
+        int bubbleY = rowH / 2 - bubbleH / 2;
+        bubble.Location = new System.Drawing.Point(bubbleX, bubbleY);
+    }
+
+    /// <summary>
     /// ★ 2026-08-29 方案 A 简化版：在 flpMessages 末尾追加一个 row
     /// </summary>
     private void AddMessageBubbleNew(ChatMessage msg)
@@ -432,41 +549,10 @@ public partial class AiChatForm : Form
         flpMessages.Controls.Add(row);
     }
 
-    private TextBox RenderMarkdownTextBox(string markdown, bool isError, int labelMaxW)
+    private TextBox RenderMarkdownTextBox_Old(string markdown, bool isError, int labelMaxW)
     {
-        // 简化渲染：把 Markdown 转成 HTML 再剥出来给 TextBox（TextBox 不支持富文本，所以做最简单的替换）
-        var html = Markdown.ToHtml(markdown ?? string.Empty, _mdPipeline);
-        // 简单提取文本（去掉 HTML 标签，但保留换行）
-        var sb = new StringBuilder();
-        bool inTag = false;
-        foreach (char c in html)
-        {
-            if (c == '<') inTag = true;
-            else if (c == '>') { inTag = false; sb.Append(' '); }
-            else if (!inTag) sb.Append(c);
-        }
-        var text = DecodeHtmlEntities(sb.ToString()).Trim();
-
-        var backColor = isError
-            ? System.Drawing.Color.FromArgb(254, 240, 240)
-            : System.Drawing.Color.FromArgb(245, 245, 245);
-        return CreateSelectableTextBox(
-            text: text,
-            font: new System.Drawing.Font("Microsoft YaHei UI", 10F),
-            foreColor: isError ? System.Drawing.Color.FromArgb(180, 30, 30) : System.Drawing.Color.FromArgb(50, 50, 50),
-            backColor: backColor,
-            maxW: labelMaxW);
+        return null;  // 已被新方案替代，保留空实现
     }
-
-    /// <summary>
-    /// 创建一个只读但可选中复制的 TextBox，代替 Label 作为气泡内容控件。
-    /// ★ 2026-08-27 陛下反馈：AI 聊天内容不能复制，现在用 TextBox(Multiline+ReadOnly+NoBorder) 作为气泡容器。
-    /// - ReadOnly=true → 不能编辑修改
-    /// - TabStop=false + BorderStyle=None → 看起来跟 Label 一样（无框）
-    /// - BackColor 硬编码父气泡的底色（TextBox 不能真正透明，手动配色）
-    /// - Cursor=IBeam → 鼠标进入时光标变成 I 字，提示可以选中
-    /// - 高度/宽度 按 TextRenderer.MeasureText 计算（TextBox 没 AutoSize）
-    /// </summary>
     private static TextBox CreateSelectableTextBox(string text, System.Drawing.Font font, System.Drawing.Color foreColor, System.Drawing.Color backColor, int maxW)
     {
         // ★ 2026-08-28 终极修法 关键点：把 text 中的换行符都替换为空格
@@ -717,8 +803,28 @@ public partial class AiChatForm : Form
             {
                 aiMsg.Content = currentText;
                 bubble.Text = display;
-                // ★ Label.AutoSize=true + MaximumSize.Width 限制最大宽 → Label 自己撑开宽高
-                //   row.SizeChanged 会自动重算布局（气泡 + 头像位置）
+
+                // ★ 2026-08-29 修复「流式输出只显示一行」：
+                //   bubble.Text 更新后 bubble.PreferredSize 自动更新，但 row.SizeChanged 不会自动触发
+                //   直接调用 LayoutBubbleRow() 重算布局，不依赖 SizeChanged 事件
+                var row = bubble.Parent as Panel;
+                if (row != null)
+                {
+                    // ★ 从 row.Tag 或 sender 拿 avatar + isUser（创建 row 时设）
+                    Label? avatar = null;
+                    bool isUser = false;
+                    foreach (Control c in row.Controls)
+                    {
+                        if (c is Label lbl && lbl != bubble)
+                        {
+                            avatar = lbl;
+                            isUser = lbl.Text == "B";  // 用户头像 = "B"，AI 头像 = "AI"
+                            break;
+                        }
+                    }
+                    LayoutBubbleRow(row, bubble, avatar, isUser);
+                }
+
                 ScrollToBottom();
             });
 
@@ -768,6 +874,44 @@ public partial class AiChatForm : Form
             else if (!inTag) sb.Append(c);
         }
         return DecodeHtmlEntities(sb.ToString()).Trim();
+    }
+
+    /// <summary>
+    /// ★ 2026-08-29 14:59 陛下要求 AI 气泡支持 Markdown 完整渲染（含表格/代码块）
+    ///   复用 UpdateForm.RenderMarkdownAsHtml 的 GitHub CSS 风格
+    ///   返回完整 HTML，可直接赋给 WebBrowser.DocumentText
+    /// </summary>
+    private string RenderMarkdownAsHtml(string markdown)
+    {
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build();
+        string bodyHtml = Markdown.ToHtml(markdown ?? string.Empty, pipeline);
+
+        // GitHub 风格 CSS（与 UpdateForm 一致，适配 AI 气泡场景字号略小）
+        string html = @"<!DOCTYPE html><html><head><meta charset=""utf-8""><style>
+body { font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 10pt; line-height: 1.5; color: #24292f; background: transparent; padding: 0; margin: 0; word-wrap: break-word; }
+h1, h2, h3, h4, h5, h6 { margin: 14px 0 8px 0; font-weight: 600; line-height: 1.25; }
+h1 { font-size: 18px; padding-bottom: 4px; border-bottom: 1px solid #d0d7de; }
+h2 { font-size: 16px; padding-bottom: 4px; border-bottom: 1px solid #d0d7de; }
+h3 { font-size: 14px; }
+p { margin: 0 0 8px 0; }
+ul, ol { margin: 0 0 8px 0; padding-left: 22px; }
+li { margin: 2px 0; }
+blockquote { margin: 0 0 8px 0; padding: 0 10px; color: #57606a; border-left: 4px solid #d0d7de; background: #f6f8fa; }
+code { font-family: 'Consolas', monospace; font-size: 9pt; background: rgba(175, 184, 193, 0.2); padding: 1px 4px; border-radius: 4px; }
+pre { background: #f6f8fa; padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 0 0 8px 0; line-height: 1.45; }
+pre code { background: transparent; padding: 0; font-size: 9pt; }
+strong { font-weight: 600; }
+em { font-style: italic; }
+a { color: #0969da; text-decoration: none; }
+hr { border: none; border-top: 1px solid #d0d7de; margin: 14px 0; }
+table { border-collapse: collapse; margin: 0 0 8px 0; }
+table th, table td { border: 1px solid #d0d7de; padding: 4px 10px; }
+table th { background: #f6f8fa; font-weight: 600; }
+img { max-width: 100%; }
+</style></head><body>" + bodyHtml + @"</body></html>";
+        return html;
     }
 
     private List<ChatMessage> BuildApiMessages(List<ChatMessage> history)
