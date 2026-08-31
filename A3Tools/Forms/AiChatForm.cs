@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -299,16 +299,9 @@ public partial class AiChatForm : Form
         }
 
         // ★★★ Label 直接当气泡（AutoSize=true 100% 可靠）
-        // 颜色：根据角色选 2 种颜色用于线性渐变（顶亮 → 底暗）
+        // 颜色：仅用户气泡用（AI/Error 改用 WebView2）
         Color bubbleTop, bubbleBottom, borderColor, textColor;
-        if (isError)
-        {
-            bubbleTop = System.Drawing.Color.FromArgb(254, 242, 242);
-            bubbleBottom = System.Drawing.Color.FromArgb(248, 220, 220);
-            borderColor = System.Drawing.Color.FromArgb(220, 80, 80);
-            textColor = System.Drawing.Color.FromArgb(180, 30, 30);
-        }
-        else if (isUser)
+        if (isUser)
         {
             // 用户气泡：蓝色渐变
             bubbleTop = System.Drawing.Color.FromArgb(64, 169, 255);   // 亮蓝
@@ -318,20 +311,19 @@ public partial class AiChatForm : Form
         }
         else
         {
-            // AI 气泡：白色渐变
-            bubbleTop = System.Drawing.Color.FromArgb(252, 252, 252);  // 接近白
-            bubbleBottom = System.Drawing.Color.FromArgb(238, 238, 238); // 浅灰
-            borderColor = System.Drawing.Color.FromArgb(220, 220, 220);
-            textColor = System.Drawing.Color.FromArgb(50, 50, 50);
+            // 占位（AI/Error 用 WebView2，不走 Label 路径）
+            bubbleTop = bubbleBottom = borderColor = textColor = System.Drawing.Color.Black;
         }
 
-        var bubble = new Label
+        Control bubble;
+        if (isUser)
         {
-            AutoSize = true,
-            MaximumSize = new System.Drawing.Size(bubbleMaxW, int.MaxValue),
-            // ★ 2026-08-29 修复「四角黑色残留」：BackColor 设为父背景色 White，
-            //   g.Clear 才能真的清除干净；圆角外的部分跟外背景同色看不到
-            BackColor = System.Drawing.Color.White,
+            // ★★★ 用户气泡：Label + Paint 自绘（已验证 100% 可靠）
+            var labelBubble = new Label
+            {
+                AutoSize = true,
+                MaximumSize = new System.Drawing.Size(bubbleMaxW, int.MaxValue),
+                BackColor = System.Drawing.Color.White,
             ForeColor = textColor,
             Font = new System.Drawing.Font("Microsoft YaHei UI", 10F),
             Padding = new Padding(12, 10, 12, 10),
@@ -348,7 +340,7 @@ public partial class AiChatForm : Form
         //   注：Label.OnPaintBackground 事件无公开订阅，需要继承或用 WndProc
         //   最简方案：直接重设 BackColor 为透明，然后 在 Paint 里画背景 + 文字
         //   Label 默认 OnPaint 后才调用 Paint 事件，所以我们订阅 Paint + 重画文字
-        bubble.Paint += (sender, e) =>
+        labelBubble.Paint += (sender, e) =>
         {
             if (sender is not Label lbl || lbl.Width <= 0 || lbl.Height <= 0) return;
             var g = e.Graphics;
@@ -398,19 +390,19 @@ public partial class AiChatForm : Form
                 0, 0, lbl.Width - 1, lbl.Height - 1);
         };
         // 选中复制：Ctrl + 点击 复制到剪贴板（陛下 13:55 拍板方案 B）
-        bubble.MouseDown += (_, e) =>
+        labelBubble.MouseDown += (_, e) =>
         {
             if (e.Button != MouseButtons.Left) return;
             if (!ModifierKeys.HasFlag(Keys.Control)) return;
-            if (string.IsNullOrEmpty(bubble.Text)) return;
-            Clipboard.SetText(bubble.Text);
+            if (string.IsNullOrEmpty(labelBubble.Text)) return;
+            Clipboard.SetText(labelBubble.Text);
             // ★ 给个反馈：气泡闪一下（临时改变描边颜色 150ms）
             //   由于 BackColor 已设为透明 + Paint 里手画，修改 BackColor 无效
             //   这里直接订阅一次性 Paint 事件画亮色边框
             System.Action<System.Drawing.Color, System.Drawing.Color> flashOnce = null;
             flashOnce = (origTop, origBottom) =>
             {
-                bubble.Paint += (s, pe) =>
+                labelBubble.Paint += (s, pe) =>
                 {
                     if (s is not Label lbl2 || lbl2.Width <= 0) return;
                     var g2 = pe.Graphics;
@@ -427,11 +419,11 @@ public partial class AiChatForm : Form
                     using var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(255, 200, 0), 3f);
                     g2.DrawPath(pen, p);
                 };
-                bubble.Invalidate();
+                labelBubble.Invalidate();
                 var t = new System.Windows.Forms.Timer { Interval = 150 };
                 t.Tick += (_, _) =>
                 {
-                    bubble.Invalidate();  // 触发原 Paint 重画（背景画返回原色）
+                    labelBubble.Invalidate();  // 触发原 Paint 重画（背景画返回原色）
                     t.Stop();
                     t.Dispose();
                 };
@@ -439,6 +431,96 @@ public partial class AiChatForm : Form
             };
             flashOnce(bubbleTop, bubbleBottom);
         };
+            bubble = labelBubble;
+        }
+        else
+        {
+            // ★★★ AI/Error 气泡：WebView2 + Markdown HTML
+            //   高度由 HTML 里 ResizeObserver 推送真实高度
+            var wv2 = new Microsoft.Web.WebView2.WinForms.WebView2
+            {
+                Width = bubbleMaxW,
+                Height = 80,
+                DefaultBackgroundColor = isError
+                    ? System.Drawing.Color.FromArgb(255, 245, 245)
+                    : System.Drawing.Color.FromArgb(244, 248, 251),
+                Tag = msg,
+                Margin = new Padding(0),
+                ZoomFactor = 1.0,
+            };
+            // ★ 订阅 wv2.SizeChanged：ResizeObserver 推高度 → wv2.Height 变 → row 重算
+            wv2.SizeChanged += (_, _) =>
+            {
+                var row = wv2.Parent as Panel;
+                if (row == null) return;
+                Label? avatarInRow = null;
+                foreach (Control c in row.Controls)
+                {
+                    if (c is Label al && !ReferenceEquals(c, wv2))
+                    {
+                        avatarInRow = al;
+                        break;
+                    }
+                }
+                LayoutBubbleRow(row, wv2, avatarInRow, isUser);
+                // RelayoutMessages();  // ★ 2026-08-31 流式时不重排避免闪烁
+            };
+            // ★ 订阅 WebMessageReceived：HTML 里的 ResizeObserver 主动推送高度
+            wv2.CoreWebView2InitializationCompleted += (s, e) =>
+            {
+                if (!e.IsSuccess || wv2.CoreWebView2 == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[AIChat] WebView2 init FAILED: {e.InitializationException?.Message}");
+                    return;
+                }
+                wv2.CoreWebView2.WebMessageReceived += (s2, e2) =>
+                {
+                    try
+                    {
+                        var json = e2.TryGetWebMessageAsString();
+                        if (string.IsNullOrEmpty(json)) return;
+                        using var doc = System.Text.Json.JsonDocument.Parse(json);
+                        if (!doc.RootElement.TryGetProperty("h", out var hProp)) return;
+                        int realH = hProp.GetInt32();
+                        if (realH <= 0) return;
+                        // ★ 2026-08-31 陛下诊断：getBoundingClientRect().bottom-top 已经包含 margin/padding，
+                        //   WebView2 控件 Height == 浏览器渲染区高度，
+                        //   但渲染区 < scrollHeight（滚动条预留 + 浏览器内部 padding），
+                        //   所以加 +20px 缓冲让控件高度 > 实际内容高度，避免最后几行被裁剪
+                        int newH = (int)(realH * 1.8);  // ★ 2026-08-31：按比例 +15% 缓冲，5行~18px，10行~36px，100行~360px
+                        if (Math.Abs(newH - wv2.Height) < 4) return;
+                        wv2.Height = newH;
+                        string fs = doc.RootElement.TryGetProperty("fs", out var fsp) ? fsp.GetString() : "?";
+                        string lh = doc.RootElement.TryGetProperty("lh", out var lhp) ? lhp.GetString() : "?";
+                        string ch = doc.RootElement.TryGetProperty("ch", out var chp) ? chp.GetString() : "?";
+                        System.Diagnostics.Debug.WriteLine($"[AIChat] ResizeObserver → wv2.H={newH} (was {wv2.Height}) fs={fs} lh={lh} ch={ch}");
+                        var row = wv2.Parent as Panel;
+                        if (row != null)
+                        {
+                            Label? avatarInRow = null;
+                            foreach (Control c in row.Controls)
+                            {
+                                if (c is Label al && !ReferenceEquals(c, wv2))
+                                {
+                                    avatarInRow = al;
+                                    break;
+                                }
+                            }
+                            LayoutBubbleRow(row, wv2, avatarInRow, isUser);
+                        }
+                        RelayoutMessages();
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[AIChat] WebMessageReceived Exception: {ex.Message}");
+                    }
+                };
+                wv2.CoreWebView2.NavigateToString(RenderMarkdownAsHtml(displayContent));
+            };
+                        System.Diagnostics.Debug.WriteLine("[AIChat] CreateWV2 msg=" + msg.Role + " isErr=" + isError + " contentLen=" + (displayContent == null ? 0 : displayContent.Length) + " w=" + bubbleMaxW);
+_ = wv2.EnsureCoreWebView2Async();
+            bubble = wv2;
+        }
 
         // ★ 头像 Label（AI/Error/User 全部显示，用户头像 = "B" 蓝色）
         Label? avatar = null;
@@ -492,7 +574,24 @@ public partial class AiChatForm : Form
     /// ★ 2026-08-29 抽出的布局方法：重新计算 row 高度、头像位置、气泡位置
     ///   流式输出时 bubble.Text 变化不会触发 row.SizeChanged，需要手动调用
     /// </summary>
-    private void LayoutBubbleRow(Panel row, Label bubble, Label? avatar, bool isUser)
+    private void RelayoutMessages()
+    {
+        if (!flpMessages.IsHandleCreated) return;
+        // 同步 flpMessages 宽度跟滚动容器
+        flpMessages.Width = pnlMessagesScroll.ClientSize.Width;
+        // 手算 row Y 位置 + 总高度
+        int y = flpMessages.Padding.Top;
+        foreach (Control c in flpMessages.Controls)
+        {
+            if (c is not Panel row) continue;
+            row.Width = flpMessages.ClientSize.Width;
+            row.Location = new System.Drawing.Point(0, y);
+            y += row.Height + row.Margin.Bottom + row.Margin.Top;
+        }
+        int newH = y + flpMessages.Padding.Bottom + flpMessages.Padding.Top;
+        if (flpMessages.Height != newH) flpMessages.Height = newH;
+        pnlMessagesScroll.AutoScrollMinSize = new System.Drawing.Size(flpMessages.Width, newH);
+    }    private void LayoutBubbleRow(Panel row, Control bubble, Label? avatar, bool isUser)
     {
         const int sidePadding = 24;
         const int gap = 10;
@@ -780,57 +879,79 @@ public partial class AiChatForm : Form
         aiMsg.Content = string.Empty;
         _currentSession.Messages.Add(aiMsg);
 
-        // 找到这个气泡对应的 Label
-        Label? bubble = FindBubbleLabel(aiMsg);
+// ★ 2026-08-31锛氭祦寮忚緭鍑哄悓鏃舵敮鎸?Label (鐢ㄦ埛) 鍜?WebView2 (AI)
+        //   鎵惧埌姘旀场瀵瑰簲鐨勬帶浠讹紙Label 鎴?WebView2锛夛紝娴佸紡杩藉姞鍐呭
+        var (bubble, isWv2) = FindBubbleForStream(aiMsg);
         if (bubble == null)
         {
-            // 兜底：直接全量显示
             aiMsg.Content = fullText;
             RenderMessages();
             return;
         }
 
-        // 逐字符流式显示
-        var buffer = new StringBuilder();
+        // 閫愬瓧绗︽祦寮忔樉绀?       
+         var buffer = new StringBuilder();
+        DateTime lastRenderTime = DateTime.MinValue;
+        const int renderThrottleMs = 60;
         foreach (char c in fullText)
         {
             if (_cts?.IsCancellationRequested == true) break;
             buffer.Append(c);
             string currentText = buffer.ToString();
-            string display = StripMarkdown(currentText);
 
+            bool isParagraphEnd = (c == '\n' || c == '.' || c == '?' || c == '!');
+            bool shouldRender = isParagraphEnd || (DateTime.UtcNow - lastRenderTime).TotalMilliseconds >= renderThrottleMs;
+            if (!shouldRender)
+            {
+                aiMsg.Content = currentText;
+                continue;
+            }
+            lastRenderTime = DateTime.UtcNow;
+
+            Microsoft.Web.WebView2.WinForms.WebView2? wv2ForLambda = (isWv2 ? bubble as Microsoft.Web.WebView2.WinForms.WebView2 : null);
+            string htmlForLambda = isWv2 ? RenderMarkdownAsHtml(currentText) : "";
+            Label? lblForLambda = (!isWv2 ? bubble as Label : null);
             await pnlMessagesScroll.InvokeAsync(() =>
             {
                 aiMsg.Content = currentText;
-                bubble.Text = display;
-
-                // ★ 2026-08-29 修复「流式输出只显示一行」：
-                //   bubble.Text 更新后 bubble.PreferredSize 自动更新，但 row.SizeChanged 不会自动触发
-                //   直接调用 LayoutBubbleRow() 重算布局，不依赖 SizeChanged 事件
-                var row = bubble.Parent as Panel;
-                if (row != null)
+                if (wv2ForLambda != null && wv2ForLambda.CoreWebView2 != null)
                 {
-                    // ★ 从 row.Tag 或 sender 拿 avatar + isUser（创建 row 时设）
-                    Label? avatar = null;
-                    bool isUser = false;
-                    foreach (Control c in row.Controls)
-                    {
-                        if (c is Label lbl && lbl != bubble)
-                        {
-                            avatar = lbl;
-                            isUser = lbl.Text == "B";  // 用户头像 = "B"，AI 头像 = "AI"
-                            break;
-                        }
-                    }
-                    LayoutBubbleRow(row, bubble, avatar, isUser);
+                    string escaped = System.Text.Json.JsonSerializer.Serialize(htmlForLambda);
+                    string js = "document.body.innerHTML = " + escaped + ";";
+                    _ = wv2ForLambda.CoreWebView2.ExecuteScriptAsync(js);
                 }
-
+                else if (lblForLambda != null)
+                {
+                    lblForLambda.Text = StripMarkdown(currentText);
+                    var row = lblForLambda.Parent as Panel;
+                    if (row != null)
+                    {
+                        Label? avatar = null;
+                        foreach (Control c2 in row.Controls)
+                        {
+                            if (c2 is Label al && c2 != lblForLambda) { avatar = al; break; }
+                        }
+                        LayoutBubbleRow(row, lblForLambda, avatar, avatar?.Text == "B");
+                    }
+                }
                 ScrollToBottom();
             });
+        }
 
-            // 速度控制：中文字符间隔 12ms，ASCII 间隔 6ms
-            int delay = c > 127 ? 12 : 6;
-            await Task.Delay(delay);
+        // ★ 流式结束后：WebView2 触发一次最终更新
+        if (isWv2 && bubble is Microsoft.Web.WebView2.WinForms.WebView2 wv2End)
+        {
+            if (wv2End.CoreWebView2 != null)
+            {
+                await System.Threading.Tasks.Task.Delay(150);
+                await pnlMessagesScroll.InvokeAsync(() =>
+                {
+                    string htmlEnd = RenderMarkdownAsHtml(fullText);
+                    string escapedEnd = System.Text.Json.JsonSerializer.Serialize(htmlEnd);
+                    string jsEnd = "document.body.innerHTML = " + escapedEnd + ";";
+                    _ = wv2End.CoreWebView2.ExecuteScriptAsync(jsEnd);
+                });
+            }
         }
 
         // 最终内容存进 message（带 markdown）
@@ -860,6 +981,28 @@ public partial class AiChatForm : Form
     }
 
     /// <summary>
+
+    /// ★ 2026-08-31：流式输出用，返回 (控件, 是否WebView2)
+    ///   用户气泡 = Label（AutoSize 自动撑高）
+    ///   AI/Error 气泡 = WebView2（用 ExecuteScriptAsync 更新 innerHTML）
+    /// </summary>
+    private (Control? bubble, bool isWv2) FindBubbleForStream(ChatMessage msg)
+    {
+        for (int i = flpMessages.Controls.Count - 1; i >= 0; i--)
+        {
+            if (flpMessages.Controls[i] is Panel row)
+            {
+                foreach (Control c in row.Controls)
+                {
+                    if (c.Tag is ChatMessage cm && cm == msg)
+                    {
+                        return (c, c is Microsoft.Web.WebView2.WinForms.WebView2);
+                    }
+                }
+            }
+        }
+        return (null, false);
+    }
     /// 把 markdown 简化成纯文本（用于流式 Label 显示）
     /// </summary>
     private string StripMarkdown(string md)
@@ -890,7 +1033,9 @@ public partial class AiChatForm : Form
 
         // GitHub 风格 CSS（与 UpdateForm 一致，适配 AI 气泡场景字号略小）
         string html = @"<!DOCTYPE html><html><head><meta charset=""utf-8""><style>
-body { font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 10pt; line-height: 1.5; color: #24292f; background: transparent; padding: 0; margin: 0; word-wrap: break-word; }
+::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+body { font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 14px; line-height: 22px; color: #24292f; background: transparent; padding: 8px 10px; margin: 0; }
+
 h1, h2, h3, h4, h5, h6 { margin: 14px 0 8px 0; font-weight: 600; line-height: 1.25; }
 h1 { font-size: 18px; padding-bottom: 4px; border-bottom: 1px solid #d0d7de; }
 h2 { font-size: 16px; padding-bottom: 4px; border-bottom: 1px solid #d0d7de; }
@@ -910,7 +1055,44 @@ table { border-collapse: collapse; margin: 0 0 8px 0; }
 table th, table td { border: 1px solid #d0d7de; padding: 4px 10px; }
 table th { background: #f6f8fa; font-weight: 600; }
 img { max-width: 100%; }
-</style></head><body>" + bodyHtml + @"</body></html>";
+</style></head><body>" + bodyHtml + @"<script>
+(function() {
+  // ★ 2026-08-31 方案 X：用 getBoundingClientRect().bottom - top 推真实高度
+  //   WebView2 控件 Height  == 浏览器渲染区高度
+  //   但浏览器渲染区 < scrollHeight (scrollbar预留 + 内部padding)
+  //   getBoundingClientRect 给出 body 元素渲染边界，比 scrollHeight 更准
+  function notify() {
+    try {
+      var rect = document.body.getBoundingClientRect();
+      var h = Math.ceil(rect.bottom - rect.top);
+      var w = Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);
+      var childs = [];
+      for (var i = 0; i < document.body.children.length; i++) {
+        var c = document.body.children[i];
+        childs.push(c.tagName + '=' + Math.round(c.offsetHeight));
+      }
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(JSON.stringify({
+          h: h, w: w,
+          fs: getComputedStyle(document.body).fontSize,
+          lh: getComputedStyle(document.body).lineHeight,
+          ch: childs.join(';')
+        }));
+      }
+    } catch (e) {}
+  }
+  setTimeout(notify, 0);
+  setTimeout(notify, 50);
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(notify).observe(document.body);
+  } else {
+    setInterval(notify, 200);
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(notify);
+  }
+})();
+</script></body></html>";
         return html;
     }
 
@@ -1176,3 +1358,4 @@ internal static class ControlExtensions
         c.Region = new Region(path);
     }
 }
+

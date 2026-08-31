@@ -206,9 +206,11 @@ partial class AiChatForm
         // 
         // splitChat.Panel1
         // 
-        splitChat.Panel1.AutoScroll = true;
+        // ★ 2026-08-29 修复：去掉 AutoScroll，滚动由 pnlMessagesScroll 统一负责
+        //   之前双层 AutoScroll（Panel1 + pnlMessagesScroll）互相干扰，导致气泡高度不撑开
+        splitChat.Panel1.AutoScroll = false;
         splitChat.Panel1.BackColor = Color.White;
-        splitChat.Panel1.Padding = new Padding(22);
+        splitChat.Panel1.Padding = new Padding(0);
         splitChat.Panel1.Controls.Add(pnlMessagesScroll);
         splitChat.Panel1MinSize = 0;
         // 
@@ -236,25 +238,26 @@ partial class AiChatForm
         // 
         // pnlMessages
         // 
-        // ★ 2026-08-29 思路转变（陛下原话「为什么气泡要算呢，不能根据内容自动撑开么」）：
-        //   恢复中间层 FlowLayoutPanel，但用法完全不同：flp 只管「垂直排列」，bubble AutoSize 自己管宽高
-        //   - flpMessages.AutoSize=true + AutoSizeMode=GrowAndShrink：按内容撑高
-        //   - flpMessages.Dock=Top：跟着内容缩，宽度 = pnlMessagesScroll.ClientSize.Width
-        //   - bubble AutoSize=true + MaximumSize 控制最大宽 0.85*rowWidth
-        //   - pnlMessagesScroll.AutoScroll=true 负责滚动条
-        //   - 完全不用算高度 / y / AutoScrollMinSize
+        // ★ 2026-08-29 修复气泡高度不撑开（终极方案）：
+        //   问题根因：FlowLayoutPanel AutoSize + Dock=Top 在子控件动态改 Height 时不可靠
+        //   解决方案：不用 FlowLayoutPanel，直接用 Panel + 手动垂直排列 row
+        //   - pnlMessagesScroll.AutoScroll=true 负责滚动
+        //   - row 位置手动算（y += height + gap）
+        //   - row 高度变化时调用 RelayoutMessages() 重算所有 row 位置
+        //   - pnlMessagesScroll.AutoScrollMinSize 手动设置总高度
         // 
         flpMessages = new FlowLayoutPanel();
         flpMessages.AutoScroll = false;
-        flpMessages.AutoSize = true;
-        flpMessages.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+        flpMessages.AutoSize = false;  // ★ 不再用 AutoSize，手动控制高度
         flpMessages.BackColor = Color.White;
-        flpMessages.Dock = DockStyle.Top;
+        // ★ 关键修复：Dock=Top 会被 WinForms 布局引擎覆盖手动设的 Height！
+        //   改为 Dock=None，完全手动管理 Location + Size
+        flpMessages.Dock = DockStyle.None;
         flpMessages.FlowDirection = FlowDirection.TopDown;
         flpMessages.Location = new Point(0, 0);
         flpMessages.Margin = new Padding(0);
         flpMessages.Name = "flpMessages";
-        flpMessages.Padding = new Padding(22, 14, 22 + 17, 4);  // 右侧 +17 给滚动条预留位置
+        flpMessages.Padding = new Padding(22, 14, 22 + 17, 4);
         flpMessages.Size = new Size(1597, 60);
         flpMessages.TabIndex = 0;
         flpMessages.WrapContents = false;

@@ -70,6 +70,8 @@
     <PackageReference Include="Markdig" Version="0.34.0" />
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />
     <PackageReference Include="NPinyin" Version="0.2.6321.26573" />
+    <!-- ★ 2026-08-29 15:20 方案 C：WebView2 用于 AI 气泡渲染 Markdown -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1829.34016" />
   </ItemGroup>
 
   <ItemGroup>
