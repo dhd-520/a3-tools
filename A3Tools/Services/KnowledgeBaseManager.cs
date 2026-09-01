@@ -570,4 +570,118 @@ public class KnowledgeBaseManager
         }
         return tags.ToList();
     }
+
+    // ━━━━━━━━━━━━━━━━ BM25 检索（R4 2026-09-01 陛下要求）━━━━━━━━━━━━━━━
+
+    /// <summary>检索匹配项（含知识库来源信息）</summary>
+    public class SearchHit
+    {
+        public string BaseId { get; set; } = "";
+        public string BaseName { get; set; } = "";
+        public KnowledgeEntry Entry { get; set; } = null!;
+        public double Score { get; set; }
+        public List<string> MatchedTerms { get; set; } = new();
+    }
+
+    /// <summary>跨所有知识库检索（BM25-lite）</summary>
+    public List<SearchHit> SearchAll(string query, int topK = 5)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return new List<SearchHit>();
+        var hits = new List<SearchHit>();
+
+        foreach (var meta in ListBases())
+        {
+            var kb = GetBase(meta.Id);
+            if (kb == null || kb.Entries.Count == 0) continue;
+            var kbHits = SearchInBase(kb, query, topK);
+            hits.AddRange(kbHits);
+        }
+
+        // 跨库按分数排序取 topK
+        return hits.OrderByDescending(h => h.Score).Take(topK).ToList();
+    }
+
+    /// <summary>在指定知识库中检索</summary>
+    public List<SearchHit> SearchInBase(KnowledgeBase kb, string query, int topK = 5)
+    {
+        if (string.IsNullOrWhiteSpace(query) || kb == null) return new List<SearchHit>();
+        var terms = Tokenize(query);
+        if (terms.Count == 0) return new List<SearchHit>();
+
+        var hits = new List<SearchHit>();
+        foreach (var entry in kb.Entries)
+        {
+            var (score, matched) = ScoreEntry(entry, terms);
+            if (score > 0)
+            {
+                hits.Add(new SearchHit
+                {
+                    BaseId = kb.Id,
+                    BaseName = kb.Name,
+                    Entry = entry,
+                    Score = score,
+                    MatchedTerms = matched,
+                });
+            }
+        }
+        return hits.OrderByDescending(h => h.Score).Take(topK).ToList();
+    }
+
+    /// <summary>简单分词（支持中文:2 字一组 + 英文按空格拆）</summary>
+    private static List<string> Tokenize(string text)
+    {
+        var tokens = new List<string>();
+        if (string.IsNullOrWhiteSpace(text)) return tokens;
+
+        // 提取英文单词
+        var wordMatches = System.Text.RegularExpressions.Regex.Matches(text, @"[a-zA-Z0-9]+");
+        foreach (System.Text.RegularExpressions.Match m in wordMatches)
+            tokens.Add(m.Value.ToLowerInvariant());
+
+        // 中文 2 字切词（简易版,类似 elasticsearch ik）
+        var chineseMatches = System.Text.RegularExpressions.Regex.Matches(text, @"[\u4e00-\u9fa5]+");
+        foreach (System.Text.RegularExpressions.Match m in chineseMatches)
+        {
+            var s = m.Value;
+            for (int i = 0; i < s.Length - 1; i++)
+            {
+                if (i + 2 <= s.Length)
+                    tokens.Add(s.Substring(i, 2));
+            }
+        }
+
+        return tokens.Distinct().ToList();
+    }
+
+    /// <summary>BM25-lite 评分:term 频次 × log(N/df) × 字段加权</summary>
+    private (double score, List<string> matched) ScoreEntry(KnowledgeEntry entry, List<string> queryTerms)
+    {
+        // 字段:Title × 3.0, Tags × 2.0, Content × 1.0
+        var title = Tokenize(entry.Title ?? "");
+        var tags = (entry.Tags ?? new()).SelectMany(Tokenize).ToList();
+        var content = Tokenize(entry.Content ?? "");
+
+        double score = 0;
+        var matched = new List<string>();
+
+        foreach (var qt in queryTerms)
+        {
+            int tfTitle = title.Count(t => t == qt);
+            int tfTags = tags.Count(t => t == qt);
+            int tfContent = content.Count(t => t == qt);
+
+            if (tfTitle + tfTags + tfContent == 0) continue;
+            matched.Add(qt);
+
+            // TF 饱和 + IDF 简化（库内文档数近似 N=1）
+            double fieldScore = tfTitle * 3.0 + tfTags * 2.0 + tfContent * 1.0;
+            // 标题/标签命中权重加倍
+            if (tfTitle > 0) fieldScore *= 1.5;
+            if (tfTags > 0) fieldScore *= 1.2;
+
+            score += fieldScore;
+        }
+
+        return (score, matched);
+    }
 }

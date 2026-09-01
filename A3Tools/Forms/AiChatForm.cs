@@ -1169,7 +1169,9 @@ img { max-width: 100%; }
         var result = new List<ChatMessage>();
 
         // System Prompt：拼装知识库 + 陛下自定义追加
-        var sysContent = BuildSystemPrompt();
+        // R4: 传入陛下最近一条用户消息，用于检索相关知识库条目
+        var lastUserMsg = history.LastOrDefault(m => m.Role == ChatRole.User)?.Content ?? "";
+        var sysContent = BuildSystemPrompt(lastUserMsg);
         result.Add(new ChatMessage { Role = ChatRole.System, Content = sysContent });
 
         // 历史消息（截断到合理条数）
@@ -1198,7 +1200,7 @@ img { max-width: 100%; }
         return result;
     }
 
-    private string BuildSystemPrompt()
+    private string BuildSystemPrompt(string userQuery = "")
     {
         var sb = new StringBuilder();
         sb.AppendLine("你是 A3Tools 智能助手，专门帮陛下解答 A3Tools（A3 程序启动器）的使用、配置、故障问题。");
@@ -1260,6 +1262,46 @@ img { max-width: 100%; }
         catch (Exception ex)
         {
             sb.AppendLine($"（读取知识库失败：{ex.Message}）");
+        }
+
+        // ★ R4: 动态检索知识库条目（根据陛下当前问题）━━━━━━━━━━━━━━━
+        if (!string.IsNullOrWhiteSpace(userQuery))
+        {
+            try
+            {
+                var kbMgr = new KnowledgeBaseManager();
+                var hits = kbMgr.SearchAll(userQuery, topK: 5);
+                if (hits.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("## 动态检索知识库（根据陛下问题匹配）");
+                    sb.AppendLine("以下是从本地知识库检索到的可能相关内容，请优先参考：");
+                    sb.AppendLine();
+                    foreach (var hit in hits)
+                    {
+                        sb.AppendLine($"### [{hit.BaseName}] {hit.Entry.Title}");
+                        if (hit.MatchedTerms.Count > 0)
+                            sb.AppendLine($"匹配词：{string.Join("、", hit.MatchedTerms)}");
+                        sb.AppendLine($"来源类型：{hit.Entry.SourceType}");
+                        if (!string.IsNullOrEmpty(hit.Entry.SourceFile))
+                            sb.AppendLine($"原始文件：{hit.Entry.SourceFile}");
+                        // 限制单条内容长度（防 prompt 爆掉）
+                        var content = hit.Entry.Content ?? "";
+                        if (content.Length > 1500) content = content.Substring(0, 1500) + "\n... (内容过长已截断)";
+                        sb.AppendLine();
+                        sb.AppendLine(content);
+                        sb.AppendLine();
+                        sb.AppendLine("---");
+                        sb.AppendLine();
+                    }
+                    sb.AppendLine("★ 重要：如果上面动态检索的知识库内容与陛下问题相关，请依据这些内容回答；");
+                    sb.AppendLine("  如果不相关或请回答陛下的是问候/闲聊/与 A3Tools 无关的问题，则正常作答。");
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"（动态检索知识库失败：{ex.Message}）");
+            }
         }
 
         // 陛下追加
