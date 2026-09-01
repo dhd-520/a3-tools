@@ -21,6 +21,12 @@ public class KnowledgeEntry
     /// <summary>源文件路径(扫描导入时填,手动添加为空)</summary>
     public string SourceFile { get; set; } = "";
 
+    /// <summary>来源类型(手动/文件/AI/对话)</summary>
+    public KnowledgeSourceType SourceType { get; set; } = KnowledgeSourceType.Manual;
+
+    /// <summary>来源补充参考(如对话提取时的会话 ID/标题,R手动为空)</summary>
+    public string SourceReference { get; set; } = "";
+
     /// <summary>内容哈希(检测内容是否变更,决定是否需要重新提取)</summary>
     public string ContentHash { get; set; } = "";
 

@@ -29,6 +29,11 @@ partial class KnowledgeBaseForm
         this.tsSeparator3 = new System.Windows.Forms.ToolStripSeparator();
         this.tsbAiExtract = new System.Windows.Forms.ToolStripButton();
         this.tsbSearch = new System.Windows.Forms.ToolStripButton();
+        this.tsSeparator4 = new System.Windows.Forms.ToolStripSeparator();
+        this.tsbSelectAll = new System.Windows.Forms.ToolStripButton();
+        this.tsbSelectNone = new System.Windows.Forms.ToolStripButton();
+        this.tsbDeleteSelected = new System.Windows.Forms.ToolStripButton();
+        this.tslSelectedCount = new System.Windows.Forms.ToolStripLabel();
 
         this.scMain = new System.Windows.Forms.SplitContainer();
         this.pnlBaseList = new System.Windows.Forms.Panel();
@@ -82,7 +87,9 @@ partial class KnowledgeBaseForm
             this.tsbAddEntry, this.tsbDeleteEntry,
             this.tsSeparator3,
             this.tsbAiExtract,
-            this.tsbSearch
+            this.tsbSearch,
+            this.tsSeparator4,
+            this.tsbSelectAll, this.tsbSelectNone, this.tsbDeleteSelected, this.tslSelectedCount
         });
 
         this.tsbNewBase.Text = "➕ 新建知识库";
@@ -95,6 +102,13 @@ partial class KnowledgeBaseForm
         this.tsbAiExtract.Text = "🤖 AI 提取";
         this.tsbAiExtract.Click += new System.EventHandler(this.TsbAiExtract_Click);
         this.tsbSearch.Text = "🔍 搜索";
+        this.tsbSelectAll.Text = "☑️ 全选";
+        this.tsbSelectAll.Click += new System.EventHandler(this.TsbSelectAll_Click);
+        this.tsbSelectNone.Text = "☐️ 全不选";
+        this.tsbSelectNone.Click += new System.EventHandler(this.TsbSelectNone_Click);
+        this.tsbDeleteSelected.Text = "🗑 删除选中(0)";
+        this.tsbDeleteSelected.Click += new System.EventHandler(this.TsbDeleteSelected_Click);
+        this.tslSelectedCount.Text = "";
 
         // ━━━━━ scMain 左右分栏 ━━━━━
         this.scMain.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -150,14 +164,17 @@ partial class KnowledgeBaseForm
         this.lstEntries.View = System.Windows.Forms.View.Details;
         this.lstEntries.FullRowSelect = true;
         this.lstEntries.GridLines = true;
-        this.lstEntries.MultiSelect = false;
+        this.lstEntries.MultiSelect = true;
+        this.lstEntries.CheckBoxes = true;
         this.lstEntries.HideSelection = false;
         this.lstEntries.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
         this.lstEntries.Columns.Add("标题", 280);
+        this.lstEntries.Columns.Add("来源", 100);
         this.lstEntries.Columns.Add("标签", 180);
-        this.lstEntries.Columns.Add("来源", 200);
+        this.lstEntries.Columns.Add("文件路径", 220);
         this.lstEntries.Columns.Add("更新时间", 140);
         this.lstEntries.SelectedIndexChanged += new System.EventHandler(this.LstEntries_SelectedIndexChanged);
+        this.lstEntries.ItemChecked += new System.Windows.Forms.ItemCheckedEventHandler(this.LstEntries_ItemChecked);
 
         this.scRight.Panel1.Controls.Add(this.pnlEntryList);
 
@@ -290,6 +307,11 @@ partial class KnowledgeBaseForm
     private System.Windows.Forms.ToolStripSeparator tsSeparator3;
     private System.Windows.Forms.ToolStripButton tsbAiExtract;
     private System.Windows.Forms.ToolStripButton tsbSearch;
+    private System.Windows.Forms.ToolStripSeparator tsSeparator4;
+    private System.Windows.Forms.ToolStripButton tsbSelectAll;
+    private System.Windows.Forms.ToolStripButton tsbSelectNone;
+    private System.Windows.Forms.ToolStripButton tsbDeleteSelected;
+    private System.Windows.Forms.ToolStripLabel tslSelectedCount;
 
     private System.Windows.Forms.SplitContainer scMain;
     private System.Windows.Forms.Panel pnlBaseList;

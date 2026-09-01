@@ -163,6 +163,21 @@ public class KnowledgeBaseManager
         return entry;
     }
 
+    /// <summary>快捷添加条目并指定来源类型(供 UI/扫描/AI 提取使用)</summary>
+    public KnowledgeEntry AddEntry(string baseId, KnowledgeSourceType sourceType, string title, string content,
+        string sourceFile = "", string sourceReference = "", List<string>? tags = null)
+    {
+        return AddEntry(baseId, new KnowledgeEntry
+        {
+            Title = title,
+            Content = content,
+            SourceFile = sourceFile,
+            SourceType = sourceType,
+            SourceReference = sourceReference,
+            Tags = tags ?? new List<string>(),
+        });
+    }
+
     /// <summary>更新条目(自动保存)</summary>
     public bool UpdateEntry(string baseId, KnowledgeEntry entry)
     {
@@ -192,6 +207,18 @@ public class KnowledgeBaseManager
         if (removed == 0) return false;
         SaveBase(kb);
         return true;
+    }
+
+    /// <summary>批量删除条目。返回实际删除数。</summary>
+    public int DeleteEntries(string baseId, IEnumerable<string> entryIds)
+    {
+        var kb = GetBase(baseId);
+        if (kb == null) return 0;
+        var ids = new HashSet<string>(entryIds);
+        var removed = kb.Entries.RemoveAll(e => ids.Contains(e.Id));
+        if (removed == 0) return 0;
+        SaveBase(kb);
+        return removed;
     }
 
     // ━━━━━━━━━━━━━━━━ 文件夹扫描 ━━━━━━━━━━━━━━━━
@@ -368,6 +395,7 @@ public class KnowledgeBaseManager
                         Title = Path.GetFileNameWithoutExtension(file.Name),
                         Content = aiContent,
                         SourceFile = file.FullName,
+                        SourceType = Models.KnowledgeSourceType.AiExtract,
                         ContentHash = hash,
                         Tags = ExtractTagsFromContent(aiContent),
                     });

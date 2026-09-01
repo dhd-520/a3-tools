@@ -28,9 +28,29 @@ public partial class KnowledgeBaseForm : Form
 
     private void InitData()
     {
+        InitSourceFilter();
         RefreshBaseList();
         SetEditorEnabled(false);
         UpdateStatus("就绪");
+    }
+
+    private void InitSourceFilter()
+    {
+        cmbSourceFilter = new ComboBox
+        {
+            Dock = DockStyle.Top,
+            Font = new Font("Microsoft YaHei UI", 9.5F),
+        };
+        cmbSourceFilter.Items.Add(new FilterOption("全部来源", null));
+        cmbSourceFilter.Items.Add(new FilterOption("✍ 手动添加", KnowledgeSourceType.Manual));
+        cmbSourceFilter.Items.Add(new FilterOption("📄 文件导入", KnowledgeSourceType.FileImport));
+        cmbSourceFilter.Items.Add(new FilterOption("🤖 AI 提取", KnowledgeSourceType.AiExtract));
+        cmbSourceFilter.Items.Add(new FilterOption("💬 对话提取", KnowledgeSourceType.ChatExtract));
+        cmbSourceFilter.SelectedIndex = 0;
+        cmbSourceFilter.SelectedIndexChanged += (_, _) => RefreshEntryList();
+        // 插入到 pnlEntryList 中：位于 txtSearch 上方
+        pnlEntryList.Controls.Add(cmbSourceFilter);
+        pnlEntryList.Controls.SetChildIndex(cmbSourceFilter, 1);
     }
 
     // ━━━━━━━━━━━━━━━━ 知识库列表 ━━━━━━━━━━━━━━━━
@@ -193,6 +213,7 @@ public partial class KnowledgeBaseForm : Form
                 Title = Path.GetFileNameWithoutExtension(file.Name),
                 Content = content,
                 SourceFile = file.FullName,
+                SourceType = Models.KnowledgeSourceType.FileImport,
                 ContentHash = hash,
                 Tags = KnowledgeBaseManager.ExtractTagsFromContent(content),
             };
@@ -219,6 +240,7 @@ public partial class KnowledgeBaseForm : Form
     // ━━━━━━━━━━━━━━━━ 条目列表 ━━━━━━━━━━━━━━━━
 
     private List<KnowledgeEntry> _filteredEntries = new();
+    private ComboBox cmbSourceFilter = null!;
 
     private void RefreshEntryList()
     {
@@ -226,6 +248,12 @@ public partial class KnowledgeBaseForm : Form
         if (_currentBase == null) return;
 
         var entries = _currentBase.Entries.AsEnumerable();
+        // 来源类型筛选
+        if (cmbSourceFilter.SelectedItem is FilterOption filter && filter.Type.HasValue)
+        {
+            entries = entries.Where(e => e.SourceType == filter.Type.Value);
+        }
+        // 关键词搜索
         var query = txtSearch.Text?.Trim();
         if (!string.IsNullOrEmpty(query))
         {
@@ -239,13 +267,39 @@ public partial class KnowledgeBaseForm : Form
         foreach (var entry in _filteredEntries)
         {
             var item = new ListViewItem(entry.Title);
+            item.SubItems.Add(SourceTypeLabel(entry.SourceType));
             item.SubItems.Add(string.Join(", ", entry.Tags));
-            item.SubItems.Add(Path.GetFileName(entry.SourceFile));
+            item.SubItems.Add(FormatSourceFile(entry.SourceFile, entry.SourceType));
             item.SubItems.Add(entry.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
             item.Tag = entry;
             lstEntries.Items.Add(item);
         }
         UpdateStatus($"显示 {_filteredEntries.Count} / {_currentBase.Entries.Count} 条目");
+        UpdateSelectedCount();
+    }
+
+    /// <summary>来源类型 → 显示标签</summary>
+    private static string SourceTypeLabel(KnowledgeSourceType t) => t switch
+    {
+        KnowledgeSourceType.Manual => "✍ 手动",
+        KnowledgeSourceType.FileImport => "📄 文件",
+        KnowledgeSourceType.AiExtract => "🤖 AI 提取",
+        KnowledgeSourceType.ChatExtract => "💬 对话",
+        _ => t.ToString(),
+    };
+
+    /// <summary>源文件路径 → 显示文本</summary>
+    private static string FormatSourceFile(string sourceFile, KnowledgeSourceType type)
+    {
+        if (string.IsNullOrEmpty(sourceFile)) return type == KnowledgeSourceType.Manual ? "(手动添加)" : "";
+        // 路径太长显示文件名
+        return sourceFile.Length > 80 ? "…" + sourceFile[^77..] : sourceFile;
+    }
+
+    /// <summary>筛选选项包装</summary>
+    private record FilterOption(string Display, KnowledgeSourceType? Type)
+    {
+        public override string ToString() => Display;
     }
 
     private void TxtSearch_TextChanged(object? sender, EventArgs e)
@@ -388,6 +442,57 @@ public partial class KnowledgeBaseForm : Form
     {
         txtSearch.Focus();
         txtSearch.SelectAll();
+    }
+
+    // ━━━━━━━━━━━━━━━━ 批量选删 ━━━━━━━━━━━━━━━━
+
+    private void TsbSelectAll_Click(object? sender, EventArgs e)
+    {
+        foreach (ListViewItem item in lstEntries.Items)
+            item.Checked = true;
+        UpdateSelectedCount();
+    }
+
+    private void TsbSelectNone_Click(object? sender, EventArgs e)
+    {
+        foreach (ListViewItem item in lstEntries.Items)
+            item.Checked = false;
+        UpdateSelectedCount();
+    }
+
+    private void TsbDeleteSelected_Click(object? sender, EventArgs e)
+    {
+        if (_currentBase == null) return;
+        var checkedItems = lstEntries.CheckedItems;
+        if (checkedItems.Count == 0) return;
+
+        var ok = MessageBox.Show(
+            $"确认删除选中的 {checkedItems.Count} 个条目？\n此操作不可恢复！",
+            "批量删除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (ok != DialogResult.Yes) return;
+
+        var ids = checkedItems.Cast<ListViewItem>()
+            .Select(item => (item.Tag as KnowledgeEntry)?.Id ?? "")
+            .Where(id => !string.IsNullOrEmpty(id))
+            .ToList();
+
+        var removed = _mgr.DeleteEntries(_currentBase.Id, ids);
+        _currentBase = _mgr.GetBase(_currentBase.Id);
+        RefreshEntryList();
+        UpdateStatus($"✅ 已删除 {removed} 个条目");
+    }
+
+    private void LstEntries_ItemChecked(object? sender, ItemCheckedEventArgs e)
+    {
+        UpdateSelectedCount();
+    }
+
+    private void UpdateSelectedCount()
+    {
+        int total = lstEntries.Items.Count;
+        int selected = lstEntries.CheckedItems.Count;
+        tslSelectedCount.Text = selected > 0 ? $"  [已选 {selected}/{total}]" : $"  [共 {total}]";
+        tsbDeleteSelected.Text = selected > 0 ? $"🗑 删除选中({selected})" : "🗑 删除选中(0)";
     }
 
     private async void TsbAiExtract_Click(object? sender, EventArgs e)

@@ -58,6 +58,7 @@
     <Compile Update="Models\AiAction.cs" />
     <Compile Update="Models\KnowledgeBase.cs" />
     <Compile Update="Models\KnowledgeEntry.cs" />
+    <Compile Update="Models\KnowledgeSourceType.cs" />
     <Compile Update="Services\AiActions\AiActions.cs" />
     <Compile Update="Services\KnowledgeBaseManager.cs" />
     <Compile Update="Services\AiActions\ActionRegistry.cs" />
