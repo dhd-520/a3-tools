@@ -156,7 +156,7 @@ public class KnowledgeBaseManager
         entry.CreatedAt = DateTime.UtcNow;
         entry.UpdatedAt = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(entry.ContentHash) && !string.IsNullOrEmpty(entry.Content))
-            entry.ContentHash = ComputeHash(entry.Content);
+            entry.ContentHash = ComputeHashStatic(entry.Content);
 
         kb.Entries.Add(entry);
         SaveBase(kb);
@@ -191,7 +191,7 @@ public class KnowledgeBaseManager
         existing.Tags = entry.Tags;
         existing.SourceFile = entry.SourceFile;
         if (!string.IsNullOrEmpty(entry.Content))
-            existing.ContentHash = ComputeHash(entry.Content);
+            existing.ContentHash = ComputeHashStatic(entry.Content);
         existing.UpdatedAt = DateTime.UtcNow;
 
         SaveBase(kb);
@@ -393,7 +393,7 @@ public class KnowledgeBaseManager
                 await File.WriteAllTextAsync(mdPath, aiContent, ct);
 
                 // 添加/更新 KB 条目
-                var hash = ComputeHash(aiContent);
+                var hash = ComputeHashStatic(aiContent);
                 var existing = kb.Entries.FirstOrDefault(e =>
                     e.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase));
                 if (existing != null && existing.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase))
@@ -403,7 +403,7 @@ public class KnowledgeBaseManager
                 }
 
                 // ★ 2026-09-01 按 H2 拆分 AI 输出为多条独立条目
-                var sections = SplitByH2(aiContent);
+                var sections = SplitByH2Static(aiContent);
                 var fileBaseName = Path.GetFileNameWithoutExtension(file.Name);
                 int addedCount = 0;
 
@@ -435,7 +435,7 @@ public class KnowledgeBaseManager
                             Content = prefix + "\n" + section.Content,
                             SourceFile = file.FullName,
                             SourceType = Models.KnowledgeSourceType.AiExtract,
-                            ContentHash = ComputeHash(file.FullName + section.Title),
+                            ContentHash = ComputeHashStatic(file.FullName + section.Title),
                             Tags = ExtractTagsFromContent(section.Content),
                         };
                         AddEntry(kb.Id, entry);
@@ -560,7 +560,11 @@ public class KnowledgeBaseManager
         return sb.ToString();
     }
 
-    /// <summary>从 .docx(zip)解压 word/document.xml 并拼接所有 <w:t> 文本(BCL only)</summary>
+    /// <summary>
+    /// 从 .docx(zip)解压 word/document.xml 提取段落文本
+    /// ★ 2026-09-01 增强:检测 Heading 样式(Heading1/2/3、标题1/2/3)并插入 `## ` 前缀
+    /// 使拆分逻辑(SplitByH2)能像 .md 一样识别 Word 章节
+    /// </summary>
     private static string ReadDocxText(string filePath)
     {
         const string DocXml = "word/document.xml";
@@ -575,19 +579,44 @@ public class KnowledgeBaseManager
         if (xdoc.Root == null) return "";
 
         var sb = new System.Text.StringBuilder();
-        // 每个段落 <w:p> 输出一行,用 <w:t> 拼接
         foreach (var p in xdoc.Root.Descendants(System.Xml.Linq.XName.Get("p", WmlNs)))
         {
+            // 检查段落样式名(Heading2 / 标题2 / Title 等)
+            var pStyle = p.Descendants(System.Xml.Linq.XName.Get("pStyle", WmlNs)).FirstOrDefault();
+            var styleVal = pStyle?.Attribute(System.Xml.Linq.XName.Get("val", WmlNs))?.Value ?? "";
+            bool isHeading = IsHeadingStyle(styleVal);
+
             var line = string.Concat(p.Descendants(System.Xml.Linq.XName.Get("t", WmlNs))
                                        .Select(t => (string?)t.Value ?? ""));
-            if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine(line);
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            if (isHeading)
+            {
+                sb.AppendLine();
+                sb.AppendLine("## " + line.Trim());
+                sb.AppendLine();
+            }
+            else
+            {
+                sb.AppendLine(line);
+            }
         }
         return sb.ToString();
     }
 
+    /// <summary>判断 Word 样式名是否是标题（Heading1-5/标题1-5/Title/副标题）</summary>
+    private static bool IsHeadingStyle(string styleVal)
+    {
+        if (string.IsNullOrEmpty(styleVal)) return false;
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            styleVal,
+            @"^(Heading|title|标题|副标题)\d?$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
     // ━━━━━━━━━━━━━━━━ 工具方法 ━━━━━━━━━━━━━━━━
 
-    private static string ComputeHash(string content)
+    public static string ComputeHashStatic(string content)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(content);
         var hash = System.Security.Cryptography.SHA256.HashData(bytes);
@@ -595,7 +624,7 @@ public class KnowledgeBaseManager
     }
 
     /// <summary>Markdown H2 章节片段</summary>
-    private class H2Section
+    public class H2Section
     {
         public string Title { get; set; } = "";
         public string Content { get; set; } = "";
@@ -605,7 +634,7 @@ public class KnowledgeBaseManager
     /// <summary>把 Markdown 按 ## 二级标题拆分为多个段落
     /// 返回第一个 H2 之前的 header + 多个 H2 片段
     /// </summary>
-    private static List<H2Section> SplitByH2(string markdown)
+    public static List<H2Section> SplitByH2Static(string markdown)
     {
         var result = new List<H2Section>();
         if (string.IsNullOrWhiteSpace(markdown)) return result;

@@ -193,48 +193,64 @@ public partial class KnowledgeBaseForm : Form
         var kb = _mgr.GetBase(_currentBase.Id);
         if (kb == null) return;
 
-        int added = 0, skipped = 0;
+        int added = 0, skipped = 0, updated = 0;
         foreach (var file in selected)
         {
-            // 用文件路径+内容 hash 去重
+            // ★ 2026-09-01 扫描同样按 H2 拆分多条目（docx 检测 Heading 样式后插 `## `）
             var content = _mgr.ReadFileContent(file.FullName);
-            var hash = ComputeHash(content);
+            var sections = KnowledgeBaseManager.SplitByH2Static(content);
+            // 过滤出有标题的段落（不是首段的纯前缀部分）
+            var realSections = sections.Where(s => !string.IsNullOrWhiteSpace(s.Title)).ToList();
 
-            var existing = kb.Entries.FirstOrDefault(e =>
-                e.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase));
-            if (existing != null && existing.ContentHash == hash)
-            {
-                skipped++;
-                continue;
-            }
+            // 同一文件已存在 → 先删旧条目再重新拆分（保持一致）
+            var existingForFile = kb.Entries
+                .Where(e => e.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var old in existingForFile)
+                _mgr.DeleteEntry(kb.Id, old.Id);
+            // 重新加载最新 kb
+            kb = _mgr.GetBase(_currentBase.Id);
 
-            var entry = new KnowledgeEntry
+            if (realSections.Count == 0)
             {
-                Title = Path.GetFileNameWithoutExtension(file.Name),
-                Content = content,
-                SourceFile = file.FullName,
-                SourceType = Models.KnowledgeSourceType.FileImport,
-                ContentHash = hash,
-                Tags = KnowledgeBaseManager.ExtractTagsFromContent(content),
-            };
-
-            if (existing != null)
-            {
-                // 覆盖更新
-                entry.Id = existing.Id;
-                entry.CreatedAt = existing.CreatedAt;
-                _mgr.UpdateEntry(kb.Id, entry);
+                // 没有 H2 → 退化为 1 条
+                var entry = new KnowledgeEntry
+                {
+                    Title = Path.GetFileNameWithoutExtension(file.Name),
+                    Content = content,
+                    SourceFile = file.FullName,
+                    SourceType = Models.KnowledgeSourceType.FileImport,
+                    ContentHash = KnowledgeBaseManager.ComputeHashStatic(content),
+                    Tags = KnowledgeBaseManager.ExtractTagsFromContent(content),
+                };
+                _mgr.AddEntry(kb.Id, entry);
+                added++;
             }
             else
             {
-                _mgr.AddEntry(kb.Id, entry);
+                // 按 H2 拆为多条
+                var fileBaseName = Path.GetFileNameWithoutExtension(file.Name);
+                foreach (var section in realSections)
+                {
+                    var entry = new KnowledgeEntry
+                    {
+                        Title = $"{fileBaseName} - {section.Title}",
+                        Content = section.Content,
+                        SourceFile = file.FullName,
+                        SourceType = Models.KnowledgeSourceType.FileImport,
+                        ContentHash = KnowledgeBaseManager.ComputeHashStatic(file.FullName + section.Title),
+                        Tags = KnowledgeBaseManager.ExtractTagsFromContent(section.Content),
+                    };
+                    _mgr.AddEntry(kb.Id, entry);
+                    added++;
+                }
             }
-            added++;
+            updated++;
         }
 
         _currentBase = kb;
         RefreshEntryList();
-        UpdateStatus($"✅ 导入完成: 新增 {added},跳过(无变化) {skipped}");
+        UpdateStatus($"✅ 导入完成: 处理 {updated} 个文件,新增 {added} 条目,跳过(无变化) {skipped}");
     }
 
     // ━━━━━━━━━━━━━━━━ 条目列表 ━━━━━━━━━━━━━━━━
@@ -573,7 +589,7 @@ public partial class KnowledgeBaseForm : Form
         tsslStatus.Text = $"{DateTime.Now:HH:mm:ss}  {msg}";
     }
 
-    private static string ComputeHash(string content)
+    private static string ComputeHashUnused(string content)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(content);
         var hash = System.Security.Cryptography.SHA256.HashData(bytes);
