@@ -1,4 +1,29 @@
 ﻿
+### ⚠️ 【永久】永远不要 `git restore <file>` (2026-09-01 差点丢光未提交改动)
+- `git restore <file>` 是**不可逆**的，会覆盖未提交的本地修改
+- `git fsck --dangling` 也找不回未 stage 的 working tree 修改（git 只在对象库里保存 stage/commit 过的内容）
+- **正鯇备份习惯**：改字节/改结构前 `cp 原文件 worklist/YYYY-MM-DD-baseline-xxx.cs`
+- **清理 BOM 用 `read` + `write` 工具重写整个文件**（read 出来的内容自带干净 BOM，不需要手动处理字节）
+- PowerShell 的 `[..]` 范围运算符对 byte[] 有 bug，不要用 `$bytes[9..]` 这种写法操作字节
+
+### ⚠️ 【永久】.NET 7 项目不持 C# 12 集合表达式 (2026-09-01 踩坑)
+- `<TargetFramework>net7.0-windows</TargetFramework>` → 默认 LangVersion = C# 11
+- C# 12 的 `[char]10` / `['│', '┼']` 这种集合元素语法会编译不过 (CS1026/CS1525/CS1002)
+- **正确写法**：`content.Split('\n')` / `trimmed.Split(new[] { '│', '┼' }, StringSplitOptions.RemoveEmptyEntries)`
+- 如果以后陛上升到 .NET 8 SDK 可以用集合表达式
+
+### ⚠️ 【永久】Markdown 多步处理的顺序问题 (2026-09-01)
+- 检测型转换（如表格）和全局型转换（如标题/粗体）一起跑时，**先跑全局**、再跑检测型
+- 原顺序「表格优先」会跳过 Pretty，表格外的 `##` `**` `-` 全部不替换
+- 调试技巧：用 `write` + `exec` 独立测试项目验证逻辑，不依赖 A3Tools 启动
+
+### AI 气泡 Markdown 处理现状 (2026-09-01 commit e8fde63)
+- `A3Tools/Forms/AiChatForm.cs` L282 if 块三级处理：
+  1. `RemoveThinkTags` 删除 `<think>...</think>`（DeepSeek-R1/Qwen-QwQ）
+  2. `MarkdownToPrettyText` 全局：`##` → `━━...━━`、`**bold**` → `【bold】`、`code` → `「code」、`-` → `•`
+  3. `MarkdownTableToText` 表格：标准 `|` 和预格式化 `│` 两种输入都识别，输出统一 `│─┼─` 制表符对齐
+- Label 不持局部格式，纯 Unicode 符号模拟是现阶段最优解
+
 ### WinForms Form 位置/尺寸设置顺序（2026-07-04 教训）
 
 - **Form.Width / Form.Height / Form.Right 在 Show() 之前都是默认值（100x100）**
