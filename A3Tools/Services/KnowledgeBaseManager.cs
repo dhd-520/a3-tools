@@ -280,15 +280,31 @@ public class KnowledgeBaseManager
         public string Status { get; set; } = "";  // "读取中" / "提取中" / "完成" / "失败"
     }
 
-    /// <summary>AI 提取提示词模板（强调提炼 + 尊重原始内容）</summary>
+    /// <summary>AI 提取提示词模板（强调提炼 + 按主题拆分）</summary>
     private const string AiExtractSystemPrompt = @"你是 A3Tools 知识库提取助手。请把以下文档提炼为结构化 Markdown 知识条目。
 
-【要求】
-1. 提炼关键概念、操作步骤、参数、注意事项 — 不要大段复制原文
-2. 重要控制控控在原文 30% 长度以内，以精炼为优先
-3. 使用 `##` 二级标题 + `###` 三级标题组织章节
-4. 列表用 `-` 5. 关键术语加 `【重点】` 标记6. 如有原始表格，用 `│` `─┼─` 制表符重新对齐
-7. 开头输出一行 `> 来源：<filename>` 标记出处
+【关键要求 - 按主题拆分】
+1. **一个文档如果含多个主题，请拆为多个 `##` 二级标题**（每个主题独立一条知识）
+2. **每个 `##` 二级标题代表一个独立的知识点**，不能把整个文档合成一个大块
+3. 提炼关键概念、操作步骤、参数、注意事项 — 不要大段复制原文
+4. 重要控制在原文 30% 长度以内，以精炼为优先
+5. 使用 `###` 三级标题组织子章节
+6. 列表用 `-`
+7. 关键术语加 `【重点】` 标记
+8. 如有原始表格，用 `│` `─┼─` 制表符重新对齐
+9. 开头输出一行 `> 来源：<filename>` 标记出处
+
+【输出示例】
+> 来源：xxx手册.md
+
+## 账套启动
+账套启动有三种方式：ERP 网页版、A3 客户端、软件开发工具...
+
+## 账套备份
+备份路径位于 DATA 目录下的 backup 文件夹...
+
+## 常见问题
+如果启动后黑屏，请检查...
 
 【输出】仅输出提炼后的 Markdown，不要额外说明。";
 
@@ -380,29 +396,55 @@ public class KnowledgeBaseManager
                 var hash = ComputeHash(aiContent);
                 var existing = kb.Entries.FirstOrDefault(e =>
                     e.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase));
-                if (existing != null)
+                if (existing != null && existing.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase))
                 {
-                    existing.Title = Path.GetFileNameWithoutExtension(file.Name);
-                    existing.Content = aiContent;
-                    existing.ContentHash = hash;
-                    existing.UpdatedAt = DateTime.UtcNow;
-                    UpdateEntry(kb.Id, existing);
+                    // 同一文件已提取过 → 全部重新拆分(以新 AI 输出为准)
+                    kb.Entries.RemoveAll(e => e.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase));
                 }
-                else
+
+                // ★ 2026-09-01 按 H2 拆分 AI 输出为多条独立条目
+                var sections = SplitByH2(aiContent);
+                var fileBaseName = Path.GetFileNameWithoutExtension(file.Name);
+                int addedCount = 0;
+
+                if (sections.Count == 0)
                 {
+                    // 没有 H2 拆分点（AI 输出了纯文本）→ 退化为 1 条
                     AddEntry(kb.Id, new KnowledgeEntry
                     {
-                        Title = Path.GetFileNameWithoutExtension(file.Name),
+                        Title = fileBaseName,
                         Content = aiContent,
                         SourceFile = file.FullName,
                         SourceType = Models.KnowledgeSourceType.AiExtract,
                         ContentHash = hash,
                         Tags = ExtractTagsFromContent(aiContent),
                     });
+                    addedCount = 1;
+                }
+                else
+                {
+                    // 第一个 H2 之前的内容（如 > 来源：xxx）作为前缀
+                    var header = sections[0].Header;
+                    var prefix = string.IsNullOrEmpty(header) ? "" : header;
+                    // 为每个 H2 创建独立条目
+                    foreach (var section in sections)
+                    {
+                        var entry = new KnowledgeEntry
+                        {
+                            Title = section.Title,
+                            Content = prefix + "\n" + section.Content,
+                            SourceFile = file.FullName,
+                            SourceType = Models.KnowledgeSourceType.AiExtract,
+                            ContentHash = ComputeHash(file.FullName + section.Title),
+                            Tags = ExtractTagsFromContent(section.Content),
+                        };
+                        AddEntry(kb.Id, entry);
+                        addedCount++;
+                    }
                 }
 
                 summary.Success++;
-                progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = "✅ 完成" });
+                progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = $"✅ 完成(拆为 {addedCount} 条)" });
             }
             catch (OperationCanceledException)
             {
@@ -550,6 +592,60 @@ public class KnowledgeBaseManager
         var bytes = System.Text.Encoding.UTF8.GetBytes(content);
         var hash = System.Security.Cryptography.SHA256.HashData(bytes);
         return Convert.ToHexString(hash);
+    }
+
+    /// <summary>Markdown H2 章节片段</summary>
+    private class H2Section
+    {
+        public string Title { get; set; } = "";
+        public string Content { get; set; } = "";
+        public string Header { get; set; } = "";  // 首个 H2 之前的内容（如 > 来源：xxx）
+    }
+
+    /// <summary>把 Markdown 按 ## 二级标题拆分为多个段落
+    /// 返回第一个 H2 之前的 header + 多个 H2 片段
+    /// </summary>
+    private static List<H2Section> SplitByH2(string markdown)
+    {
+        var result = new List<H2Section>();
+        if (string.IsNullOrWhiteSpace(markdown)) return result;
+
+        var lines = markdown.Split('\n');
+        H2Section? current = null;
+        string headerAccum = "";
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+            // 匹配 ## 开头的二级标题（不能是 ### 或更多 #）
+            if (line.StartsWith("## ") && !line.StartsWith("### "))
+            {
+                // 闭合上一个
+                if (current != null) result.Add(current);
+                // 开始新章节
+                current = new H2Section
+                {
+                    Title = line[3..].Trim(),
+                    Content = line + "\n",
+                };
+            }
+            else if (current == null)
+            {
+                // 第一个 H2 之前的内容
+                headerAccum += rawLine + "\n";
+            }
+            else
+            {
+                current.Content += rawLine + "\n";
+            }
+        }
+        if (current != null) result.Add(current);
+
+        // 第一个 section 的 Header 填前面
+        if (result.Count > 0)
+            result[0].Header = headerAccum.Trim();
+
+        return result;
     }
 
     /// <summary>从 Markdown 内容自动生成标签（取 ## 二级标题前 5 个）</summary>
