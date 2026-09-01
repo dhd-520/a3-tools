@@ -1270,7 +1270,21 @@ img { max-width: 100%; }
             try
             {
                 var kbMgr = new KnowledgeBaseManager();
+                System.Diagnostics.Debug.WriteLine($"[KB] 查询：{userQuery}");
                 var hits = kbMgr.SearchAll(userQuery, topK: 5);
+                System.Diagnostics.Debug.WriteLine($"[KB] BM25 检索到 {hits.Count} 条命中");
+
+                // ★ Fallback: BM25 未命中时,取最近更新的 3 条全部注入
+                if (hits.Count == 0)
+                {
+                    var recent = kbMgr.GetRecentEntries(3);
+                    if (recent.Count > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[KB] BM25 0 命中,Fallback 注入最近 {recent.Count} 条");
+                        hits = recent;
+                    }
+                }
+
                 if (hits.Count > 0)
                 {
                     sb.AppendLine();

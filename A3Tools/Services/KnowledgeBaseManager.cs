@@ -627,6 +627,31 @@ public class KnowledgeBaseManager
         return hits.OrderByDescending(h => h.Score).Take(topK).ToList();
     }
 
+    /// <summary>Fallback：跨所有库取最近更新的 N 条（BM25 未命中时用）</summary>
+    public List<SearchHit> GetRecentEntries(int topN = 3)
+    {
+        var allEntries = new List<(KnowledgeBase kb, KnowledgeEntry entry)>();
+        foreach (var meta in ListBases())
+        {
+            var kb = GetBase(meta.Id);
+            if (kb == null) continue;
+            foreach (var e in kb.Entries)
+                allEntries.Add((kb, e));
+        }
+        return allEntries
+            .OrderByDescending(x => x.entry.UpdatedAt)
+            .Take(topN)
+            .Select(x => new SearchHit
+            {
+                BaseId = x.kb.Id,
+                BaseName = x.kb.Name,
+                Entry = x.entry,
+                Score = 0,
+                MatchedTerms = new List<string>(),
+            })
+            .ToList();
+    }
+
     /// <summary>简单分词（支持中文:2 字一组 + 英文按空格拆）</summary>
     private static List<string> Tokenize(string text)
     {
