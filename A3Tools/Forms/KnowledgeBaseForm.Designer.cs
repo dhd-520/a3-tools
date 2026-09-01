@@ -28,6 +28,7 @@ partial class KnowledgeBaseForm
         this.tsbDeleteEntry = new System.Windows.Forms.ToolStripButton();
         this.tsSeparator3 = new System.Windows.Forms.ToolStripSeparator();
         this.tsbAiExtract = new System.Windows.Forms.ToolStripButton();
+        this.tsbAiSplit = new System.Windows.Forms.ToolStripButton();
         this.tsbSearch = new System.Windows.Forms.ToolStripButton();
         this.tsSeparator4 = new System.Windows.Forms.ToolStripSeparator();
         this.tsbSelectAll = new System.Windows.Forms.ToolStripButton();
@@ -87,6 +88,7 @@ partial class KnowledgeBaseForm
             this.tsbAddEntry, this.tsbDeleteEntry,
             this.tsSeparator3,
             this.tsbAiExtract,
+            this.tsbAiSplit,
             this.tsbSearch,
             this.tsSeparator4,
             this.tsbSelectAll, this.tsbSelectNone, this.tsbDeleteSelected, this.tslSelectedCount
@@ -108,6 +110,8 @@ partial class KnowledgeBaseForm
         this.tsbDeleteEntry.Click += new System.EventHandler(this.TsbDeleteEntry_Click);
         this.tsbAiExtract.Text = "🤖 AI 提取";
         this.tsbAiExtract.Click += new System.EventHandler(this.TsbAiExtract_Click);
+        this.tsbAiSplit.Text = "🤖 AI 拆分选中";
+        this.tsbAiSplit.Click += new System.EventHandler(this.TsbAiSplit_Click);
         this.tsbSearch.Text = "🔍 搜索";
         this.tsbSearch.Click += new System.EventHandler(this.TsbSearch_Click);
         this.tsbSelectAll.Text = "☑️ 全选";
@@ -314,6 +318,7 @@ partial class KnowledgeBaseForm
     private System.Windows.Forms.ToolStripButton tsbDeleteEntry;
     private System.Windows.Forms.ToolStripSeparator tsSeparator3;
     private System.Windows.Forms.ToolStripButton tsbAiExtract;
+    private System.Windows.Forms.ToolStripButton tsbAiSplit;
     private System.Windows.Forms.ToolStripButton tsbSearch;
     private System.Windows.Forms.ToolStripSeparator tsSeparator4;
     private System.Windows.Forms.ToolStripButton tsbSelectAll;

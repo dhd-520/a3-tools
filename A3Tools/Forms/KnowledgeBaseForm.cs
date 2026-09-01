@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -579,6 +579,81 @@ public partial class KnowledgeBaseForm : Form
             progress.Close();
             MessageBox.Show($"AI 提取失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             UpdateStatus("❌ AI 提取失败");
+        }
+    }
+
+    private async void TsbAiSplit_Click(object? sender, EventArgs e)
+    {
+        if (_currentBase == null) { MessageBox.Show("请先选择知识库"); return; }
+
+        // CheckedItems 和 SelectedItems 类型不同,统一用 Count 判断
+        List<ListViewItem> selectedEntries;
+        if (lstEntries.CheckedItems.Count > 0)
+            selectedEntries = lstEntries.CheckedItems.Cast<ListViewItem>().ToList();
+        else if (lstEntries.SelectedItems.Count > 0)
+            selectedEntries = lstEntries.SelectedItems.Cast<ListViewItem>().ToList();
+        else
+            selectedEntries = new List<ListViewItem>();
+        if (selectedEntries.Count == 0)
+        {
+            MessageBox.Show("请先勾选或选中要 AI 拆分的条目", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var entryIds = selectedEntries
+            .Select(i => (i.Tag as KnowledgeEntry)?.Id ?? "")
+            .Where(id => !string.IsNullOrEmpty(id))
+            .ToList();
+
+        var confirm = MessageBox.Show(
+            $"将对 {entryIds.Count} 个条目逐个调用 AI 分析内容并按主题拆分为多条。\n每个条目调 AI 一次,可能耗时较长。\n确定开始吗？",
+            "AI 拆分确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (confirm != DialogResult.Yes) return;
+
+        var configService = new AiConfigService();
+        var provider = configService.GetDefaultProvider();
+        if (provider == null)
+        {
+            MessageBox.Show("未配置默认 AI 供应商,请先在「帮助 -> AI 助理设置」中配置",
+                "AI 未配置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        using var progress = new ProgressForm("AI 拆分中...");
+        progress.Show(this);
+
+        try
+        {
+            var backend = new OpenAiCompatibleBackend();
+            var (success, failed, errors) = await Task.Run(async () => await _mgr.AiSplitEntriesAsync(
+                _currentBase.Id, entryIds, provider, backend,
+                new Progress<KnowledgeBaseManager.AiExtractProgress>(p =>
+                {
+                    progress.SetProgress(p.Index, p.Total, p.FileName, p.Status);
+                    UpdateStatus($"🤖 [{p.Index}/{p.Total}] {p.FileName} - {p.Status}");
+                }),
+                progress.CancellationToken));
+
+            progress.Close();
+            _currentBase = _mgr.GetBase(_currentBase.Id);
+            RefreshEntryList();
+
+            var msg = $"✅ AI 拆分完成\n选中 {entryIds.Count} 个条目：\n成功 {success}\n失败 {failed}";
+            if (errors.Count > 0)
+                msg += "\n\n错误详情：\n" + string.Join("\n", errors.Take(10));
+            MessageBox.Show(msg, "AI 拆分结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UpdateStatus($"✅ AI 拆分：成功 {success}, 失败 {failed}");
+        }
+        catch (OperationCanceledException)
+        {
+            progress.Close();
+            UpdateStatus("⚠ AI 拆分已取消");
+        }
+        catch (Exception ex)
+        {
+            progress.Close();
+            MessageBox.Show($"AI 拆分失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UpdateStatus("❌ AI 拆分失败");
         }
     }
 

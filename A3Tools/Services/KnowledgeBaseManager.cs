@@ -777,6 +777,139 @@ public class KnowledgeBaseManager
             .ToList();
     }
 
+    // ━━━━━━━━━━━━━━━━ AI 智能拆分（R4 增强 2026-09-01）━━━━━━━━━━━━━━━
+
+    /// <summary>AI 拆分提示词模板（接现有 entry 拆分为多主题）</summary>
+    private const string AiSplitSystemPrompt = @"你是 A3Tools 知识拆分助手。陛下现有 1 个条目包含多个主题，请拆为多个独立 `##` 二级标题。
+
+【要求】
+1. **按主题拆为多个 `##` 二级标题**（每个主题独立一条知识）
+2. 提炼关键概念、操作步骤、参数、注意事项 — 不要大段复制
+3. 重要控制在原文 30% 长度以内，以精炼为优先
+4. 使用 `###` 三级标题组织子章节
+5. 列表用 `-`
+6. 关键术语加 `【重点】` 标记
+7. 开头输出 `> 来源：<original_source>`
+
+【输出格式示例】
+> 来源：<原始文件路径>
+
+## 主题 A 标题
+主题 A 内容...
+
+## 主题 B 标题
+主题 B 内容...
+
+【输出】仅输出拆分后的 Markdown，不要额外说明。";
+
+    /// <summary>检测「未拆分」条目(内容长且无 ## 章节划分)</summary>
+    public List<KnowledgeEntry> DetectUnsplitEntries(string baseId, int minLength = 200)
+    {
+        var kb = GetBase(baseId);
+        if (kb == null) return new List<KnowledgeEntry>();
+        return kb.Entries.Where(e =>
+            !string.IsNullOrEmpty(e.Content)
+            && e.Content.Length >= minLength
+            && !e.Content.Contains("## ")  // 没有 ## 拆分
+        ).ToList();
+    }
+
+    /// <summary>AI 智能拆分选中条目：调 AI 拆为多主题，返回拆分后的新条目列表</summary>
+    public async Task<(int success, int failed, List<string> errors)> AiSplitEntriesAsync(
+        string baseId,
+        IEnumerable<string> entryIds,
+        Models.AiProviderConfig provider,
+        OpenAiCompatibleBackend backend,
+        IProgress<AiExtractProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        int success = 0, failed = 0;
+        var errors = new List<string>();
+
+        foreach (var entryId in entryIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            var kb = GetBase(baseId);
+            if (kb == null) { failed++; errors.Add("知识库不存在"); continue; }
+            var entry = kb.Entries.FirstOrDefault(e => e.Id == entryId);
+            if (entry == null) { failed++; errors.Add($"条目不存在: {entryId}"); continue; }
+
+            progress?.Report(new AiExtractProgress
+            {
+                Index = success + failed + 1,
+                Total = entryIds.Count(),
+                FileName = entry.Title,
+                Status = "AI 拆分中"
+            });
+
+            try
+            {
+                // 调用 AI 拆分
+                var userPrompt = $"【现有条目标题】{entry.Title}\n【内容】\n{entry.Content}";
+                var messages = new List<Models.ChatMessage>
+                {
+                    new() { Role = Models.ChatRole.System, Content = AiSplitSystemPrompt },
+                    new() { Role = Models.ChatRole.User, Content = userPrompt },
+                };
+                var reply = await backend.SendAsync(provider, messages, ct);
+                if (string.IsNullOrWhiteSpace(reply?.Content))
+                {
+                    failed++; errors.Add($"{entry.Title}: AI 返回为空");
+                    continue;
+                }
+
+                // 拆分 H2 章节
+                var sections = SplitByH2Static(reply.Content);
+                var realSections = sections.Where(s => !string.IsNullOrWhiteSpace(s.Title)).ToList();
+                if (realSections.Count == 0)
+                {
+                    failed++; errors.Add($"{entry.Title}: AI 未拆分出主题");
+                    continue;
+                }
+
+                // 删除原条目,创建多个新条目
+                kb.Entries.Remove(entry);
+                var fileBaseName = entry.Title;
+                foreach (var section in realSections)
+                {
+                    var newEntry = new KnowledgeEntry
+                    {
+                        Title = section.Title,
+                        Content = section.Content,
+                        SourceFile = entry.SourceFile,
+                        SourceType = entry.SourceType,
+                        SourceReference = entry.SourceReference,
+                        ContentHash = ComputeHashStatic(entry.SourceFile + section.Title),
+                        Tags = ExtractTagsFromContent(section.Content),
+                    };
+                    kb.Entries.Add(newEntry);
+                }
+                SaveBase(kb);
+                success++;
+                progress?.Report(new AiExtractProgress
+                {
+                    Index = success + failed,
+                    Total = entryIds.Count(),
+                    FileName = entry.Title,
+                    Status = $"✅ 拆为 {realSections.Count} 条"
+                });
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                failed++; errors.Add($"{entry.Title}: {ex.Message}");
+                progress?.Report(new AiExtractProgress
+                {
+                    Index = success + failed,
+                    Total = entryIds.Count(),
+                    FileName = entry.Title,
+                    Status = "❌ 失败"
+                });
+            }
+        }
+        return (success, failed, errors);
+    }
+
     /// <summary>简单分词（支持中文:2 字一组 + 英文按空格拆）</summary>
     private static List<string> Tokenize(string text)
     {
