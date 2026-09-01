@@ -93,15 +93,23 @@ partial class KnowledgeBaseForm
         });
 
         this.tsbNewBase.Text = "➕ 新建知识库";
+        this.tsbNewBase.Click += new System.EventHandler(this.TsbNewBase_Click);
         this.tsbDeleteBase.Text = "🗑 删除知识库";
+        this.tsbDeleteBase.Click += new System.EventHandler(this.TsbDeleteBase_Click);
         this.tsbRenameBase.Text = "✏ 重命名";
+        this.tsbRenameBase.Click += new System.EventHandler(this.TsbRenameBase_Click);
         this.tsbSetWatchFolder.Text = "📁 设置扫描文件夹";
+        this.tsbSetWatchFolder.Click += new System.EventHandler(this.TsbSetWatchFolder_Click);
         this.tsbScanFolder.Text = "🔄 扫描文件夹";
+        this.tsbScanFolder.Click += new System.EventHandler(this.TsbScanFolder_Click);
         this.tsbAddEntry.Text = "➕ 新建条目";
+        this.tsbAddEntry.Click += new System.EventHandler(this.TsbAddEntry_Click);
         this.tsbDeleteEntry.Text = "🗑 删除条目";
+        this.tsbDeleteEntry.Click += new System.EventHandler(this.TsbDeleteEntry_Click);
         this.tsbAiExtract.Text = "🤖 AI 提取";
         this.tsbAiExtract.Click += new System.EventHandler(this.TsbAiExtract_Click);
         this.tsbSearch.Text = "🔍 搜索";
+        this.tsbSearch.Click += new System.EventHandler(this.TsbSearch_Click);
         this.tsbSelectAll.Text = "☑️ 全选";
         this.tsbSelectAll.Click += new System.EventHandler(this.TsbSelectAll_Click);
         this.tsbSelectNone.Text = "☐️ 全不选";
