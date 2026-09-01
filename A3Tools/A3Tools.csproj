@@ -87,6 +87,10 @@
     <PackageReference Include="Markdig" Version="0.34.0" />
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />
     <PackageReference Include="NPinyin" Version="0.2.6321.26573" />
+    <!-- ★ 2026-09-01 知识库多格式文档读取: .pdf / .xls / .xlsx -->
+    <!-- .doc 暂不支持: NPOI 2.6+ 拆出 HWPF 独立包,API 与主包不兼容;建议陛下用 Word/WPS 转 .docx -->
+    <PackageReference Include="PdfPig" Version="0.1.9" />
+    <PackageReference Include="NPOI" Version="2.7.1" />
   </ItemGroup>
 
   <ItemGroup>

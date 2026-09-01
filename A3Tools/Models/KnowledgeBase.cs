@@ -18,8 +18,11 @@ public class KnowledgeBase
     /// <summary>扫描文件夹路径(可选,设为空则只能手动添加)</summary>
     public string WatchFolder { get; set; } = "";
 
-    /// <summary>扫描文件模式(默认 .md/.txt/.docx)</summary>
-    public List<string> FilePatterns { get; set; } = new() { "*.md", "*.txt", "*.docx" };
+    /// <summary>扫描文件模式(默认 .md/.txt/.docx/.pdf/.xls/.xlsx)</summary>
+    public List<string> FilePatterns { get; set; } = new()
+    {
+        "*.md", "*.txt", "*.docx", "*.pdf", "*.xls", "*.xlsx"
+    };
 
     /// <summary>是否递归扫描子文件夹</summary>
     public bool Recursive { get; set; } = true;

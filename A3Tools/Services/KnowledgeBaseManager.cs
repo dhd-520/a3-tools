@@ -419,20 +419,103 @@ public class KnowledgeBaseManager
         return summary;
     }
 
-    /// <summary>读取文件内容(.md/.txt 直接读,.docx 用 BCL ZipFile 解 XML 提取文本)</summary>
+    /// <summary>读取文件内容(.md/.txt/.docx BCL; .pdf/.doc/.xls/.xlsx 用 NuGet)</summary>
     public string ReadFileContent(string filePath)
     {
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
-        if (ext == ".md" || ext == ".txt")
-            return File.ReadAllText(filePath);
-
-        if (ext == ".docx")
+        return ext switch
         {
-            // ★ 2026-09-01 陛下要求:不需要 OpenXml NuGet
-            //   docx = zip,word/document.xml 里所有段落文字都在 <w:t> 标签里
-            return ReadDocxText(filePath);
+            ".md" or ".txt" => File.ReadAllText(filePath),
+            ".docx" => ReadDocxText(filePath),
+            ".pdf" => ReadPdfText(filePath),
+            ".doc" => ReadDocText(filePath),
+            ".xls" => ReadXlsText(filePath),
+            ".xlsx" => ReadXlsxText(filePath),
+            _ => File.ReadAllText(filePath),
+        };
+    }
+
+    /// <summary>从 .pdf 提取所有页文本(PdfPig)</summary>
+    private static string ReadPdfText(string filePath)
+    {
+        try
+        {
+            using var pdf = UglyToad.PdfPig.PdfDocument.Open(filePath);
+            var sb = new System.Text.StringBuilder();
+            foreach (var page in pdf.GetPages())
+            {
+                var text = page.Text?.Trim();
+                if (!string.IsNullOrWhiteSpace(text)) sb.AppendLine(text);
+            }
+            return sb.ToString();
         }
-        return File.ReadAllText(filePath);
+        catch (Exception ex)
+        {
+            return $"[PDF 读取失败 {Path.GetFileName(filePath)}: {ex.Message}]";
+        }
+    }
+
+    /// <summary>从 .doc(二进制 Word)提取文本(NPOI 2.7+ 拆出 HWPF 独立包,暂不支持)</summary>
+    private static string ReadDocText(string filePath)
+    {
+        return $"[.doc 暂不支持自动读取,请用 Word/WPS 另存为 .docx 后再导入: {Path.GetFileName(filePath)}]";
+    }
+
+    /// <summary>从 .xls(二进制 Excel)提取所有 sheet 文本(NPOI HSSF)</summary>
+    private static string ReadXlsText(string filePath)
+    {
+        try
+        {
+            using var fs = File.OpenRead(filePath);
+            var wb = new NPOI.HSSF.UserModel.HSSFWorkbook(fs);
+            return ExtractSheetsText(wb);
+        }
+        catch (Exception ex)
+        {
+            return $"[XLS 读取失败 {Path.GetFileName(filePath)}: {ex.Message}]";
+        }
+    }
+
+    /// <summary>从 .xlsx(OOXML Excel)提取所有 sheet 文本(NPOI XSSF)</summary>
+    private static string ReadXlsxText(string filePath)
+    {
+        try
+        {
+            using var fs = File.OpenRead(filePath);
+            var wb = new NPOI.XSSF.UserModel.XSSFWorkbook(fs);
+            return ExtractSheetsText(wb);
+        }
+        catch (Exception ex)
+        {
+            return $"[XLSX 读取失败 {Path.GetFileName(filePath)}: {ex.Message}]";
+        }
+    }
+
+    /// <summary>遍历 NPOI 工作簿所有 sheet,每行用 Tab 分隔</summary>
+    private static string ExtractSheetsText(NPOI.SS.UserModel.IWorkbook wb)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int s = 0; s < wb.NumberOfSheets; s++)
+        {
+            var sheet = wb.GetSheetAt(s);
+            if (sheet == null) continue;
+            sb.AppendLine($"=== Sheet: {sheet.SheetName} ===");
+            for (int r = 0; r <= sheet.LastRowNum; r++)
+            {
+                var row = sheet.GetRow(r);
+                if (row == null) continue;
+                var cells = new List<string>();
+                for (int c = 0; c < row.LastCellNum; c++)
+                {
+                    var cell = row.GetCell(c);
+                    cells.Add(cell?.ToString()?.Trim() ?? "");
+                }
+                if (cells.Any(x => !string.IsNullOrWhiteSpace(x)))
+                    sb.AppendLine(string.Join("\t", cells));
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString();
     }
 
     /// <summary>从 .docx(zip)解压 word/document.xml 并拼接所有 <w:t> 文本(BCL only)</summary>
