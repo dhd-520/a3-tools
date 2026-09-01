@@ -42,8 +42,20 @@
     <Compile Update="Forms\AiSettingsForm.Designer.cs">
       <DependentUpon>AiSettingsForm.cs</DependentUpon>
     </Compile>
+    <Compile Update="Forms\KnowledgeBaseForm.cs" />
+    <Compile Update="Forms\KnowledgeBaseForm.Designer.cs">
+      <DependentUpon>KnowledgeBaseForm.cs</DependentUpon>
+    </Compile>
+    <Compile Update="Forms\Prompt.cs" />
+    <Compile Update="Forms\ScanResultForm.cs" />
+    <Compile Update="Forms\ScanResultForm.Designer.cs">
+      <DependentUpon>ScanResultForm.cs</DependentUpon>
+    </Compile>
     <Compile Update="Models\AiAction.cs" />
+    <Compile Update="Models\KnowledgeBase.cs" />
+    <Compile Update="Models\KnowledgeEntry.cs" />
     <Compile Update="Services\AiActions\AiActions.cs" />
+    <Compile Update="Services\KnowledgeBaseManager.cs" />
     <Compile Update="Services\AiActions\ActionRegistry.cs" />
     <Compile Update="Forms\ConfirmActionForm.cs" />
     <None Update="Resources\A3ToolsKnowledge.md">

@@ -24,6 +24,8 @@ partial class MainForm
     private ToolStripMenuItem menuAiChat = null!;
     private ToolStripMenuItem menuAiSettings = null!;
     private ToolStripMenuItem menuCopyAccount = null!;
+    // ★ 2026-09-01 知识库入口
+    private ToolStripMenuItem menuKnowledgeBase = null!;
     private ContextMenuStrip addMenu = null!;
     private ToolStripMenuItem miManualAdd = null!;
     private ToolStripMenuItem miQuickAdd = null!;
@@ -93,6 +95,7 @@ partial class MainForm
         menuCheckUpdate = new ToolStripMenuItem();
         menuAiChat = new ToolStripMenuItem();
         menuAiSettings = new ToolStripMenuItem();
+        menuKnowledgeBase = new ToolStripMenuItem();
         tabControl = new TabControl();
         tabLaunch = new TabPage();
         tabTools = new TabPage();
@@ -184,7 +187,7 @@ partial class MainForm
         // 
         // menuHelp
         // 
-        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuAiChat, menuAiSettings, menuCheckUpdate, menuAbout });
+        menuHelp.DropDownItems.AddRange(new ToolStripItem[] { menuAiChat, menuAiSettings, menuKnowledgeBase, menuCheckUpdate, menuAbout });
         menuHelp.Name = "menuHelp";
         menuHelp.Size = new Size(111, 32);
         menuHelp.Text = "帮助(_H)";
@@ -212,6 +215,13 @@ partial class MainForm
         menuAiSettings.Name = "menuAiSettings";
         menuAiSettings.Size = new Size(210, 40);
         menuAiSettings.Text = "AI 助理设置";
+        //
+        // menuKnowledgeBase
+        //
+        menuKnowledgeBase.Name = "menuKnowledgeBase";
+        menuKnowledgeBase.Size = new Size(210, 40);
+        menuKnowledgeBase.Text = "知识库管理(_K)";
+        menuKnowledgeBase.Click += new EventHandler(MenuKnowledgeBase_Click);
         // 
         // tabControl
         // 
