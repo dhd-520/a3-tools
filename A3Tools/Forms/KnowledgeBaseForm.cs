@@ -194,7 +194,7 @@ public partial class KnowledgeBaseForm : Form
                 Content = content,
                 SourceFile = file.FullName,
                 ContentHash = hash,
-                Tags = ExtractTagsFromContent(content),
+                Tags = KnowledgeBaseManager.ExtractTagsFromContent(content),
             };
 
             if (existing != null)
@@ -390,6 +390,77 @@ public partial class KnowledgeBaseForm : Form
         txtSearch.SelectAll();
     }
 
+    private async void TsbAiExtract_Click(object? sender, EventArgs e)
+    {
+        if (_currentBase == null) { MessageBox.Show("请先选择知识库"); return; }
+
+        // 选文件夹（默认使用 KB 的 WatchFolder）
+        string folderPath = _currentBase.WatchFolder;
+        if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+        {
+            using var dlg = new FolderBrowserDialog();
+            dlg.Description = "选择要 AI 提取的文件夹";
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            folderPath = dlg.SelectedPath;
+        }
+
+        // 检查 AI 配置
+        var configService = new AiConfigService();
+        var provider = configService.GetDefaultProvider();
+        if (provider == null)
+        {
+            MessageBox.Show("未配置默认 AI 供应商，请先在「帮助 -> AI 助理设置」中配置",
+                "AI 未配置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 确认
+        var confirm = MessageBox.Show(
+            $"将对文件夹里的文件逐个调用 AI 提炼为 md 知识库条目：\n{folderPath}\n\n根据文件数量与 AI 速度，这可能耗时较长。\n确定开始吗？",
+            "确认 AI 提取", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (confirm != DialogResult.Yes) return;
+
+        // 进度窗
+        using var progress = new ProgressForm("AI 提炼中...");
+        progress.Show(this);
+
+        try
+        {
+            var backend = new OpenAiCompatibleBackend();
+            var summary = await Task.Run(async () => await _mgr.AiExtractFromFolderAsync(
+                _currentBase.Id, folderPath, provider, backend,
+                new Progress<KnowledgeBaseManager.AiExtractProgress>(p =>
+                {
+                    progress.SetProgress(p.Index, p.Total, p.FileName, p.Status);
+                    UpdateStatus($"🤖 [{p.Index}/{p.Total}] {p.FileName} - {p.Status}");
+                }),
+                progress.CancellationToken));
+
+            progress.Close();
+            _currentBase = _mgr.GetBase(_currentBase.Id);
+            RefreshEntryList();
+
+            var msg = $"✅ AI 提取完成\n总计 {summary.Total} 个文件：\n成功 {summary.Success}\n失败 {summary.Failed}\n跳过 {summary.Skipped}";
+            if (summary.Errors.Count > 0)
+            {
+                msg += "\n\n错误详情：\n" + string.Join("\n", summary.Errors.Take(10));
+            }
+            MessageBox.Show(msg, "AI 提取结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UpdateStatus($"✅ AI 提取：成功 {summary.Success}, 失败 {summary.Failed}, 跳过 {summary.Skipped}");
+        }
+        catch (OperationCanceledException)
+        {
+            progress.Close();
+            UpdateStatus("⚠ AI 提取已取消");
+        }
+        catch (Exception ex)
+        {
+            progress.Close();
+            MessageBox.Show($"AI 提取失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UpdateStatus("❌ AI 提取失败");
+        }
+    }
+
     // ━━━━━━━━━━━━━━━━ 辅助 ━━━━━━━━━━━━━━━━
 
     private void UpdateStatus(string msg)
@@ -402,26 +473,6 @@ public partial class KnowledgeBaseForm : Form
         var bytes = System.Text.Encoding.UTF8.GetBytes(content);
         var hash = System.Security.Cryptography.SHA256.HashData(bytes);
         return Convert.ToHexString(hash);
-    }
-
-    /// <summary>从内容自动生成标签(标题前 5 个 # 词)</summary>
-    private static List<string> ExtractTagsFromContent(string content)
-    {
-        if (string.IsNullOrWhiteSpace(content)) return new List<string>();
-        var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        // 简单方案:取 ## 二级标题作为标签
-        foreach (var line in content.Split('\n'))
-        {
-            var t = line.TrimStart();
-            if (t.StartsWith("## ") && t.Length > 3)
-            {
-                var title = t[3..].Trim().Split(' ', '\t', '|')[0];
-                if (title.Length > 0 && title.Length < 30)
-                    tags.Add(title);
-                if (tags.Count >= 5) break;
-            }
-        }
-        return tags.ToList();
     }
 
     private void KnowledgeBaseForm_FormClosing(object? sender, FormClosingEventArgs e)

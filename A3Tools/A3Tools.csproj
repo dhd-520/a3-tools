@@ -47,6 +47,10 @@
       <DependentUpon>KnowledgeBaseForm.cs</DependentUpon>
     </Compile>
     <Compile Update="Forms\Prompt.cs" />
+    <Compile Update="Forms\ProgressForm.cs" />
+    <Compile Update="Forms\ProgressForm.Designer.cs">
+      <DependentUpon>ProgressForm.cs</DependentUpon>
+    </Compile>
     <Compile Update="Forms\ScanResultForm.cs" />
     <Compile Update="Forms\ScanResultForm.Designer.cs">
       <DependentUpon>ScanResultForm.cs</DependentUpon>

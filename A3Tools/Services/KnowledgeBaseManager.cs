@@ -232,7 +232,166 @@ public class KnowledgeBaseManager
         return ScanFolder(k.WatchFolder, k.FilePatterns, k.Recursive);
     }
 
-    /// <summary>读取文件内容(.md/.txt 直接读,.docx 待 R3 用 OpenXML SDK 实现)</summary>
+    // ━━━━━━━━━━━━━━━━ AI 提取（R3 2026-09-01 陛下要求）━━━━━━━━━━━━━━━
+
+    /// <summary>AI 提取结果汇总</summary>
+    public class AiExtractSummary
+    {
+        public int Total { get; set; }
+        public int Success { get; set; }
+        public int Failed { get; set; }
+        public int Skipped { get; set; }
+        public List<string> Errors { get; set; } = new();
+    }
+
+    /// <summary>单文件提取进度</summary>
+    public class AiExtractProgress
+    {
+        public int Index { get; set; }      // 当前处理第几个(1-based)
+        public int Total { get; set; }       // 总文件数
+        public string FileName { get; set; } = "";
+        public string Status { get; set; } = "";  // "读取中" / "提取中" / "完成" / "失败"
+    }
+
+    /// <summary>AI 提取提示词模板（强调提炼 + 尊重原始内容）</summary>
+    private const string AiExtractSystemPrompt = @"你是 A3Tools 知识库提取助手。请把以下文档提炼为结构化 Markdown 知识条目。
+
+【要求】
+1. 提炼关键概念、操作步骤、参数、注意事项 — 不要大段复制原文
+2. 重要控制控控在原文 30% 长度以内，以精炼为优先
+3. 使用 `##` 二级标题 + `###` 三级标题组织章节
+4. 列表用 `-` 5. 关键术语加 `【重点】` 标记6. 如有原始表格，用 `│` `─┼─` 制表符重新对齐
+7. 开头输出一行 `> 来源：<filename>` 标记出处
+
+【输出】仅输出提炼后的 Markdown，不要额外说明。";
+
+    /// <summary>从文件夹 AI 提取为知识库条目</summary>
+    /// <param name="baseId">目标知识库 ID</param>
+    /// <param name="folderPath">要扫描的文件夹路径（为空则用 KB 的 WatchFolder）</param>
+    /// <param name="provider">AI 供应商配置</param>
+    /// <param name="backend">AI 后端</param>
+    /// <param name="progress">进度回调</param>
+    /// <param name="ct">取消令牌</param>
+    public async Task<AiExtractSummary> AiExtractFromFolderAsync(
+        string baseId,
+        string? folderPath,
+        Models.AiProviderConfig provider,
+        OpenAiCompatibleBackend backend,
+        IProgress<AiExtractProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var summary = new AiExtractSummary();
+        var kb = GetBase(baseId);
+        if (kb == null)
+        {
+            summary.Errors.Add($"知识库 {baseId} 不存在");
+            return summary;
+        }
+
+        var folder = folderPath ?? kb.WatchFolder;
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        {
+            summary.Errors.Add($"文件夹不存在: {folder}");
+            return summary;
+        }
+
+        var files = ScanFolder(folder, kb.FilePatterns, kb.Recursive);
+        summary.Total = files.Count;
+        if (files.Count == 0)
+        {
+            summary.Errors.Add("文件夹下未找到任何匹配文件");
+            return summary;
+        }
+
+        // extracted 子目录存生成的 .md
+        var extractedDir = Path.Combine(DataDir, kb.Id, "extracted");
+        Directory.CreateDirectory(extractedDir);
+
+        for (int i = 0; i < files.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var file = files[i];
+            progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = "读取中" });
+
+            try
+            {
+                var content = ReadFileContent(file.FullName);
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    summary.Skipped++;
+                    progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = "跳过(空内容)" });
+                    continue;
+                }
+
+                progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = "AI 提炼中" });
+
+                // 构造提示词
+                var userPrompt = $"【文件名】{file.Name}\n【文档内容】\n{content}";
+                var messages = new List<Models.ChatMessage>
+                {
+                    new() { Role = Models.ChatRole.System, Content = AiExtractSystemPrompt },
+                    new() { Role = Models.ChatRole.User, Content = userPrompt },
+                };
+
+                var reply = await backend.SendAsync(provider, messages, ct);
+                if (string.IsNullOrWhiteSpace(reply?.Content))
+                {
+                    summary.Failed++;
+                    summary.Errors.Add($"{file.Name}: AI 返回为空");
+                    progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = "失败(空返回)" });
+                    continue;
+                }
+
+                var aiContent = reply.Content.Trim();
+
+                // 保存 .md 到 extracted 目录
+                var mdName = Path.GetFileNameWithoutExtension(file.Name) + ".md";
+                var mdPath = Path.Combine(extractedDir, mdName);
+                await File.WriteAllTextAsync(mdPath, aiContent, ct);
+
+                // 添加/更新 KB 条目
+                var hash = ComputeHash(aiContent);
+                var existing = kb.Entries.FirstOrDefault(e =>
+                    e.SourceFile.Equals(file.FullName, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    existing.Title = Path.GetFileNameWithoutExtension(file.Name);
+                    existing.Content = aiContent;
+                    existing.ContentHash = hash;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                    UpdateEntry(kb.Id, existing);
+                }
+                else
+                {
+                    AddEntry(kb.Id, new KnowledgeEntry
+                    {
+                        Title = Path.GetFileNameWithoutExtension(file.Name),
+                        Content = aiContent,
+                        SourceFile = file.FullName,
+                        ContentHash = hash,
+                        Tags = ExtractTagsFromContent(aiContent),
+                    });
+                }
+
+                summary.Success++;
+                progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = "✅ 完成" });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                summary.Failed++;
+                summary.Errors.Add($"{file.Name}: {ex.Message}");
+                progress?.Report(new AiExtractProgress { Index = i + 1, Total = files.Count, FileName = file.Name, Status = "❌ 失败" });
+            }
+        }
+
+        return summary;
+    }
+
+    /// <summary>读取文件内容(.md/.txt 直接读,.docx 用 BCL ZipFile 解 XML 提取文本)</summary>
     public string ReadFileContent(string filePath)
     {
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
@@ -241,11 +400,36 @@ public class KnowledgeBaseManager
 
         if (ext == ".docx")
         {
-            // ★ R3 待实现:用 DocumentFormat.OpenXml 提取纯文本
-            //   暂时返回文件名提示
-            return $"[docx 文件:{Path.GetFileName(filePath)} - 待 R3 实现 OpenXML 解析]";
+            // ★ 2026-09-01 陛下要求:不需要 OpenXml NuGet
+            //   docx = zip,word/document.xml 里所有段落文字都在 <w:t> 标签里
+            return ReadDocxText(filePath);
         }
         return File.ReadAllText(filePath);
+    }
+
+    /// <summary>从 .docx(zip)解压 word/document.xml 并拼接所有 <w:t> 文本(BCL only)</summary>
+    private static string ReadDocxText(string filePath)
+    {
+        const string DocXml = "word/document.xml";
+        const string WmlNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+        using var zip = System.IO.Compression.ZipFile.OpenRead(filePath);
+        var entry = zip.GetEntry(DocXml);
+        if (entry == null) return $"[docx 文件 {Path.GetFileName(filePath)} 缺少 {DocXml}]";
+
+        using var stream = entry.Open();
+        var xdoc = System.Xml.Linq.XDocument.Load(stream);
+        if (xdoc.Root == null) return "";
+
+        var sb = new System.Text.StringBuilder();
+        // 每个段落 <w:p> 输出一行,用 <w:t> 拼接
+        foreach (var p in xdoc.Root.Descendants(System.Xml.Linq.XName.Get("p", WmlNs)))
+        {
+            var line = string.Concat(p.Descendants(System.Xml.Linq.XName.Get("t", WmlNs))
+                                       .Select(t => (string?)t.Value ?? ""));
+            if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine(line);
+        }
+        return sb.ToString();
     }
 
     // ━━━━━━━━━━━━━━━━ 工具方法 ━━━━━━━━━━━━━━━━
@@ -255,5 +439,24 @@ public class KnowledgeBaseManager
         var bytes = System.Text.Encoding.UTF8.GetBytes(content);
         var hash = System.Security.Cryptography.SHA256.HashData(bytes);
         return Convert.ToHexString(hash);
+    }
+
+    /// <summary>从 Markdown 内容自动生成标签（取 ## 二级标题前 5 个）</summary>
+    public static List<string> ExtractTagsFromContent(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return new List<string>();
+        var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in content.Split('\n'))
+        {
+            var t = line.TrimStart();
+            if (t.StartsWith("## ") && t.Length > 3)
+            {
+                var title = t[3..].Trim().Split(' ', '\t', '|')[0];
+                if (title.Length > 0 && title.Length < 30)
+                    tags.Add(title);
+                if (tags.Count >= 5) break;
+            }
+        }
+        return tags.ToList();
     }
 }

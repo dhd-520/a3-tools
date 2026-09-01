@@ -27,6 +27,7 @@ partial class KnowledgeBaseForm
         this.tsbAddEntry = new System.Windows.Forms.ToolStripButton();
         this.tsbDeleteEntry = new System.Windows.Forms.ToolStripButton();
         this.tsSeparator3 = new System.Windows.Forms.ToolStripSeparator();
+        this.tsbAiExtract = new System.Windows.Forms.ToolStripButton();
         this.tsbSearch = new System.Windows.Forms.ToolStripButton();
 
         this.scMain = new System.Windows.Forms.SplitContainer();
@@ -80,6 +81,7 @@ partial class KnowledgeBaseForm
             this.tsSeparator2,
             this.tsbAddEntry, this.tsbDeleteEntry,
             this.tsSeparator3,
+            this.tsbAiExtract,
             this.tsbSearch
         });
 
@@ -90,6 +92,8 @@ partial class KnowledgeBaseForm
         this.tsbScanFolder.Text = "🔄 扫描文件夹";
         this.tsbAddEntry.Text = "➕ 新建条目";
         this.tsbDeleteEntry.Text = "🗑 删除条目";
+        this.tsbAiExtract.Text = "🤖 AI 提取";
+        this.tsbAiExtract.Click += new System.EventHandler(this.TsbAiExtract_Click);
         this.tsbSearch.Text = "🔍 搜索";
 
         // ━━━━━ scMain 左右分栏 ━━━━━
@@ -284,6 +288,7 @@ partial class KnowledgeBaseForm
     private System.Windows.Forms.ToolStripButton tsbAddEntry;
     private System.Windows.Forms.ToolStripButton tsbDeleteEntry;
     private System.Windows.Forms.ToolStripSeparator tsSeparator3;
+    private System.Windows.Forms.ToolStripButton tsbAiExtract;
     private System.Windows.Forms.ToolStripButton tsbSearch;
 
     private System.Windows.Forms.SplitContainer scMain;
