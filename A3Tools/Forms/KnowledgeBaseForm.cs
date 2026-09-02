@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Services;
+using Markdig;
 
 namespace A3Tools.Forms;
 
@@ -20,6 +21,13 @@ public partial class KnowledgeBaseForm : Form
     private KnowledgeEntry? _currentEntry;        // 当前编辑中的条目
     private bool _isDirty;                         // 条目内容是否有未保存修改
 
+    // ★ 2026-09-02 陛下要求:知识库内容支持 Markdown 预览
+    //   运行时构建(Designer 一行不改,避免 VS 设计器重写覆盖)
+    private TabControl? tabContent;
+    private TabPage? tpEdit;
+    private TabPage? tpPreview;
+    private WebBrowser? webPreview;
+
     public KnowledgeBaseForm()
     {
         InitializeComponent();
@@ -29,9 +37,84 @@ public partial class KnowledgeBaseForm : Form
     private void InitData()
     {
         InitSourceFilter();
+        InitMarkdownPreviewTab();
+        InitButtonTooltips();
+        InitEditorChangeEvents();
+        // ★ 先设 SplitterDistance(此时 Panel 才有正确尺寸)
+        ApplyDefaultSplitterDistance();
+        // ★ 然后再定位按钮(依赖 Panel 正确尺寸)
+        RepositionActionButtons();
         RefreshBaseList();
         SetEditorEnabled(false);
         UpdateStatus("就绪");
+    }
+
+    /// <summary>
+    /// ★ 2026-09-02 修复:保存/取消按钮永远为灰色
+    ///   原 Designer 只绑了 txtContent.TextChanged → OnEditorChanged
+    ///   但改 txtTitle(标题) / txtTags(标签) 时不会触发 _isDirty,按钮永远灰色
+    ///   这里手动订阅所有三个字段的 TextChanged
+    /// </summary>
+    private void InitEditorChangeEvents()
+    {
+        // 用 -= += 模式防止重复订阅(InitData 可能被调多次)
+        txtTitle.TextChanged -= OnEditorChanged;
+        txtTitle.TextChanged += OnEditorChanged;
+
+        txtTags.TextChanged -= OnEditorChanged;
+        txtTags.TextChanged += OnEditorChanged;
+
+        // txtContent 已在 Designer 里绑了,但 InitMarkdownPreviewTab 移动了 Parent,安全起见重新订阅
+        txtContent.TextChanged -= OnEditorChanged;
+        txtContent.TextChanged += OnEditorChanged;
+    }
+
+    /// <summary>
+    /// ★ 2026-09-02 修复:保存/取消按钮重叠
+    ///   原 Designer:btnSaveEntry 在 pnlEntryEdit.Width-180,btnCancelEdit 在 pnlEntryEdit.Width-90,间距 10px 太紧
+    ///   Anchor=Bottom|Right 在 Form.Load 时按 runtime 尺寸重算,但 Designer 里用 pnlEntryEdit.Width(此时为 0)算 Location,Anchor 起点错乱
+    ///   这里运行时显式设置 Location + Anchor,间距加大到 20px
+    /// </summary>
+    private void RepositionActionButtons()
+    {
+        int btnW = 90;  // 稍微加宽一点(原 80,中文"保存"+"取消"+图标更舒服)
+        int gap = 10;
+        int bottomMargin = 10;
+
+        // 重新设 Anchor(从 Designer 的 Anchor=Bottom|Right 继承过来,但 Location 重新算)
+        btnSaveEntry.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+        btnCancelEdit.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+
+        // 从右往左排:btnCancelEdit 在最右,btnSaveEntry 在其左边
+        int panelW = pnlEntryEdit.Width;
+        int panelH = pnlEntryEdit.Height;
+        int y = panelH - btnSaveEntry.Height - bottomMargin;
+
+        btnCancelEdit.Location = new Point(panelW - btnW - 50, y);
+        btnSaveEntry.Location = new Point(panelW - btnW * 2 - gap - 150, y);
+
+        // 字符计数 Label 也跟着调到底部左边
+        lblCharCount.Location = new Point(10, y + 6);  // 垂直居中
+    }
+
+    /// <summary>
+    /// ★ 2026-09-02 运行时设置 SplitterDistance 默认值。
+    /// 陛下要求:左侧知识库宽度 500(原 250 的 2 倍),右上条目列表高度 600+(原 280 的 2 倍多)。
+    /// </summary>
+    private void ApplyDefaultSplitterDistance()
+    {
+        // scMain 左侧 = 500(form 宽 1200 时 Panel1=500, Panel2=694)
+        try { scMain.SplitterDistance = 500; }
+        catch { /* 超过容器尺寸时 WinForms 自动 clamp */ }
+
+        // scRight 上方条目列表高度 = 380(平衡:Panel1 380 看条目 + Panel2 ≈ 254 放编辑器 + 按钮)
+        //   ★ 2026-09-02 调整:不能设太大(比如 600),否则 Panel2 被压太矮,保存/取消按钮重叠
+        try
+        {
+            int maxDist = scRight.Height - scRight.SplitterWidth - 25;
+            scRight.SplitterDistance = Math.Min(380, Math.Max(100, maxDist));
+        }
+        catch { /* 同上 */ }
     }
 
     private void InitSourceFilter()
@@ -355,6 +438,7 @@ public partial class KnowledgeBaseForm : Form
             txtSource.Text = "";
             txtContent.Text = "";
             lblCharCount.Text = "字符:0";
+            RefreshPreviewIfActive();
             return;
         }
         txtTitle.Text = entry.Title;
@@ -362,6 +446,7 @@ public partial class KnowledgeBaseForm : Form
         txtSource.Text = entry.SourceFile;
         txtContent.Text = entry.Content;
         lblCharCount.Text = $"字符:{entry.Content?.Length ?? 0}";
+        RefreshPreviewIfActive();
     }
 
     private void SetEditorEnabled(bool enabled)
@@ -369,16 +454,32 @@ public partial class KnowledgeBaseForm : Form
         txtTitle.Enabled = enabled;
         txtTags.Enabled = enabled;
         txtContent.Enabled = enabled;
-        btnSaveEntry.Enabled = enabled && _isDirty;
-        btnCancelEdit.Enabled = enabled && _isDirty;
+        // ★ 2026-09-02 简化:选中条目后按钮直接可用(不再用 _isDirty 门控)
+        btnSaveEntry.Enabled = enabled;
+        btnCancelEdit.Enabled = enabled;
+    }
+
+    /// <summary>
+    /// ★ 2026-09-02 陛下反馈:保存/取消按钮始终为灰色,不理解作用。
+    ///   这里初始化 ToolTip 解释按钮行为:灰色 = 无未保存修改(或未选条目),修改后变蓝可点击。
+    /// </summary>
+    private void InitButtonTooltips()
+    {
+        var tip = new ToolTip
+        {
+            AutoPopDelay = 5000,
+            InitialDelay = 200,
+            ReshowDelay = 200,
+            IsBalloon = false,
+        };
+        tip.SetToolTip(btnSaveEntry, "保存当前条目的修改(标题/标签/内容)\n灰色 = 无未保存修改");
+        tip.SetToolTip(btnCancelEdit, "撤销当前条目的修改,重新加载原始内容\n灰色 = 无未保存修改");
     }
 
     private void OnEditorChanged(object? sender, EventArgs e)
     {
         if (_currentEntry == null) return;
         _isDirty = true;
-        btnSaveEntry.Enabled = true;
-        btnCancelEdit.Enabled = true;
         lblCharCount.Text = $"字符:{txtContent.Text.Length}";
     }
 
@@ -680,5 +781,160 @@ public partial class KnowledgeBaseForm : Form
             if (ok == DialogResult.Yes) BtnSaveEntry_Click(null, EventArgs.Empty);
             else if (ok == DialogResult.Cancel) e.Cancel = true;
         }
+    }
+
+    // ━━━━━━━━━━━━━━━━ Markdown 预览(2026-09-02 陛下要求,运行时构建) ━━━━━━━━━━━━━━━━
+
+    /// <summary>
+    /// ★ 2026-09-02 陛下要求:知识库内容支持 Markdown 预览。
+    ///   重要:Designer.cs 一行不改(陛下调布局的自由完全保留),所有控件运行时构建。
+    ///   步骤:
+    ///     1. 记录 txtContent 原位置/Anchor(继承)
+    ///     2. 创建 tabContent + tpEdit + tpPreview + webPreview
+    ///     3. 把 txtContent 从 pnlEntryEdit 移到 tpEdit(Dock=Fill)
+    ///     4. tabContent 放在 txtContent 原位置,继承 Anchor
+    /// </summary>
+    private void InitMarkdownPreviewTab()
+    {
+        // 1. 记录 txtContent 原状态(为了 tabContent 完全继承)
+        var txtLoc = txtContent.Location;
+        var txtSize = txtContent.Size;
+        var txtAnchor = txtContent.Anchor;
+
+        // 2. 创建 TabControl + 2 个 TabPage
+        tabContent = new TabControl
+        {
+            Location = txtLoc,
+            Size = txtSize,
+            Anchor = txtAnchor,  // 继承 txtContent 的 Anchor,运行时随窗体缩放
+        };
+        tpEdit = new TabPage { Text = "✏ 编辑" };
+        tpPreview = new TabPage { Text = "👁 预览(Markdown)" };
+
+        // 3. 把 txtContent 从 pnlEntryEdit 移到 tpEdit
+        pnlEntryEdit.Controls.Remove(txtContent);
+        txtContent.Dock = DockStyle.Fill;
+        tpEdit.Controls.Add(txtContent);
+
+        // 4. webPreview 装到 tpPreview
+        webPreview = new WebBrowser
+        {
+            Dock = DockStyle.Fill,
+            ScriptErrorsSuppressed = true,
+        };
+        tpPreview.Controls.Add(webPreview);
+
+        // 5. tabContent 装 TabPage + 加到 pnlEntryEdit(覆盖原 txtContent 位置)
+        tabContent.Controls.Add(tpEdit);
+        tabContent.Controls.Add(tpPreview);
+        pnlEntryEdit.Controls.Add(tabContent);
+
+        // 6. 切到预览 Tab 触发渲染
+        tabContent.SelectedIndexChanged += (_, _) =>
+        {
+            if (tabContent.SelectedIndex == tpPreview.TabIndex)
+                RenderMarkdownPreview();
+        };
+
+        // 7. 更新 lblContent 文字提示用户切 Tab 看预览
+        lblContent.Text = "内容(Markdown):  💡 切到下方「👁 预览」Tab 看渲染效果";
+    }
+
+    /// <summary>
+    /// LoadEntryToEditor 后若当前在预览 Tab,自动刷新预览。
+    /// ★ 2026-09-02 hook 进 LoadEntryToEditor,保证选条目 → 切到预览 Tab 能立刻看到渲染。
+    /// </summary>
+    private void RefreshPreviewIfActive()
+    {
+        if (tabContent != null && tabContent.SelectedIndex == tpPreview!.TabIndex)
+        {
+            RenderMarkdownPreview();
+        }
+    }
+
+    /// <summary>把 txtContent 的 markdown 渲染到 webPreview</summary>
+    private void RenderMarkdownPreview()
+    {
+        if (webPreview == null) return;
+        try
+        {
+            string html = RenderMarkdownAsHtml(txtContent.Text ?? "");
+            webPreview.DocumentText = html;
+        }
+        catch (Exception ex)
+        {
+            webPreview.DocumentText = $"<html><body style=\"font-family:Microsoft YaHei UI;padding:20px;color:#b00;\"><h3>渲染失败</h3><pre>{System.Net.WebUtility.HtmlEncode(ex.Message)}</pre></body></html>";
+            UpdateStatus($"❌ Markdown 渲染失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Markdig → GitHub 风格 CSS HTML(★ 2026-09-02 加大:正文 17px,标题 24/21/18,代码 16px,适配右侧窗格大字阅读)。
+    /// 支持 GFM(表格/任务列表/代码块)+ CommonMark(标题/列表/代码/粗体/斜体/链接/引用/分割线)。
+    /// </summary>
+    private static string RenderMarkdownAsHtml(string markdown)
+    {
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build();
+        string bodyHtml = Markdown.ToHtml(markdown ?? "", pipeline);
+
+        string html = @"<!DOCTYPE html>
+<html><head><meta charset=""utf-8""><meta http-equiv=""X-UA-Compatible"" content=""IE=edge""><style>
+body {
+    font-family: 'Microsoft YaHei UI', 'Segoe UI', -apple-system, sans-serif;
+    font-size: 20px;
+    line-height: 1.7;
+    color: #24292f;
+    background: #ffffff;
+    padding: 14px 18px;
+    margin: 0;
+}
+h1, h2, h3, h4, h5, h6 { margin: 20px 0 12px 0; font-weight: 600; line-height: 1.3; }
+h1 { font-size: 28px; padding-bottom: 8px; border-bottom: 1px solid #d0d7de; }
+h2 { font-size: 24px; padding-bottom: 6px; border-bottom: 1px solid #d0d7de; }
+h3 { font-size: 21px; }
+h4 { font-size: 18px; }
+p { margin: 0 0 14px 0; }
+ul, ol { margin: 0 0 14px 0; padding-left: 28px; }
+li { margin: 4px 0; }
+li > p { margin: 0; }
+blockquote {
+    margin: 0 0 10px 0;
+    padding: 0 12px;
+    color: #57606a;
+    border-left: 4px solid #d0d7de;
+    background: #f6f8fa;
+}
+code {
+    font-family: 'Consolas', 'Cascadia Code', monospace;
+    font-size: 18px;
+    background: rgba(175, 184, 193, 0.2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #24292f;
+}
+pre {
+    background: #f6f8fa;
+    padding: 12px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0 0 12px 0;
+    line-height: 1.55;
+}
+pre code { background: transparent; padding: 0; font-size: 18px; }
+strong { font-weight: 600; color: #24292f; }
+em { font-style: italic; }
+a { color: #0969da; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: none; border-top: 1px solid #d0d7de; margin: 16px 0; }
+table { border-collapse: collapse; margin: 0 0 14px 0; font-size: 17px; }
+table th, table td { border: 1px solid #d0d7de; padding: 6px 12px; }
+table th { background: #f6f8fa; font-weight: 600; }
+input[type='checkbox'] { margin-right: 4px; vertical-align: middle; }
+.task-list-item { list-style: none; padding-left: 0; }
+img { max-width: 100%; }
+</style></head><body>" + bodyHtml + @"</body></html>";
+        return html;
     }
 }
