@@ -42,8 +42,25 @@
     <Compile Update="Forms\AiSettingsForm.Designer.cs">
       <DependentUpon>AiSettingsForm.cs</DependentUpon>
     </Compile>
+    <Compile Update="Forms\KnowledgeBaseForm.cs" />
+    <Compile Update="Forms\KnowledgeBaseForm.Designer.cs">
+      <DependentUpon>KnowledgeBaseForm.cs</DependentUpon>
+    </Compile>
+    <Compile Update="Forms\Prompt.cs" />
+    <Compile Update="Forms\ProgressForm.cs" />
+    <Compile Update="Forms\ProgressForm.Designer.cs">
+      <DependentUpon>ProgressForm.cs</DependentUpon>
+    </Compile>
+    <Compile Update="Forms\ScanResultForm.cs" />
+    <Compile Update="Forms\ScanResultForm.Designer.cs">
+      <DependentUpon>ScanResultForm.cs</DependentUpon>
+    </Compile>
     <Compile Update="Models\AiAction.cs" />
+    <Compile Update="Models\KnowledgeBase.cs" />
+    <Compile Update="Models\KnowledgeEntry.cs" />
+    <Compile Update="Models\KnowledgeSourceType.cs" />
     <Compile Update="Services\AiActions\AiActions.cs" />
+    <Compile Update="Services\KnowledgeBaseManager.cs" />
     <Compile Update="Services\AiActions\ActionRegistry.cs" />
     <Compile Update="Forms\ConfirmActionForm.cs" />
     <None Update="Resources\A3ToolsKnowledge.md">
@@ -70,8 +87,12 @@
     <PackageReference Include="Markdig" Version="0.34.0" />
     <PackageReference Include="Microsoft.SqlServer.SqlManagementObjects" Version="171.30.0" />
     <PackageReference Include="NPinyin" Version="0.2.6321.26573" />
-    <!-- ★ 2026-08-29 15:20 方案 C：WebView2 用于 AI 气泡渲染 Markdown -->
+    <!-- ★ 2026-08-29 15:20 方案 C:WebView2 用于 AI 气泡渲染 Markdown -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1829.34016" />
+    <!-- ★ 2026-09-01 知识库多格式文档读取: .pdf / .xls / .xlsx -->
+    <!-- .doc 暂不支持: NPOI 2.6+ 拆出 HWPF 独立包,API 与主包不兼容;建议陛下用 Word/WPS 转 .docx -->
+    <PackageReference Include="PdfPig" Version="0.1.9" />
+    <PackageReference Include="NPOI" Version="2.7.1" />
   </ItemGroup>
 
   <ItemGroup>

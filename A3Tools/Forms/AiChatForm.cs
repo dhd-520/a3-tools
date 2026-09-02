@@ -282,16 +282,42 @@ public partial class AiChatForm : Form
         string displayContent = isSystem ? "" : msg.Content;
         if (!isUser && !isSystem)
         {
-            var html = Markdown.ToHtml(displayContent ?? string.Empty, _mdPipeline);
-            var sb = new StringBuilder();
-            bool inTag = false;
-            foreach (char c in html)
+            displayContent = displayContent ?? string.Empty;
+
+            // ★ 2026-09-01 陛下要求：DeepSeek/Qwen 推理模型输出的 <think>...</think> 标签
+            //   是思考过程(Chain of Thought),Label 不能折叠 → 直接删除整个块
+            displayContent = RemoveThinkTags(displayContent);
+
+            // ★ 2026-09-01 陛下要求：AI 气泡支持 ## / ### 标题 + **粗体**（Label 渲染不出局部格式）
+            //   思路是转成 Unicode 符号让标题/粗体看着有层次：
+            //     ## 标题  →  ━━ 标题 ━━（H1 大标题）
+            //     ### 标题 →  ▌ 标题（H2 标题）
+            //     **xxx**  →  【xxx】（方括号当“粗体”标记）
+            //     `xxx`    →  「xxx」（全角引号当代码标记）
+            //     - item   →  • item（项目符号）
+            //   ★ 必须在表格处理之前跑：否则表格存在时只走表格分支，标题/粗体会被跳过
+            displayContent = MarkdownToPrettyText(displayContent);
+
+            // ★ 2026-09-01 陛下要求：AI 气泡表格用对齐纯文本（Label 渲染不出 HTML 表格）
+            //   检测到 Markdown 表格 → 转成 │─┼─ 制表符对齐的纯文本，避免 HTML 标签在 Label 里乱码
+            if (ContainsMarkdownTable(displayContent))
             {
-                if (c == '<') inTag = true;
-                else if (c == '>') { inTag = false; sb.Append(' '); }
-                else if (!inTag) sb.Append(c);
+                displayContent = MarkdownTableToText(displayContent);
             }
-            displayContent = DecodeHtmlEntities(sb.ToString()).Trim();
+            else
+            {
+                // ★ 然后走 Markdig HTML 渲染+ 去标签（清理代码块、链接等）
+                var html = Markdown.ToHtml(displayContent, _mdPipeline);
+                var sb = new StringBuilder();
+                bool inTag = false;
+                foreach (char c in html)
+                {
+                    if (c == '<') inTag = true;
+                    else if (c == '>') { inTag = false; sb.Append(' '); }
+                    else if (!inTag) sb.Append(c);
+                }
+                displayContent = DecodeHtmlEntities(sb.ToString()).Trim();
+            }
         }
         else
         {
@@ -1020,6 +1046,230 @@ _ = wv2.EnsureCoreWebView2Async();
     }
 
     /// <summary>
+    /// ★ 2026-09-01 陛下要求：DeepSeek/Qwen 等推理模型输出的 <think>...</think> 标签
+    ///   是 AI 思考过程(Chain of Thought),对陛下无价值 → 直接删除整个块
+    ///   多行、非贪婪匹配,处理嵌套和连续多个 think 块
+    /// </summary>
+    private string RemoveThinkTags(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return content;
+        // 匹配 <think>...</think>(含跨行内容),后面可选吃掉一个换行避免留空行
+        return System.Text.RegularExpressions.Regex.Replace(
+            content,
+            @"<think>[\s\S]*?</think>\s*\n?",
+            string.Empty
+        ).TrimStart();
+    }
+
+    /// <summary>
+    /// ★ 2026-09-01 陛下要求：AI 气泡支持 Markdown 表格（Label 渲染不出 HTML 表格）
+    ///   支持两种表格格式：
+    ///     1. 标准 Markdown：| col1 | col2 | + |----|----| + | a | b |
+    ///     2. AI 预格式化：col1 │ col2 + ───┼──── + CPU │ 90
+    ///   至少 3 行含表格分隔符才算
+    /// </summary>
+    private bool ContainsMarkdownTable(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return false;
+        var lines = content.Split('\n');
+        int tableLineCount = 0;
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            // 标准 Markdown 表格：| col1 | col2 | 开头
+            if (trimmed.StartsWith("|") && trimmed.Count(c => c == '|') >= 2)
+                tableLineCount++;
+            // AI 预格式化表格：含 │ 或 ┼ 分隔符
+            else if (trimmed.Contains('│') || trimmed.Contains('┼'))
+                tableLineCount++;
+        }
+        return tableLineCount >= 3;
+    }
+
+    /// <summary>
+    /// ★ 2026-09-01 把 Markdown 表格转成对齐纯文本（Label 渲染用）
+    ///   支持两种输入格式：
+    ///     1. 标准 Markdown：| 名称 | 值 |  →  名称 │ 值
+    ///     2. AI 预格式化： 名称 │ 值        →  名称 │ 值（重新对齐）
+    ///   输出统一格式: │ 列分隔,─┼─ 表头/数据分隔,─ 列填充
+    /// </summary>
+    private string MarkdownTableToText(string markdown)
+    {
+        var lines = markdown.Split('\n');
+        var result = new StringBuilder();
+        bool inTable = false;
+        List<string[]>? tableRows = null;
+        List<int>? colWidths = null;
+
+        void FlushTable()
+        {
+            if (tableRows == null || tableRows.Count == 0) return;
+            // 算列宽
+            if (colWidths == null) colWidths = new List<int>();
+            for (int c = 0; c < tableRows[0].Length; c++)
+            {
+                int maxW = 0;
+                foreach (var row in tableRows)
+                    if (c < row.Length && row[c].Length > maxW) maxW = row[c].Length;
+                colWidths.Add(maxW);
+            }
+            // 输出表头
+            for (int c = 0; c < tableRows[0].Length; c++)
+            {
+                if (c > 0) result.Append(" │ ");
+                result.Append(tableRows[0][c].PadRight(colWidths[c]));
+            }
+            result.AppendLine();
+            // 分隔线
+            for (int c = 0; c < tableRows[0].Length; c++)
+            {
+                if (c > 0) result.Append("─┼─");
+                result.Append(new string('─', colWidths[c]));
+            }
+            result.AppendLine();
+            // 数据行（跳过表头和分隔行）
+            for (int r = 2; r < tableRows.Count; r++)
+            {
+                for (int c = 0; c < tableRows[r].Length; c++)
+                {
+                    if (c > 0) result.Append(" │ ");
+                    string cell = c < tableRows[r].Length ? tableRows[r][c] : "";
+                    result.Append(cell.PadRight(colWidths[c]));
+                }
+                result.AppendLine();
+            }
+            tableRows = null;
+            colWidths = null;
+            inTable = false;
+        }
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+            var trimmed = line.Trim();
+
+            // 检测表格行：两种格式
+            //   1. 标准 Markdown: | col1 | col2 |（以 | 开头 + ≥2 个 |）
+            //   2. AI 预格式化:  col1 │ col2（含 │/┼ 分隔符 + ≥2 个）
+            bool isPipeTable = trimmed.StartsWith("|") && trimmed.Count(c => c == '|') >= 2;
+            bool isPreAligned = !isPipeTable
+                && (trimmed.Contains('│') || trimmed.Contains('┼'));
+            bool isTableLine = isPipeTable || isPreAligned;
+
+            // 分隔行检测
+            bool isSeparator = false;
+            if (isPipeTable)
+            {
+                // |---|---| 格式
+                isSeparator = System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"\|[-:\s]+\|");
+            }
+            else if (isPreAligned)
+            {
+                // ───┼──── 或 ──────── 格式
+                isSeparator = (trimmed.Contains('─') || trimmed.Contains('┼'))
+                    && !trimmed.Any(c => char.IsLetterOrDigit(c));
+            }
+
+            if (isTableLine)
+            {
+                if (!inTable) { inTable = true; tableRows = new List<string[]>(); }
+                // 解析行
+                string[] cells;
+                if (isPipeTable)
+                {
+                    // | a | b | → [a, b]
+                    cells = trimmed.Trim('|').Split('|');
+                }
+                else
+                {
+                    // a │ b ┼ c → [a, b, c]
+                    cells = trimmed.Split(new[] { '│', '┼' }, StringSplitOptions.RemoveEmptyEntries);
+                }
+                for (int i = 0; i < cells.Length; i++) cells[i] = cells[i].Trim();
+                if (!isSeparator) tableRows!.Add(cells);
+            }
+            else
+            {
+                if (inTable) FlushTable();
+                result.AppendLine(line);
+            }
+        }
+        if (inTable) FlushTable();
+        return result.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// ★ 2026-09-01 陛下要求：AI 气泡支持 Markdown 标题 + 粗体（Label 渲染不出局部格式）
+    ///   思路是用 Unicode 符号让标题/粗体在 Label 里看着有层次：
+    ///     # H1 标题    →  ━━━━ 标题 ━━━━
+    ///     ## H2 标题   →  ━━ 标题 ━━
+    ///     ### H3 标题  →  ▌ 标题
+    ///     ####+ H4+    →  ▸ 标题
+    ///     **粗体**     →  【粗体】
+    ///     `代码`        →  「代码」
+    ///     - 列表项      →  • 列表项
+    ///   不处理:链接(交给 Markdig)、代码块(交给 Markdig)、图片(交给 Markdig)
+    /// </summary>
+    private string MarkdownToPrettyText(string markdown)
+    {
+        var lines = markdown.Split('\n');
+        var result = new StringBuilder();
+
+        // 先逐行处理（标题、列表）
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+            var trimmed = line.TrimStart();
+
+            // 标题 # / ## / ### / #### / ##### / ######
+            // 注意顺序：先匹配 ###（多个 # 的），再匹配 ##（两个 #），最后 #（一个 #）
+            if (trimmed.StartsWith("###### "))
+            {
+                result.Append("▸ ").AppendLine(trimmed[6..]);
+            }
+            else if (trimmed.StartsWith("##### "))
+            {
+                result.Append("▸ ").AppendLine(trimmed[5..]);
+            }
+            else if (trimmed.StartsWith("#### "))
+            {
+                result.Append("▌ ").AppendLine(trimmed[4..]);
+            }
+            else if (trimmed.StartsWith("### "))
+            {
+                result.Append("▌ ").AppendLine(trimmed[3..]);
+            }
+            else if (trimmed.StartsWith("## "))
+            {
+                result.Append("━━ ").Append(trimmed[3..]).AppendLine(" ━━");
+            }
+            else if (trimmed.StartsWith("# "))
+            {
+                result.Append("━━━━ ").Append(trimmed[2..]).AppendLine(" ━━━━");
+            }
+            // 列表 - 或 *
+            else if (trimmed.StartsWith("- ") || trimmed.StartsWith("* "))
+            {
+                result.Append("• ").AppendLine(trimmed[2..]);
+            }
+            // 普通行
+            else
+            {
+                result.AppendLine(line);
+            }
+        }
+
+        // 然后处理行内标记（粗体、行内代码）
+        var text = result.ToString();
+        // **xxx** → 【xxx】（粗体）
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\*\*(.+?)\*\*", "【$1】");
+        // `xxx` → 「xxx」（代码）
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"`([^`\n]+?)`", "「$1」");
+
+        return text.TrimEnd();
+    }
+
+    /// <summary>
     /// ★ 2026-08-29 14:59 陛下要求 AI 气泡支持 Markdown 完整渲染（含表格/代码块）
     ///   复用 UpdateForm.RenderMarkdownAsHtml 的 GitHub CSS 风格
     ///   返回完整 HTML，可直接赋给 WebBrowser.DocumentText
@@ -1101,7 +1351,9 @@ img { max-width: 100%; }
         var result = new List<ChatMessage>();
 
         // System Prompt：拼装知识库 + 陛下自定义追加
-        var sysContent = BuildSystemPrompt();
+        // R4: 传入陛下最近一条用户消息，用于检索相关知识库条目
+        var lastUserMsg = history.LastOrDefault(m => m.Role == ChatRole.User)?.Content ?? "";
+        var sysContent = BuildSystemPrompt(lastUserMsg);
         result.Add(new ChatMessage { Role = ChatRole.System, Content = sysContent });
 
         // 历史消息（截断到合理条数）
@@ -1130,7 +1382,7 @@ img { max-width: 100%; }
         return result;
     }
 
-    private string BuildSystemPrompt()
+    private string BuildSystemPrompt(string userQuery = "")
     {
         var sb = new StringBuilder();
         sb.AppendLine("你是 A3Tools 智能助手，专门帮陛下解答 A3Tools（A3 程序启动器）的使用、配置、故障问题。");
@@ -1192,6 +1444,60 @@ img { max-width: 100%; }
         catch (Exception ex)
         {
             sb.AppendLine($"（读取知识库失败：{ex.Message}）");
+        }
+
+        // ★ R4: 动态检索知识库条目（根据陛下当前问题）━━━━━━━━━━━━━━━
+        if (!string.IsNullOrWhiteSpace(userQuery))
+        {
+            try
+            {
+                var kbMgr = new KnowledgeBaseManager();
+                System.Diagnostics.Debug.WriteLine($"[KB] 查询：{userQuery}");
+                var hits = kbMgr.SearchAll(userQuery, topK: 5);
+                System.Diagnostics.Debug.WriteLine($"[KB] BM25 检索到 {hits.Count} 条命中");
+
+                // ★ Fallback: BM25 未命中时,取最近更新的 3 条全部注入
+                if (hits.Count == 0)
+                {
+                    var recent = kbMgr.GetRecentEntries(3);
+                    if (recent.Count > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[KB] BM25 0 命中,Fallback 注入最近 {recent.Count} 条");
+                        hits = recent;
+                    }
+                }
+
+                if (hits.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("## 动态检索知识库（根据陛下问题匹配）");
+                    sb.AppendLine("以下是从本地知识库检索到的可能相关内容，请优先参考：");
+                    sb.AppendLine();
+                    foreach (var hit in hits)
+                    {
+                        sb.AppendLine($"### [{hit.BaseName}] {hit.Entry.Title}");
+                        if (hit.MatchedTerms.Count > 0)
+                            sb.AppendLine($"匹配词：{string.Join("、", hit.MatchedTerms)}");
+                        sb.AppendLine($"来源类型：{hit.Entry.SourceType}");
+                        if (!string.IsNullOrEmpty(hit.Entry.SourceFile))
+                            sb.AppendLine($"原始文件：{hit.Entry.SourceFile}");
+                        // 限制单条内容长度（防 prompt 爆掉）
+                        var content = hit.Entry.Content ?? "";
+                        if (content.Length > 1500) content = content.Substring(0, 1500) + "\n... (内容过长已截断)";
+                        sb.AppendLine();
+                        sb.AppendLine(content);
+                        sb.AppendLine();
+                        sb.AppendLine("---");
+                        sb.AppendLine();
+                    }
+                    sb.AppendLine("★ 重要：如果上面动态检索的知识库内容与陛下问题相关，请依据这些内容回答；");
+                    sb.AppendLine("  如果不相关或请回答陛下的是问候/闲聊/与 A3Tools 无关的问题，则正常作答。");
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"（动态检索知识库失败：{ex.Message}）");
+            }
         }
 
         // 陛下追加

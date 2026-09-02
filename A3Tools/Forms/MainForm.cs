@@ -3649,6 +3649,30 @@ public partial class MainForm : Form, IToolContext
         }
     }
 
+    // ★ 2026-09-01 知识库管理入口（点击「帮助 -> 知识库管理」打开管理窗口）
+    private KnowledgeBaseForm? _knowledgeBaseForm;
+
+    private void MenuKnowledgeBase_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_knowledgeBaseForm == null || _knowledgeBaseForm.IsDisposed)
+            {
+                _knowledgeBaseForm = new KnowledgeBaseForm
+                {
+                    Owner = this
+                };
+            }
+            _knowledgeBaseForm.Show();
+            _knowledgeBaseForm.BringToFront();
+            _knowledgeBaseForm.Activate();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"打开知识库管理失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
     private void MenuAiSettings_Click(object? sender, EventArgs e)
     {
         try
