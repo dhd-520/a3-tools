@@ -282,42 +282,13 @@ public partial class AiChatForm : Form
         string displayContent = isSystem ? "" : msg.Content;
         if (!isUser && !isSystem)
         {
-            displayContent = displayContent ?? string.Empty;
-
-            // ★ 2026-09-01 陛下要求：DeepSeek/Qwen 推理模型输出的 <think>...</think> 标签
-            //   是思考过程(Chain of Thought),Label 不能折叠 → 直接删除整个块
-            displayContent = RemoveThinkTags(displayContent);
-
-            // ★ 2026-09-01 陛下要求：AI 气泡支持 ## / ### 标题 + **粗体**（Label 渲染不出局部格式）
-            //   思路是转成 Unicode 符号让标题/粗体看着有层次：
-            //     ## 标题  →  ━━ 标题 ━━（H1 大标题）
-            //     ### 标题 →  ▌ 标题（H2 标题）
-            //     **xxx**  →  【xxx】（方括号当“粗体”标记）
-            //     `xxx`    →  「xxx」（全角引号当代码标记）
-            //     - item   →  • item（项目符号）
-            //   ★ 必须在表格处理之前跑：否则表格存在时只走表格分支，标题/粗体会被跳过
-            displayContent = MarkdownToPrettyText(displayContent);
-
-            // ★ 2026-09-01 陛下要求：AI 气泡表格用对齐纯文本（Label 渲染不出 HTML 表格）
-            //   检测到 Markdown 表格 → 转成 │─┼─ 制表符对齐的纯文本，避免 HTML 标签在 Label 里乱码
-            if (ContainsMarkdownTable(displayContent))
-            {
-                displayContent = MarkdownTableToText(displayContent);
-            }
-            else
-            {
-                // ★ 然后走 Markdig HTML 渲染+ 去标签（清理代码块、链接等）
-                var html = Markdown.ToHtml(displayContent, _mdPipeline);
-                var sb = new StringBuilder();
-                bool inTag = false;
-                foreach (char c in html)
-                {
-                    if (c == '<') inTag = true;
-                    else if (c == '>') { inTag = false; sb.Append(' '); }
-                    else if (!inTag) sb.Append(c);
-                }
-                displayContent = DecodeHtmlEntities(sb.ToString()).Trim();
-            }
+            // ★★★ 2026-09-02 陛下反馈：AI 气泡根本不需要 MarkdownToPrettyText/MarkdownTableToText 预处理
+            //   AI/Error 气泡走 WebView2(下面 NavigateToString)，WebView2 能直接渲染完整 Markdown：
+            //     ## 标题 / ### 标题 / **粗体** / `代码` / 表格 / 列表 / 引用 / 链接
+            //   之前走 Unicode 符号改造（标题变 ━━，表格变 │─┼─）是给 Label 准备的，
+            //   错误地作用到了 WebView2 路径 → 导致标题/表格内容被破坏
+            //   现在只保留 RemoveThinkTags：DeepSeek/Qwen 推理模型的 <think>...</think> 是思考过程，气泡里不显示
+            displayContent = RemoveThinkTags(displayContent ?? string.Empty);
         }
         else
         {
@@ -474,6 +445,10 @@ public partial class AiChatForm : Form
                 Margin = new Padding(0),
                 ZoomFactor = 1.0,
             };
+            // ★★★ 2026-09-02 陛下反馈：鼠标在气泡内滚轮无法滚动聊天列表
+            //   原因：WebView2 默认把 wheel 事件吞进浏览器内部，WinForms 控件收不到
+            //   正确修法：HTML 里 JS 监听 wheel → postMessage({type:'wheel',delta}) → C# 滚动父容器
+            //   ★ 不要订阅 wv2.MouseWheel（WebView2 是 native 子窗口，WinForms 收不到）
             // ★ 订阅 wv2.SizeChanged：ResizeObserver 推高度 → wv2.Height 变 → row 重算
             wv2.SizeChanged += (_, _) =>
             {
@@ -506,6 +481,27 @@ public partial class AiChatForm : Form
                         var json = e2.TryGetWebMessageAsString();
                         if (string.IsNullOrEmpty(json)) return;
                         using var doc = System.Text.Json.JsonDocument.Parse(json);
+                        // ★★★ 2026-09-02 滚轮事件分流：{type:'wheel', delta:...}
+                        //   转发为父容器 pnlMessagesScroll 滚动，不再走 ResizeObserver 高度计算
+                        if (doc.RootElement.TryGetProperty("type", out var typeProp) &&
+                            typeProp.GetString() == "wheel")
+                        {
+                            // ★★★ 2026-09-02 陛下反馈：方向反向 + 粒度过小
+                            //   浏览器 wheel 语义: deltaY > 0 = 内容向下(看下面) = Value 变大
+                            //   WinForms MouseEventArgs 语义: Delta > 0 = Value 变小 (翻转过)
+                            //   之前用 Value - delta 是 WinForms 默认语义，浏览器 deltaY 是另一个语义 → 反向
+                            //   正确公式: newValue = oldValue + delta  (delta 不除，每次 120px 滚 120 像素，跟空白处 WinForms 默认一致)
+                            int delta = doc.RootElement.TryGetProperty("delta", out var dp) ? dp.GetInt32() : 0;
+                            int newY = pnlMessagesScroll.VerticalScroll.Value + delta;
+                            if (newY < pnlMessagesScroll.VerticalScroll.Minimum) newY = pnlMessagesScroll.VerticalScroll.Minimum;
+                            if (newY > pnlMessagesScroll.VerticalScroll.Maximum) newY = pnlMessagesScroll.VerticalScroll.Maximum;
+                            if (newY != pnlMessagesScroll.VerticalScroll.Value)
+                            {
+                                pnlMessagesScroll.VerticalScroll.Value = newY;
+                                pnlMessagesScroll.PerformLayout();
+                            }
+                            return;
+                        }
                         if (!doc.RootElement.TryGetProperty("h", out var hProp)) return;
                         int realH = hProp.GetInt32();
                         if (realH <= 0) return;
@@ -535,6 +531,7 @@ public partial class AiChatForm : Form
                             LayoutBubbleRow(row, wv2, avatarInRow, isUser);
                         }
                         RelayoutMessages();
+                        ScrollToBottom(); // ★★★ 2026-09-02 WebView2 高度回来后立刻滚到底
                     }
                     catch (Exception ex)
                     {
@@ -732,21 +729,55 @@ _ = wv2.EnsureCoreWebView2Async();
 
     private void ScrollToBottom()
     {
-        // ★ 2026-08-29 方案 A：现在滚动容器是 pnlMessagesScroll（不是 splitChat.Panel1）
-        //   pnlMessagesScroll 装 flpMessages，flpMessages 装气泡 row
-        //   滚到底 = pnlMessagesScroll.VerticalScroll.Value = Maximum
+        // ★★★ 2026-09-02 陛下反馈：打开会话/重新渲染后滚不到最底部
+        //   原因：AI 气泡是 WebView2，HTML 渲染 + ResizeObserver 推送高度是异步的
+        //   ScrollToBottom 同步调用时 VerticalScroll.Maximum 还是旧值（WebView2 未撑开）
+        //   修法：
+        //   1) 先同步试一次，立即滚
+        //   2) 接着分多次 0/50/150/300/600ms 重试，覆盖 WebView2 init + Render + ResizeObserver 回调
+        //   3) 最后挂 Application.Idle，捕获布局收尾的一次
+        //   4) 每次重试前都 PerformLayout + Refresh
         if (!pnlMessagesScroll.IsHandleCreated) return;
+
+        void DoScroll()
+        {
+            try
+            {
+                pnlMessagesScroll.SuspendLayout();
+                pnlMessagesScroll.PerformLayout();
+                flpMessages.PerformLayout();
+                int max = pnlMessagesScroll.VerticalScroll.Maximum;
+                if (max > 0)
+                {
+                    // ★ 使用 ScrollToControl 不起作用、臫动跳，需要选个能跳出中间状态
+                    pnlMessagesScroll.VerticalScroll.Value = max;
+                    pnlMessagesScroll.Refresh();
+                    pnlMessagesScroll.VerticalScroll.Value = max;
+                }
+            }
+            finally
+            {
+                pnlMessagesScroll.ResumeLayout(true);
+            }
+        }
 
         pnlMessagesScroll.InvokeIfNeeded(() =>
         {
-            // ★ 强制 layout，让 flpMessages 高度最新
-            pnlMessagesScroll.PerformLayout();
-            flpMessages.PerformLayout();
-            int max = pnlMessagesScroll.VerticalScroll.Maximum;
-            if (max > 0)
+            DoScroll();
+            // ★ 异步重试：覆盖 WebView2 init（~50ms） + Render + ResizeObserver（~50-200ms）
+            var t = new System.Windows.Forms.Timer { Interval = 50 };
+            int tries = 0;
+            t.Tick += (_, _) =>
             {
-                pnlMessagesScroll.VerticalScroll.Value = max;
-            }
+                DoScroll();
+                tries++;
+                if (tries >= 8) // 400ms
+                {
+                    t.Stop();
+                    t.Dispose();
+                }
+            };
+            t.Start();
         });
     }
 
@@ -1280,6 +1311,8 @@ _ = wv2.EnsureCoreWebView2Async();
             .UseAdvancedExtensions()
             .Build();
         string bodyHtml = Markdown.ToHtml(markdown ?? string.Empty, pipeline);
+        // ★★★ 2026-09-02 陛下反馈表格差劲：手工包装 table → div.bubble-table-wrap 才能 overflow-x:auto 滚
+        bodyHtml = WrapTablesForScroll(bodyHtml);
 
         // GitHub 风格 CSS（与 UpdateForm 一致，适配 AI 气泡场景字号略小）
         string html = @"<!DOCTYPE html><html><head><meta charset=""utf-8""><style>
@@ -1301,9 +1334,59 @@ strong { font-weight: 600; }
 em { font-style: italic; }
 a { color: #0969da; text-decoration: none; }
 hr { border: none; border-top: 1px solid #d0d7de; margin: 14px 0; }
-table { border-collapse: collapse; margin: 0 0 8px 0; }
-table th, table td { border: 1px solid #d0d7de; padding: 4px 10px; }
-table th { background: #f6f8fa; font-weight: 600; }
+/* ★★★ 2026-09-02 陛下反馈表格显示差劲，升级为 GitHub 正式版表格样式 ★★★ */
+.bubble-table-wrap {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 10px 0;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #ffffff;
+}
+table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+table th, table td {
+  border: 1px solid #d0d7de;
+  padding: 6px 14px;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  min-width: 60px;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ★ 首列背景区分，提示这是关键列 */
+table th:first-child, table td:first-child {
+  background: #f6f8fa;
+  font-weight: 600;
+  color: #24292f;
+}
+/* ★ 表头采用深色，主题更明确 */
+table thead th {
+  background: #eaeef2;
+  font-weight: 700;
+  color: #24292f;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+/* ★ 斑马纹 */
+table tbody tr:nth-child(even) td { background: #f9fafb; }
+table tbody tr:nth-child(even) td:first-child { background: #f1f3f5; }
+table tbody tr:hover td { background: #eef3f8; }
+table tbody tr:hover td:first-child { background: #e0e7ee; }
+/* ★ 单元格内代码/链接舒展 */
+table code { background: rgba(175,184,193,0.2); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+table a { color: #0969da; text-decoration: none; border-bottom: 1px solid transparent; }
+table a:hover { border-bottom-color: #0969da; }
 img { max-width: 100%; }
 </style></head><body>" + bodyHtml + @"<script>
 (function() {
@@ -1341,9 +1424,90 @@ img { max-width: 100%; }
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(notify);
   }
+
+  // ★★★ 2026-09-02 转发滚轮事件到 C#：WebView2 默认吞 wheel 进浏览器内部，
+  //   WinForms 控件本身收不到事件。所以用 JS 监听 wheel，postMessage 给 C# 滚父容器
+  //   ★ passive:false 才能 preventDefault 阻止浏览器内部滚动
+  window.addEventListener('wheel', function(e) {
+    try {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(JSON.stringify({
+          type: 'wheel',
+          delta: e.deltaY,
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey
+        }));
+      }
+    } catch (err) {}
+  }, { passive: false });
+  // ★ 同时捕获内部滚动容器的滚轮（表格 .bubble-table-wrap 内的横滚也转给父容器）
+  document.body.addEventListener('wheel', function(e) {
+    // ★ bubble-table-wrap 内只有横滚，没有纵滚意义，纵滚转交聊天列表
+    //   横滚（Shift+wheel 或 deltaX）允许浏览器自己处理
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(JSON.stringify({
+          type: 'wheel',
+          delta: e.deltaY,
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey
+        }));
+      }
+    }
+  }, { passive: false });
 })();
 </script></body></html>";
         return html;
+    }
+
+    /// <summary>
+    /// ★★★ 2026-09-02 表格包裹为可滚动容器：AI 输出的表格列数可能超出气泡宽度，需 overflow-x:auto
+    ///   原 table 没有包裹层，CSS 的 overflow-x:auto 不起作用
+    ///   这里手动将顶层 <table>...</table> 包成 <div class="bubble-table-wrap">...</div>
+    ///   只包最外层 table（不包 thead/nested table）
+    /// </summary>
+    private static string WrapTablesForScroll(string html)
+    {
+        if (string.IsNullOrEmpty(html)) return html;
+        var result = new StringBuilder(html.Length + 64);
+        int i = 0;
+        while (i < html.Length)
+        {
+            int idx = html.IndexOf("<table", i, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+            {
+                result.Append(html, i, html.Length - i);
+                break;
+            }
+            // ★ 需确认 <table 后是空格或 >，避免误匹配 <tablefoo>
+            char next = idx + 6 < html.Length ? html[idx + 6] : ' ';
+            if (next != ' ' && next != '>')
+            {
+                result.Append(html, i, idx - i + 6);
+                i = idx + 6;
+                continue;
+            }
+            // ★ 找匹配的 </table>（同层级）
+            int endIdx = html.IndexOf("</table>", idx, StringComparison.OrdinalIgnoreCase);
+            if (endIdx < 0)
+            {
+                result.Append(html, i, html.Length - i);
+                break;
+            }
+            int tableEnd = endIdx + "</table>".Length;
+            // ★ 输出 <table> 之前的内容
+            result.Append(html, i, idx - i);
+            // ★ 包一层可滚动容器
+            result.Append("<div class=\"bubble-table-wrap\">");
+            result.Append(html, idx, tableEnd - idx);
+            result.Append("</div>");
+            i = tableEnd;
+        }
+        return result.ToString();
     }
 
     private List<ChatMessage> BuildApiMessages(List<ChatMessage> history)
