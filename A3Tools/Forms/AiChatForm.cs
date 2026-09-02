@@ -253,10 +253,7 @@ public partial class AiChatForm : Form
             flpMessages.Controls.Add(bubble);
         }
 
-        // ★ 2026-08-29 诊断日志：加载历史/重画时记录 flp 高度 vs 滚动容器高度
-        System.Diagnostics.Debug.WriteLine(
-            $"[RenderDone] msgCount={_currentSession.Messages.Count} flpH={flpMessages.Height} pnlScrollClientH={pnlMessagesScroll.ClientSize.Height} " +
-            $"(溢出需要滚动={flpMessages.Height > pnlMessagesScroll.ClientSize.Height})");
+        // ★ 2026-08-29 诊断日志：加载历史/重画时记录 flp 高度 vs 滚动容器高度（2026-09-02 删除）
 
         ScrollToBottom();
     }
@@ -477,11 +474,7 @@ public partial class AiChatForm : Form
             // ★ 订阅 WebMessageReceived：HTML 里的 ResizeObserver 主动推送高度
             wv2.CoreWebView2InitializationCompleted += (s, e) =>
             {
-                if (!e.IsSuccess || wv2.CoreWebView2 == null)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[AIChat] WebView2 init FAILED: {e.InitializationException?.Message}");
-                    return;
-                }
+                if (!e.IsSuccess || wv2.CoreWebView2 == null) return;
                 wv2.CoreWebView2.WebMessageReceived += (s2, e2) =>
                 {
                     try
@@ -520,10 +513,6 @@ public partial class AiChatForm : Form
                         int newH = (int)(realH * 1.8);  // ★ 2026-08-31：按比例 +15% 缓冲，5行~18px，10行~36px，100行~360px
                         if (Math.Abs(newH - wv2.Height) < 4) return;
                         wv2.Height = newH;
-                        string fs = doc.RootElement.TryGetProperty("fs", out var fsp) ? fsp.GetString() : "?";
-                        string lh = doc.RootElement.TryGetProperty("lh", out var lhp) ? lhp.GetString() : "?";
-                        string ch = doc.RootElement.TryGetProperty("ch", out var chp) ? chp.GetString() : "?";
-                        System.Diagnostics.Debug.WriteLine($"[AIChat] ResizeObserver → wv2.H={newH} (was {wv2.Height}) fs={fs} lh={lh} ch={ch}");
                         var row = wv2.Parent as Panel;
                         if (row != null)
                         {
@@ -541,14 +530,13 @@ public partial class AiChatForm : Form
                         RelayoutMessages();
                         ScrollToBottom(); // ★★★ 2026-09-02 WebView2 高度回来后立刻滚到底
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        System.Diagnostics.Debug.WriteLine($"[AIChat] WebMessageReceived Exception: {ex.Message}");
+                        // ★ 2026-09-02 删除 ResizeObserver 调试日志
                     }
                 };
                 wv2.CoreWebView2.NavigateToString(RenderMarkdownAsHtml(displayContent));
             };
-                        System.Diagnostics.Debug.WriteLine("[AIChat] CreateWV2 msg=" + msg.Role + " isErr=" + isError + " contentLen=" + (displayContent == null ? 0 : displayContent.Length) + " w=" + bubbleMaxW);
 _ = wv2.EnsureCoreWebView2Async();
             bubble = wv2;
         }
@@ -592,11 +580,7 @@ _ = wv2.EnsureCoreWebView2Async();
         // 立即触发一次 SizeChanged
         row.Size = new System.Drawing.Size(row.Width, 1);
 
-        // ★ 诊断日志（验证用，测试后可删）
-        System.Diagnostics.Debug.WriteLine(
-            $"[Bubble:{msg.Role}|{source}] contentLen={displayContent?.Length ?? 0} " +
-            $"flpClientW={flpClientW} bubbleMaxW={bubbleMaxW} bubble=({bubble.PreferredSize.Width}x{bubble.PreferredSize.Height}) " +
-            $"avatar={(avatar?.PreferredSize.Width ?? 0)}x{(avatar?.PreferredSize.Height ?? 0)}");
+        // ★ 诊断日志（2026-09-02 删除）
 
         return row;
     }
@@ -851,10 +835,8 @@ _ = wv2.EnsureCoreWebView2Async();
         };
         // ★ 2026-08-29 诊断：TextBox 设 Size 后 PreferredSize 是什么？
         //   陛下反馈修复 #3 完全没生效 → 推测 TextBox 自动撑高到实际渲染高度，忽略我设的 Height
-        Size actualPreferred = tb.GetPreferredSize(new Size(int.MaxValue, int.MaxValue));
-        System.Diagnostics.Debug.WriteLine(
-            $"[TextBoxSize] setH={h} preferredH={actualPreferred.Height} preferredW={actualPreferred.Width} (Δ={actualPreferred.Height - h})");
-        return tb;
+        // ★ 诊断日志（2026-09-02 删除）
+        _ = tb.GetPreferredSize(new Size(int.MaxValue, int.MaxValue));        return tb;
     }
 
     private static string DecodeHtmlEntities(string s)
@@ -1927,9 +1909,7 @@ internal static class ControlExtensions
             //   但 WinForms TextBox.GetPreferredSize 可能在某些条件下用了 font.Height，导致每行多算 ~14px
             float realLineHeight = font.GetHeight();  // 实际行高
             int expectedLines = preferred.Height > 0 ? preferred.Height / Math.Max(1, (int)realLineHeight) : 0;
-            System.Diagnostics.Debug.WriteLine(
-                $"[MeasureRobust] textLen={text.Length} fontH={font.Height} realLineH={realLineHeight:F1} " +
-                $"preferred=({preferred.Width}x{preferred.Height}) expectedLines={expectedLines}");
+            // ★ 诊断日志（2026-09-02 删除）
 
             // ★ 2026-08-29 修复尝试 #3：preferred.Height 可能多算（用 font.Height 而非 GetHeight()）
             //   临时实验：改用 preferred.Height * (realLineHeight / font.Height) 重新计算
