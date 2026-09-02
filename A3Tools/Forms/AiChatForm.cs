@@ -55,12 +55,20 @@ public partial class AiChatForm : Form
 
         // pnlMessages Dock=None，需手动同步宽度以填满 splitChat.Panel1
         //   ★ 2026-08-29 方案 A：flpMessages Dock=Top，会自动跟 pnlMessagesScroll 宽度走，不需要手同步
-        Resize += (_, _) => ScrollToBottom();
-        pnlMessagesScroll.Resize += (_, _) => ScrollToBottom();
+        Resize += (_, _) => OnContainerResized();
+        pnlMessagesScroll.Resize += (_, _) => OnContainerResized();
+        pnlInput.Resize += (_, _) => LayoutInputPanel();
+        splitChat.Panel2.Resize += (_, _) => LayoutInputPanel();
+        pnlSidebar.Resize += (_, _) => LayoutSidebar();
 
         // ★ 2026-08-27 修陛下反馈「打开聊天框后不自动滚动到最下方」：
         //   窗体完全显示后 + layout 完成后才滚到底（构造函数里 RenderMessages 时控件还没 layout 完，Maximum=0 滚不动）
-        Shown += (_, _) => ScrollToBottom();
+        Shown += (_, _) =>
+        {
+            ScrollToBottom();
+            LayoutInputPanel(); // ★★★ 2026-09-02 初始按钮位置同步贴右边
+            LayoutSidebar();    // ★★★ 2026-09-02 sidebar 控件初始位置
+        };
 
         // 立即设真实约束（不等 Shown，避免首帧 RenderMessages 拿到错的 Panel1 宽度）
         splitChat.Panel1MinSize = 200;
@@ -614,6 +622,134 @@ _ = wv2.EnsureCoreWebView2Async();
         int newH = y + flpMessages.Padding.Bottom + flpMessages.Padding.Top;
         if (flpMessages.Height != newH) flpMessages.Height = newH;
         pnlMessagesScroll.AutoScrollMinSize = new System.Drawing.Size(flpMessages.Width, newH);
+    }
+
+    /// <summary>
+    /// ★★★ 2026-09-02 陛下反馈：窗体变化布局不跟着变
+    ///   flpMessages.Dock=None 是手动控制，Designer 里没设 Anchor
+    ///   Resize 时需手动同步：flp 宽度、每行宽度、row Y 位置、象头位置、气泡宽
+    ///   ★ WebView2.Width / Label.MaximumSize 创建时设了固定值，resize 后需重设才能跟着变大变小
+    /// </summary>
+    private void OnContainerResized()
+    {
+        if (!IsHandleCreated || !pnlMessagesScroll.IsHandleCreated) return;
+        // ★★★ 重算每个气泡的宽度 = 当前 flp 宽度的 85%（与 CreateBubbleRow 保持一致）
+        int flpClientW = Math.Max(400, flpMessages.ClientSize.Width - flpMessages.Padding.Horizontal);
+        const int sidePadding = 24;
+        int bubbleMaxW = (int)((flpClientW - sidePadding * 2) * 0.85);
+        foreach (Control rowCtl in flpMessages.Controls)
+        {
+            if (rowCtl is not Panel row) continue;
+            foreach (Control c in row.Controls)
+            {
+                if (c is Microsoft.Web.WebView2.WinForms.WebView2 wv2)
+                {
+                    // ★ WebView2 resize 后重新设宽度
+                    if (wv2.Width != bubbleMaxW) wv2.Width = bubbleMaxW;
+                }
+                else if (c is Label lbl && lbl.Tag is ChatMessage m && m.Role == ChatRole.User)
+                {
+                    // ★ Label 用户气泡：重设 MaximumSize.Width 让 Text 重新换行
+                    var maxSize = lbl.MaximumSize;
+                    if (maxSize.Width != bubbleMaxW)
+                        lbl.MaximumSize = new System.Drawing.Size(bubbleMaxW, int.MaxValue);
+                }
+            }
+        }
+        RelayoutMessages();
+        ScrollToBottom();
+    }
+
+    /// <summary>
+    /// ★★★ 2026-09-02 陛下反馈：窗体变化布局不跟着变 / 发送按钮右边空了很大部分
+    ///   pnlInput 里 btnSend/btnCancel 都是 Location 固定，没设 Anchor
+    ///   txtInput 设了 Anchor=Top|Bottom|Left|Right，会撑满整个右边、覆盖到按钮
+    ///   Resize 时手动重新定位
+    ///   ★★★ 关键：btnCancel 默认 Visible=false（没在发送时隐藏）
+    ///     如果 btnSend 贴在 btnCancel 左边，而 cancel 隐藏 → btnSend 右边会空出一大块
+    ///     所以要按 btnCancel.Visible 分支处理：
+    ///       - 可见时：btnCancel 贴右、btnSend 紧贴 btnCancel 左
+    ///       - 隐藏时：btnSend 直接贴右
+    /// ★ lblStatus 不在 pnlInput 里（在 pnlSidebar 里），不要这里管
+    /// </summary>
+    private void LayoutInputPanel()
+    {
+        if (!pnlInput.IsHandleCreated) return;
+        int clientW = pnlInput.ClientSize.Width;
+        int clientH = pnlInput.ClientSize.Height;
+        if (clientW <= 0 || clientH <= 0) return;
+        const int gap = 10;
+        if (btnCancel.Visible)
+        {
+            // ★ btnCancel 贴右
+            btnCancel.Location = new System.Drawing.Point(
+                clientW - btnCancel.Width - pnlInput.Padding.Right,
+                pnlInput.Padding.Top);
+            // ★ btnSend 紧贴 btnCancel 左
+            btnSend.Location = new System.Drawing.Point(
+                btnCancel.Left - btnSend.Width - gap,
+                pnlInput.Padding.Top);
+        }
+        else
+        {
+            // ★ btnCancel 隐藏：btnSend 直接贴右
+            btnSend.Location = new System.Drawing.Point(
+                clientW - btnSend.Width - pnlInput.Padding.Right,
+                pnlInput.Padding.Top);
+        }
+        // ★★★ 关键修复：txtInput 的 Right anchor 会撑满整个右边，覆盖到按钮
+        //   手动把 txtInput 右收到 btnSend.Left - gap
+        int txtNewRight = btnSend.Left - gap;
+        int txtNewW = txtNewRight - txtInput.Left;
+        if (txtNewW > 50 && txtInput.Width != txtNewW)
+        {
+            txtInput.Width = txtNewW;
+        }
+    }
+
+    /// <summary>
+    /// ★★★ 2026-09-02 陛下反馈：btnDeleteSession/btnClearAll/lblStatus/lstSessions 不跟着 resize
+    ///   全是 Location 固定，没设 Dock/Anchor
+    ///   Resize 时手动重新定位：
+    ///     lblSidebarTitle: 顶部 (Dock=Top 会被 Designer 重置，不动)
+    ///     lstSessions: 中部 Fill
+    ///     btnDeleteSession: 底部左
+    ///     btnClearAll: 底部右
+    ///     lblStatus: 在按钮下方贴底左
+    /// </summary>
+    private void LayoutSidebar()
+    {
+        if (!pnlSidebar.IsHandleCreated) return;
+        int clientW = pnlSidebar.ClientSize.Width;
+        int clientH = pnlSidebar.ClientSize.Height;
+        if (clientW <= 0 || clientH <= 0) return;
+
+        int pad = pnlSidebar.Padding.Left;       // 15
+        int padTop = pnlSidebar.Padding.Top;     // 15
+        int padR = pnlSidebar.Padding.Right;     // 15
+        int padB = pnlSidebar.Padding.Bottom;    // 15
+        int titleH = 50;                         // 会话列表标题 + 一点间距
+        int btnH = btnDeleteSession.Height;      // 52
+        int statusH = lblStatus.Height;          // 状态栏高度
+
+        // ★ lstSessions 撑满中部：title 下 + 按钮组上方
+        int btnGroupH = btnH + statusH + 10;     // 按钮 + 状态 + 间距
+        lstSessions.Location = new System.Drawing.Point(pad, padTop + titleH);
+        lstSessions.Size = new System.Drawing.Size(
+            clientW - pad - padR,
+            clientH - padTop - titleH - btnGroupH - padB);
+
+        // ★ 按钮贴底
+        int btnY = clientH - btnH - statusH - 10 - padB;
+        btnDeleteSession.Location = new System.Drawing.Point(pad, btnY);
+        btnClearAll.Location = new System.Drawing.Point(
+            clientW - padR - btnClearAll.Width,
+            btnY);
+
+        // ★ lblStatus 在按钮下方
+        lblStatus.Location = new System.Drawing.Point(
+            pad,
+            clientH - statusH - padB);
     }    private void LayoutBubbleRow(Panel row, Control bubble, Label? avatar, bool isUser)
     {
         const int sidePadding = 24;
