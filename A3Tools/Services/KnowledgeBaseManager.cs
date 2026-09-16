@@ -259,6 +259,378 @@ public class KnowledgeBaseManager
         return ScanFolder(k.WatchFolder, k.FilePatterns, k.Recursive);
     }
 
+    // ━━━━━━━━━━━━━━━━ 导入导出（R1 2026-09-08 陛下要求：跨机器）━━━━━━━━━━━━━━━
+
+    /// <summary>JSON 中用于识别导出类型的字段名</summary>
+    private const string DiscriminatorField = "$type";
+    private const string SingleBaseType = "a3kb-base-v1";
+    private const string AllBasesType = "a3kb-all-v1";
+
+    /// <summary>单库导出顶层 DTO（绕过 base 是 C# 关键字的问题）</summary>
+    private class SingleExportDto
+    {
+        [JsonPropertyName("$type")] public string Type { get; set; } = "";
+        [JsonPropertyName("exportedAt")] public string ExportedAt { get; set; } = "";
+        [JsonPropertyName("exportedFromVersion")] public string ExportedFromVersion { get; set; } = "";
+        [JsonPropertyName("library")] public KnowledgeBase? Library { get; set; }
+    }
+
+    /// <summary>多库导出顶层 DTO</summary>
+    private class AllExportDto
+    {
+        [JsonPropertyName("$type")] public string Type { get; set; } = "";
+        [JsonPropertyName("exportedAt")] public string ExportedAt { get; set; } = "";
+        [JsonPropertyName("exportedFromVersion")] public string ExportedFromVersion { get; set; } = "";
+        [JsonPropertyName("libraries")] public List<KnowledgeBase> Libraries { get; set; } = new();
+    }
+
+    /// <summary>导出汇总</summary>
+    public class ExportSummary
+    {
+        public int TotalBases { get; set; }
+        public int TotalEntries { get; set; }
+        public long FileSizeBytes { get; set; }
+    }
+
+    /// <summary>单个知识库的导入冲突详情</summary>
+    public class ImportConflict
+    {
+        /// <summary>原知识库名称（导出文件里的）</summary>
+        public string OriginalName { get; set; } = "";
+        /// <summary>导入后最终名称（重名时加 "(导入)" 后缀或 (导入 N) 后缀）</summary>
+        public string FinalName { get; set; } = "";
+        /// <summary>导入后该库的新 ID</summary>
+        public string NewBaseId { get; set; } = "";
+        /// <summary>重名原因：Name（同名）、Id（同一个库重复导入）</summary>
+        public string Reason { get; set; } = "";
+        /// <summary>该库包含的条目数</summary>
+        public int EntryCount { get; set; }
+    }
+
+    /// <summary>导入汇总</summary>
+    public class ImportSummary
+    {
+        public bool Success { get; set; }
+        public int TotalBases { get; set; }
+        public int SuccessBases { get; set; }
+        public int RenamedBases { get; set; }
+        public List<ImportConflict> Conflicts { get; set; } = new();
+        public List<string> Errors { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 导出单个知识库到 JSON 字符串。
+    /// 设计：扁平化单 json（陛下拍板，便于 Git/diff/邮件）。
+    ///   - $type=a3kb-base-v1 标识单库导出
+    ///   - watchFolder 跨机器时手动重设（不在导出阶段动，保留原值供陛下参考）
+    ///   - entries 全部序列化（包括 content/tags/sourceType 等）
+    /// </summary>
+    public string ExportBaseToJson(string baseId)
+    {
+        var kb = GetBase(baseId);
+        if (kb == null) throw new InvalidOperationException($"知识库 [{baseId}] 不存在");
+
+        var dto = new SingleExportDto
+        {
+            Type = SingleBaseType,
+            ExportedAt = DateTime.UtcNow.ToString("o"),
+            ExportedFromVersion = "A3Tools/2.5.0",
+            Library = kb,
+        };
+        return JsonSerializer.Serialize(dto, JsonOpts);
+    }
+
+    /// <summary>导出所有知识库到 JSON 字符串</summary>
+    public string ExportAllToJson()
+    {
+        var bases = new List<KnowledgeBase>();
+        foreach (var meta in ListBases())
+        {
+            var kb = GetBase(meta.Id);
+            if (kb != null) bases.Add(kb);
+        }
+
+        var dto = new AllExportDto
+        {
+            Type = AllBasesType,
+            ExportedAt = DateTime.UtcNow.ToString("o"),
+            ExportedFromVersion = "A3Tools/2.5.0",
+            Libraries = bases,
+        };
+        return JsonSerializer.Serialize(dto, JsonOpts);
+    }
+
+    /// <summary>导出单个知识库到文件，返回摘要</summary>
+    public ExportSummary ExportBaseToFile(string baseId, string filePath)
+    {
+        var json = ExportBaseToJson(baseId);
+        File.WriteAllText(filePath, json, System.Text.Encoding.UTF8);
+        var kb = GetBase(baseId);
+        return new ExportSummary
+        {
+            TotalBases = 1,
+            TotalEntries = kb?.Entries.Count ?? 0,
+            FileSizeBytes = new FileInfo(filePath).Length,
+        };
+    }
+
+    /// <summary>导出所有知识库到文件</summary>
+    public ExportSummary ExportAllToFile(string filePath)
+    {
+        var json = ExportAllToJson();
+        File.WriteAllText(filePath, json, System.Text.Encoding.UTF8);
+
+        int totalBases = 0, totalEntries = 0;
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("libraries", out var basesArr))
+        {
+            totalBases = basesArr.GetArrayLength();
+            foreach (var b in basesArr.EnumerateArray())
+                if (b.TryGetProperty("entries", out var entries))
+                    totalEntries += entries.GetArrayLength();
+        }
+
+        return new ExportSummary
+        {
+            TotalBases = totalBases,
+            TotalEntries = totalEntries,
+            FileSizeBytes = new FileInfo(filePath).Length,
+        };
+    }
+
+    /// <summary>
+    /// 从 JSON 字符串导入。
+    /// 规则（陛下拍板 2026-09-08）：
+    ///   1. 自动重生成 ID（避免与现有库 ID 冲突）
+    ///   2. 重名自动加 " (导入)" / " (导入 N)" 后缀（库名作为查找键）
+    ///   3. WatchFolder 跨机器自动清空，让陛下手动重设
+    ///   4. SourceFile 路径保留（参考用，在新机器上扫描不到是预期）
+    ///   5. 条目 ID 也重生成（避免与其他库的 ID 冲突）
+    /// </summary>
+    public ImportSummary ImportFromJson(string json)
+    {
+        var summary = new ImportSummary();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("$type", out var typeProp))
+            {
+                summary.Errors.Add("JSON 缺少 $type 字段，不是合法的 A3Tools 知识库导出文件");
+                return summary;
+            }
+            string type = typeProp.GetString() ?? "";
+
+            // 收集现有库名（用于重名检测）
+            var existing = ListBases();
+            var existingNames = new HashSet<string>(existing.Select(b => b.Name), StringComparer.OrdinalIgnoreCase);
+
+            if (type == SingleBaseType)
+            {
+                if (!doc.RootElement.TryGetProperty("library", out var baseEl))
+                {
+                    summary.Errors.Add("a3kb-base-v1 缺少 library 字段");
+                    return summary;
+                }
+                summary.TotalBases = 1;
+                ImportOneBase(baseEl, existingNames, summary);
+                summary.SuccessBases = summary.Conflicts.Count;
+            }
+            else if (type == AllBasesType)
+            {
+                if (!doc.RootElement.TryGetProperty("libraries", out var basesEl))
+                {
+                    summary.Errors.Add("a3kb-all-v1 缺少 libraries 字段");
+                    return summary;
+                }
+                summary.TotalBases = basesEl.GetArrayLength();
+                foreach (var baseEl in basesEl.EnumerateArray())
+                {
+                    ImportOneBase(baseEl, existingNames, summary);
+                }
+                summary.SuccessBases = summary.Conflicts.Count;
+            }
+            else
+            {
+                summary.Errors.Add($"未知的 $type：{type}（只支持 a3kb-base-v1 / a3kb-all-v1）");
+                return summary;
+            }
+
+            summary.Success = summary.Errors.Count == 0 && summary.SuccessBases == summary.TotalBases;
+            return summary;
+        }
+        catch (Exception ex)
+        {
+            summary.Errors.Add($"解析 JSON 失败：{ex.Message}");
+            return summary;
+        }
+    }
+
+    /// <summary>从文件导入</summary>
+    public ImportSummary ImportFromFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return new ImportSummary
+            {
+                Errors = { $"文件不存在：{filePath}" }
+            };
+        }
+        string json;
+        try
+        {
+            json = File.ReadAllText(filePath, System.Text.Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            return new ImportSummary
+            {
+                Errors = { $"读取文件失败：{ex.Message}" }
+            };
+        }
+        return ImportFromJson(json);
+    }
+
+    /// <summary>
+    /// 导入单个知识库（内部使用），返回冲突信息。
+    /// ★ 2026-09-08 关键决策：
+    ///   - ID 始终重生成（跨机器安全 + 避免与现有 ID 冲突）
+    ///   - Name 冲突时加 " (导入)" / " (导入 2)" / " (导入 3)" ...
+    ///   - watchFolder 强制清空（跨机器路径不存在）
+    ///   - entries 内部 ID 也重生成
+    /// </summary>
+    private void ImportOneBase(JsonElement baseEl, HashSet<string> existingNames, ImportSummary summary)
+    {
+        try
+        {
+            var kb = JsonSerializer.Deserialize<KnowledgeBase>(baseEl.GetRawText(), JsonOpts);
+            if (kb == null)
+            {
+                summary.Errors.Add("反序列化失败（base 节点）");
+                return;
+            }
+
+            string originalName = kb.Name ?? "";
+            string reason = "";
+
+            // 1. 重名检测
+            string finalName = originalName;
+            if (existingNames.Contains(finalName))
+            {
+                reason = "Name";
+                int suffix = 1;
+                while (true)
+                {
+                    string candidate = suffix == 1
+                        ? $"{originalName} (导入)"
+                        : $"{originalName} (导入 {suffix})";
+                    if (!existingNames.Contains(candidate))
+                    {
+                        finalName = candidate;
+                        break;
+                    }
+                    suffix++;
+                    if (suffix > 99)
+                    {
+                        summary.Errors.Add($"库名「{originalName}」冲突超过 99 次，放弃");
+                        return;
+                    }
+                }
+                summary.RenamedBases++;
+                existingNames.Add(finalName);
+            }
+
+            // 2. ID 重生成
+            string newId = Guid.NewGuid().ToString("N");
+
+            // 3. WatchFolder 跨机器清空（陛下拍板）
+            kb.WatchFolder = "";
+
+            // 4. 条目 ID 重生成（避免 ID 冲突）
+            if (kb.Entries != null)
+            {
+                foreach (var e in kb.Entries)
+                {
+                    e.Id = Guid.NewGuid().ToString("N");
+                }
+            }
+
+            kb.Id = newId;
+            kb.Name = finalName;
+            kb.CreatedAt = DateTime.UtcNow;
+            kb.UpdatedAt = DateTime.UtcNow;
+
+            SaveBase(kb);
+
+            summary.Conflicts.Add(new ImportConflict
+            {
+                OriginalName = originalName,
+                FinalName = finalName,
+                NewBaseId = newId,
+                Reason = reason,
+                EntryCount = kb.Entries?.Count ?? 0,
+            });
+        }
+        catch (Exception ex)
+        {
+            summary.Errors.Add($"导入失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>检测 JSON 是否为合法的 A3KB 导出文件</summary>
+    public static bool IsValidA3KbFile(string filePath)
+    {
+        if (!File.Exists(filePath)) return false;
+        try
+        {
+            using var fs = File.OpenRead(filePath);
+            using var doc = JsonDocument.Parse(fs);
+            return doc.RootElement.TryGetProperty("$type", out var t)
+                && (t.GetString() == SingleBaseType || t.GetString() == AllBasesType);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>快速预览 A3KB 文件信息（不导入）</summary>
+    public static (string type, int baseCount, int entryCount, string? warning) PreviewA3KbFile(string filePath)
+    {
+        if (!File.Exists(filePath)) return ("unknown", 0, 0, "文件不存在");
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(filePath, System.Text.Encoding.UTF8));
+            if (!doc.RootElement.TryGetProperty("$type", out var typeProp))
+                return ("unknown", 0, 0, "缺少 $type 字段，不是 A3KB 文件");
+            string type = typeProp.GetString() ?? "unknown";
+            int baseCount = 0, entryCount = 0;
+
+            if (type == SingleBaseType && doc.RootElement.TryGetProperty("library", out var baseEl))
+            {
+                baseCount = 1;
+                if (baseEl.TryGetProperty("entries", out var entries))
+                    entryCount = entries.GetArrayLength();
+            }
+            else if (type == AllBasesType && doc.RootElement.TryGetProperty("libraries", out var basesEl))
+            {
+                baseCount = basesEl.GetArrayLength();
+                foreach (var b in basesEl.EnumerateArray())
+                    if (b.TryGetProperty("entries", out var entries))
+                        entryCount += entries.GetArrayLength();
+            }
+
+            string? warn = null;
+            if (type != SingleBaseType && type != AllBasesType)
+                warn = $"未知的 $type：{type}";
+
+            return (type, baseCount, entryCount, warn);
+        }
+        catch (Exception ex)
+        {
+            return ("unknown", 0, 0, $"解析失败：{ex.Message}");
+        }
+    }
+
     // ━━━━━━━━━━━━━━━━ AI 提取（R3 2026-09-01 陛下要求）━━━━━━━━━━━━━━━
 
     /// <summary>AI 提取结果汇总</summary>

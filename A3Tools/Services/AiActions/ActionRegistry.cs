@@ -38,6 +38,19 @@ public class ActionRegistry
         Register(new ListTablesAction());
         Register(new GetTableSchemaAction());
         Register(new ExecuteSqlAction());
+        // ★ 2026-09-08 知识库管理（list/search/get/recommend 只读；create/add/update 普通确认）
+        //   delete 高危：输入条目标题前 4 字确认
+        Register(new ListKnowledgeBasesAction());
+        Register(new SearchKnowledgeAction());
+        Register(new GetKnowledgeEntryAction());
+        Register(new RecommendKnowledgeTargetAction());
+        Register(new CreateKnowledgeBaseAction());
+        Register(new AddKnowledgeEntryAction());
+        Register(new UpdateKnowledgeEntryAction());
+        Register(new DeleteKnowledgeEntryAction());
+        // ★ 2026-09-16 知识库导入导出（export/import 普通确认）
+        Register(new ExportKnowledgeAction());
+        Register(new ImportKnowledgeAction());
     }
 
     private void Register(IAiAction action)

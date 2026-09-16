@@ -40,6 +40,8 @@ public partial class KnowledgeBaseForm : Form
         InitMarkdownPreviewTab();
         InitButtonTooltips();
         InitEditorChangeEvents();
+        // ★ 2026-09-16 陛下要求:知识库导入导出 UI
+        InitImportExportButtons();
         // ★ 先设 SplitterDistance(此时 Panel 才有正确尺寸)
         ApplyDefaultSplitterDistance();
         // ★ 然后再定位按钮(依赖 Panel 正确尺寸)
@@ -47,6 +49,214 @@ public partial class KnowledgeBaseForm : Form
         RefreshBaseList();
         SetEditorEnabled(false);
         UpdateStatus("就绪");
+    }
+
+    // ━━━━━━━━━━━━━━━━ 导入导出按钮（2026-09-16 陛下要求）━━━━━━━━━━━━━━━
+
+    /// <summary>工具栏右侧的导出/导入按钮（运行时构建，Designer 不动）</summary>
+    private ToolStripButton tsbExportBase = null!;
+    private ToolStripButton tsbExportAll = null!;
+    private ToolStripButton tsbImport = null!;
+    private ToolStripSeparator tsSepExport = null!;
+
+    /// <summary>
+    /// ★ 2026-09-16：KnowledgeBaseManager 后端已有 ExportBaseToFile/ExportAllToFile/ImportFromFile，
+    ///   但 KnowledgeBaseForm UI 完全没接。现在在工具栏运行时添加 3 个按钮 + 1 个分隔符。
+    ///   位置：放在「🗑 删除选中」之后（最后面），保持现有按钮顺序不变。
+    /// </summary>
+    private void InitImportExportButtons()
+    {
+        tsSepExport = new ToolStripSeparator();
+        tsbExportBase = new ToolStripButton("📤 导出当前库");
+        tsbExportBase.ToolTipText = "把当前选中的知识库导出为 JSON 文件（a3kb-base-v1 格式）\n文件名: 知识库名_yyyyMMdd_HHmmss.json";
+        tsbExportBase.Click += (_, _) => TsbExportBase_Click();
+
+        tsbExportAll = new ToolStripButton("📤 导出全部");
+        tsbExportAll.ToolTipText = "把所有知识库导出到一个 JSON 文件（a3kb-all-v1 格式）\n文件名: A3Tools_知识库备份_yyyyMMdd_HHmmss.json";
+        tsbExportAll.Click += (_, _) => TsbExportAll_Click();
+
+        tsbImport = new ToolStripButton("📥 导入");
+        tsbImport.ToolTipText = "从 JSON 文件导入知识库（支持单库/多库格式）\n重名自动加「(导入)」后缀；条目 ID 会重新生成；WatchFolder 跨机器自动清空";
+        tsbImport.Click += (_, _) => TsbImport_Click();
+
+        // 加到工具栏尾部（不破坏现有顺序）
+        tsTop.Items.Add(tsSepExport);
+        tsTop.Items.Add(tsbExportBase);
+        tsTop.Items.Add(tsbExportAll);
+        tsTop.Items.Add(tsbImport);
+
+        // 没选库时导出当前库按钮禁用
+        tsbExportBase.Enabled = _currentBase != null;
+        lstBases.SelectedIndexChanged += (_, _) =>
+        {
+            tsbExportBase.Enabled = lstBases.SelectedItem is KnowledgeBase;
+        };
+    }
+
+    /// <summary>导出当前选中知识库</summary>
+    private void TsbExportBase_Click()
+    {
+        if (_currentBase == null) { MessageBox.Show("请先选中要导出的知识库"); return; }
+
+        var safeName = SanitizeFileName(_currentBase.Name);
+        var ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var defaultName = $"{safeName}_{ts}.json";
+
+        using var dlg = new SaveFileDialog
+        {
+            Title = $"导出知识库「{_currentBase.Name}」",
+            Filter = "A3Tools 知识库 JSON (*.json)|*.json|所有文件 (*.*)|*.*",
+            FileName = defaultName,
+            DefaultExt = "json",
+            AddExtension = true,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            var summary = _mgr.ExportBaseToFile(_currentBase.Id, dlg.FileName);
+            var sizeKb = summary.FileSizeBytes / 1024.0;
+            UpdateStatus($"✅ 已导出 {summary.TotalBases} 个库 / {summary.TotalEntries} 条目 ({sizeKb:F1} KB)");
+            MessageBox.Show(
+                $"✅ 导出成功\n\n" +
+                $"知识库：{_currentBase.Name}\n" +
+                $"条目数：{summary.TotalEntries}\n" +
+                $"文件大小：{sizeKb:F1} KB\n" +
+                $"路径：{dlg.FileName}",
+                "导出完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"导出失败：{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UpdateStatus($"❌ 导出失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>导出全部知识库</summary>
+    private void TsbExportAll_Click()
+    {
+        var allBases = _mgr.ListBases();
+        if (allBases.Count == 0) { MessageBox.Show("当前没有任何知识库可导出"); return; }
+
+        var ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var defaultName = $"A3Tools_知识库备份_{ts}.json";
+
+        using var dlg = new SaveFileDialog
+        {
+            Title = $"导出全部知识库（{allBases.Count} 个）",
+            Filter = "A3Tools 知识库 JSON (*.json)|*.json|所有文件 (*.*)|*.*",
+            FileName = defaultName,
+            DefaultExt = "json",
+            AddExtension = true,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            var summary = _mgr.ExportAllToFile(dlg.FileName);
+            var sizeKb = summary.FileSizeBytes / 1024.0;
+            UpdateStatus($"✅ 已导出全部 {summary.TotalBases} 个库 / {summary.TotalEntries} 条目 ({sizeKb:F1} KB)");
+            MessageBox.Show(
+                $"✅ 导出成功\n\n" +
+                $"知识库数：{summary.TotalBases}\n" +
+                $"条目总数：{summary.TotalEntries}\n" +
+                $"文件大小：{sizeKb:F1} KB\n" +
+                $"路径：{dlg.FileName}",
+                "导出完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"导出失败：{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UpdateStatus($"❌ 导出失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>从 JSON 文件导入知识库</summary>
+    private void TsbImport_Click()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = "导入知识库 JSON 文件",
+            Filter = "A3Tools 知识库 JSON (*.json)|*.json|所有文件 (*.*)|*.*",
+            Multiselect = false,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        // 先预览，让陛下看到文件里有几个库/几条目、是否有冲突，再决定是否继续
+        var (type, baseCount, entryCount, warning) = KnowledgeBaseManager.PreviewA3KbFile(dlg.FileName);
+        if (warning != null)
+        {
+            MessageBox.Show(
+                $"❌ 这不是合法的 A3Tools 知识库导出文件\n\n{warning}",
+                "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        string typeLabel = type == "a3kb-base-v1" ? "单库" : type == "a3kb-all-v1" ? "多库" : type;
+        var confirm = MessageBox.Show(
+            $"确认导入此文件？\n\n" +
+            $"类型：{typeLabel}\n" +
+            $"知识库：{baseCount} 个\n" +
+            $"条目：{entryCount} 条\n\n" +
+            $"⚠ 重名会自动加「(导入)」后缀\n" +
+            $"⚠ 条目 ID 会重新生成\n" +
+            $"⚠ WatchFolder 会被清空（跨机器保护）",
+            "确认导入", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (confirm != DialogResult.Yes) return;
+
+        try
+        {
+            var summary = _mgr.ImportFromFile(dlg.FileName);
+
+            // 刷新列表
+            RefreshBaseList();
+
+            // 汇总展示
+            if (summary.Success)
+            {
+                var msg = $"✅ 导入完成\n\n" +
+                          $"成功：{summary.SuccessBases}/{summary.TotalBases} 个库\n";
+                if (summary.RenamedBases > 0)
+                    msg += $"重命名：{summary.RenamedBases} 个库（重名加了「(导入)」后缀）\n";
+                if (summary.Conflicts.Count > 0)
+                {
+                    msg += $"\n冲突详情：\n";
+                    foreach (var c in summary.Conflicts)
+                    {
+                        msg += $"• {c.OriginalName} → {c.FinalName}（{c.EntryCount} 条，原因:{c.Reason}）\n";
+                    }
+                }
+                UpdateStatus($"✅ 导入 {summary.SuccessBases}/{summary.TotalBases} 个库" +
+                             (summary.RenamedBases > 0 ? $"，{summary.RenamedBases} 个重命名" : ""));
+                MessageBox.Show(msg, "导入完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                var errMsg = summary.Errors.Count > 0
+                    ? string.Join("\n", summary.Errors)
+                    : "未知错误";
+                MessageBox.Show($"❌ 导入失败\n\n{errMsg}",
+                    "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateStatus($"❌ 导入失败");
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"导入失败：{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UpdateStatus($"❌ 导入失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>清理文件名中的非法字符</summary>
+    private static string SanitizeFileName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "未命名";
+        var invalid = Path.GetInvalidFileNameChars();
+        var clean = new string(name.Where(c => !invalid.Contains(c)).ToArray()).Trim();
+        return string.IsNullOrEmpty(clean) ? "未命名" : clean;
     }
 
     /// <summary>
