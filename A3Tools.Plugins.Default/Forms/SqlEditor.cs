@@ -885,6 +885,14 @@ public class SqlEditor : RichTextBox
         if (IsDisposed || TextLength == 0) return;
         if (!IsHandleCreated) return;
 
+        // ★ 2026-09-14 修复: 用户拖选时禁止执行 Highlight
+        // 原因: Highlight 内部 Select(0, TextLength) 会把当前选区覆盖为全文,
+        //       然后恢复成 200ms 前 OnTextChanged 触发时的旧选区 (selStart/selLen).
+        //       如果用户正在拖选 (MouseButtons != None), 恢复的旧选区会打断用户当前的拖选,
+        //       表现为 "选区突然跳回" / "选多或选少".
+        // 解决: 用户在拖选时直接 return, 等 OnTextChanged/下次 timer 触发再跑.
+        if (MouseButtons != MouseButtons.None) return;
+
         int selStart = SelectionStart;
         int selLen = SelectionLength;
         // 保存滚动位置

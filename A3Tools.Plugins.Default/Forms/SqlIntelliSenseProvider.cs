@@ -140,7 +140,8 @@ public static class SqlIntelliSenseProvider
         // ===== -0. SELECT/WHERE/ON 后空白 → 弹列 =====
         if (ctx == SqlContextKind.AfterColumnKeyword)
         {
-            var cols = GetAllColumnsFromAliases(connectionString, fullSql, prefix);
+            // ★ 2026-09-14: 透传 caretOffset, 让 SqlAliasResolver.Parse 缩到当前语句
+            var cols = GetAllColumnsFromAliases(connectionString, fullSql, caretOffset, prefix);
             if (cols != null && cols.Count > 0) return cols;
         }
 
@@ -530,23 +531,48 @@ public static class SqlIntelliSenseProvider
         w.Equals("OR", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// 从 SQL 所有 FROM 别名拉列名（去重），用于 SELECT/WHERE/ON 后空白场景。
-    /// 如果 prefix 非空 → 前缀过滤。
+    /// 从 SQL 当前语句的 alias 拉列名（去重），用于 SELECT/WHERE/ON 后空白场景。
+    /// ★ 2026-09-14 增强 (陛下反馈 "LEFT JOIN 别名. 无提示"):
+    ///   - 如果 prefix 命中 aliasMap 某个 key → **只拉该 alias 的列**，不混入其他表的列。
+    ///     例: `SELECT * FROM T1 LEFT JOIN T2 b ON b` → prefix="b" → 命中 alias "b" → 只返 T2 的列。
+    ///   - 如果 prefix 未命中 alias (用户输到一半 / 表名末段匹配不到) → 拉所有 alias 的列,
+    ///     按 prefix startsWith 过滤 (兼容旧逻辑)。
+    ///   - 同步修正 caretOffset 默认 0 的问题: 现在透传实际光标位置,
+    ///     SqlAliasResolver.Parse 才能正确缩到当前语句 (避免前一句 SELECT 的 FROM 污染)。
     /// </summary>
-    private static List<string>? GetAllColumnsFromAliases(string? connectionString, string? fullSql, string? prefix)
+    /// <param name="connectionString">当前账套连接串</param>
+    /// <param name="fullSql">编辑器完整 SQL</param>
+    /// <param name="caretOffset">光标位置 (透传给 SqlAliasResolver)</param>
+    /// <param name="prefix">光标前的 token (可能是 alias 名 / 表名末段 / 列名前缀)</param>
+    private static List<string>? GetAllColumnsFromAliases(string? connectionString, string? fullSql, int caretOffset, string? prefix)
     {
         if (string.IsNullOrEmpty(connectionString) || string.IsNullOrEmpty(fullSql)) return null;
-        var aliasMap = SqlAliasResolver.Parse(fullSql, 0);
+        var aliasMap = SqlAliasResolver.Parse(fullSql, caretOffset);
         if (aliasMap.Count == 0) return null;
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // ★ 关键修复: 如果 prefix 是某个 alias 名 (case-insensitive), 只拉该 alias 的列
+        // 不再像旧逻辑那样把所有 alias 的列拼一起 startsWith(prefix), 那会导致:
+        //   - alias "b" (T2) 和 alias "Body" (T3) 的 Body 列一起 startsWith "b" → 提示混乱
+        //   - 用户想输 "b.Name" 时混入了 "Body", "Brand" 等
+        if (!string.IsNullOrEmpty(prefix) && aliasMap.TryGetValue(prefix, out var aliased))
+        {
+            var aliasCols = SqlObjectSchemaCache.GetColumnSuggestions(
+                connectionString, aliased.SchemaName, aliased.ObjectName, "");
+            return aliasCols.Count == 0 ? null : aliasCols;
+        }
+
+        // prefix 是空 / 不是 alias → 拉所有 alias 的列 (兼容 "SELECT * FROM T1|" 这种还没输 alias 的场景)
         var all = new List<string>();
         foreach (var kv in aliasMap)
         {
-            var cols = SqlObjectSchemaCache.GetColumnSuggestions(connectionString, kv.Value.SchemaName, kv.Value.ObjectName, "");
+            var cols = SqlObjectSchemaCache.GetColumnSuggestions(
+                connectionString, kv.Value.SchemaName, kv.Value.ObjectName, "");
             foreach (var c in cols) if (seen.Add(c)) all.Add(c);
         }
         if (all.Count == 0) return null;
+
         var pre = prefix ?? "";
         var matched = string.IsNullOrEmpty(pre)
             ? all

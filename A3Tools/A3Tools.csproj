@@ -60,6 +60,8 @@
     <Compile Update="Models\KnowledgeEntry.cs" />
     <Compile Update="Models\KnowledgeSourceType.cs" />
     <Compile Update="Services\AiActions\AiActions.cs" />
+    <!-- ★ 2026-09-08 知识库 AI Action（让 AI 在对话中直接管理知识库） -->
+    <Compile Update="Services\AiActions\KnowledgeActions.cs" />
     <Compile Update="Services\KnowledgeBaseManager.cs" />
     <Compile Update="Services\AiActions\ActionRegistry.cs" />
     <Compile Update="Forms\ConfirmActionForm.cs" />
