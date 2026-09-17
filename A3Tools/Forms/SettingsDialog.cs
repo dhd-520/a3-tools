@@ -68,10 +68,7 @@ public partial class SettingsDialog : Form
         chkClientAutoLogin.Checked = settings.ClientAutoLogin;
         chkDevToolsAutoLogin.Checked = settings.DevToolsAutoLogin;
         txtDevToolsPassword.Text = settings.DevToolsPassword;  // LoadSettings 已自动解密
-        if (settings.QueryToolMode == QueryToolMode.BuiltIn)
-            rbQueryToolBuiltIn.Checked = true;
-        else
-            rbQueryToolSsms.Checked = true;
+        chkEnableAi.Checked = settings.EnableAi;
 
         // Root 专属设置
         txtHubConfigDir.Text = settings.A3ToolsHubConfigDir;
@@ -137,7 +134,7 @@ public partial class SettingsDialog : Form
         settings.ClientAutoLogin = chkClientAutoLogin.Checked;
         settings.DevToolsAutoLogin = chkDevToolsAutoLogin.Checked;
         settings.DevToolsPassword = txtDevToolsPassword.Text;  // 明文，SaveSettings 自动加密
-        settings.QueryToolMode = rbQueryToolBuiltIn.Checked ? QueryToolMode.BuiltIn : QueryToolMode.Ssms;
+        settings.EnableAi = chkEnableAi.Checked;
         settings.A3ToolsHubConfigDir = txtHubConfigDir.Text.Trim();
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;

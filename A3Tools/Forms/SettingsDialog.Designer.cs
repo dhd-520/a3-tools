@@ -16,10 +16,7 @@ partial class SettingsDialog
         btnSsmsBrowse = new Button();
         btnSsmsClear = new Button();
         hintSsms = new Label();
-        lblQueryTool = new Label();
-        rbQueryToolSsms = new RadioButton();
-        rbQueryToolBuiltIn = new RadioButton();
-        hintQueryTool = new Label();
+        chkEnableAi = new CheckBox();
         lblLaunchTitle = new Label();
         chkShowLaunchDialog = new CheckBox();
         hintLaunch = new Label();
@@ -97,10 +94,7 @@ partial class SettingsDialog
         mainPanel.Controls.Add(btnSsmsBrowse);
         mainPanel.Controls.Add(btnSsmsClear);
         mainPanel.Controls.Add(hintSsms);
-        mainPanel.Controls.Add(lblQueryTool);
-        mainPanel.Controls.Add(rbQueryToolSsms);
-        mainPanel.Controls.Add(rbQueryToolBuiltIn);
-        mainPanel.Controls.Add(hintQueryTool);
+        mainPanel.Controls.Add(chkEnableAi);
         mainPanel.Controls.Add(lblLaunchTitle);
         mainPanel.Controls.Add(chkShowLaunchDialog);
         mainPanel.Controls.Add(hintLaunch);
@@ -246,51 +240,20 @@ partial class SettingsDialog
         hintSsms.Size = new Size(958, 30);
         hintSsms.TabIndex = 8;
         hintSsms.Text = "设置SSMS可执行文件路径,为空则自动查找";
-        // 
-        // lblQueryTool
-        // 
-        lblQueryTool.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        lblQueryTool.Location = new Point(36, 290);
-        lblQueryTool.Name = "lblQueryTool";
-        lblQueryTool.Size = new Size(220, 50);
-        lblQueryTool.TabIndex = 9;
-        lblQueryTool.Text = "数据库查询工具:";
-        lblQueryTool.TextAlign = ContentAlignment.MiddleLeft;
-        // 
-        // rbQueryToolSsms
-        // 
-        rbQueryToolSsms.AutoSize = true;
-        rbQueryToolSsms.Checked = true;
-        rbQueryToolSsms.Font = new Font("微软雅黑", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
-        rbQueryToolSsms.Location = new Point(260, 300);
-        rbQueryToolSsms.Name = "rbQueryToolSsms";
-        rbQueryToolSsms.Size = new Size(205, 36);
-        rbQueryToolSsms.TabIndex = 10;
-        rbQueryToolSsms.TabStop = true;
-        rbQueryToolSsms.Text = "SSMS（默认）";
-        rbQueryToolSsms.UseVisualStyleBackColor = true;
-        // 
-        // rbQueryToolBuiltIn
-        // 
-        rbQueryToolBuiltIn.AutoSize = true;
-        rbQueryToolBuiltIn.Font = new Font("微软雅黑", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
-        rbQueryToolBuiltIn.Location = new Point(488, 300);
-        rbQueryToolBuiltIn.Name = "rbQueryToolBuiltIn";
-        rbQueryToolBuiltIn.Size = new Size(294, 36);
-        rbQueryToolBuiltIn.TabIndex = 11;
-        rbQueryToolBuiltIn.Text = "A3Tools 内置查询工具";
-        rbQueryToolBuiltIn.UseVisualStyleBackColor = true;
-        // 
-        // hintQueryTool
-        // 
-        hintQueryTool.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        hintQueryTool.ForeColor = Color.FromArgb(150, 150, 150);
-        hintQueryTool.Location = new Point(36, 334);
-        hintQueryTool.Name = "hintQueryTool";
-        hintQueryTool.Size = new Size(958, 30);
-        hintQueryTool.TabIndex = 12;
-        hintQueryTool.Text = "点击「链接数据库」按钮时启动的工具（重启后生效）";
-        // 
+        //
+        // chkEnableAi
+        //
+        chkEnableAi.AutoSize = true;
+        chkEnableAi.Checked = false;
+        chkEnableAi.CheckState = CheckState.Unchecked;
+        chkEnableAi.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        chkEnableAi.Location = new Point(36, 300);
+        chkEnableAi.Name = "chkEnableAi";
+        chkEnableAi.Size = new Size(958, 50);
+        chkEnableAi.TabIndex = 9;
+        chkEnableAi.Text = "启用 AI 功能（启用后在「帮助」菜单下显示「AI 助理」「AI 助理设置」「知识库管理」）";
+        chkEnableAi.UseVisualStyleBackColor = true;
+        //
         // lblLaunchTitle
         // 
         lblLaunchTitle.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
@@ -687,6 +650,7 @@ partial class SettingsDialog
     private Label hint;
     private Label lblSsmsPath;
     private Label hintSsms;
+    private CheckBox chkEnableAi;
     private Label lblLaunchTitle;
     private Label hintLaunch;
     private Label lblBrowserLaunch;
@@ -699,10 +663,7 @@ partial class SettingsDialog
     private TextBox txtSubmitSel;
     private Label hintWebSel;
     private Panel bottom;
-    private Label lblQueryTool;
-    private RadioButton rbQueryToolSsms;
-    private RadioButton rbQueryToolBuiltIn;
-    private Label hintQueryTool;
+    
 
     // Root 专属：A3ToolsHub 配置目录
     private Panel sepHubConfig = null!;

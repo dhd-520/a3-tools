@@ -80,6 +80,12 @@ public class AppSettings
     public QueryToolMode QueryToolMode { get; set; } = QueryToolMode.Ssms;
 
     /// <summary>
+    /// 是否启用 AI 功能（默认 false）。为 false 时隐藏「AI 助理」「AI 助理设置」「知识库管理」菜单项。
+    /// 2026-09-17 陛下需求：默认隐藏 AI 相关菜单，通过设置项启用。
+    /// </summary>
+    public bool EnableAi { get; set; } = false;
+
+    /// <summary>
     /// 从托盘恢复显示的快捷键（如 "Ctrl+Shift+Z"，为空表示不启用）
     /// </summary>
     public string TrayShowHotkey { get; set; } = "Ctrl+Shift+Z";

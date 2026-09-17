@@ -256,6 +256,8 @@ public partial class MainForm : Form, IToolContext
         UpdateVersionPosition();
         _isInitializing = false;
         UpdateRootModeUI();
+        // 2026-09-17 启用 AI 功能：根据设置控制「AI 助理 / AI 助理设置 / 知识库管理」三个菜单可见性
+        ApplyAiMenuVisibility();
         _edgeDockManager = new EdgeDockManager(this);
         _edgeDockManager.OnHideToTray = HideToTray;
         _edgeDockManager.OnShowFromTray = ShowFromTray;
@@ -1149,7 +1151,7 @@ public partial class MainForm : Form, IToolContext
                     BtnSettings_Click(null, EventArgs.Empty);
                     break;
                 case 6:
-                    if (tabControl.SelectedTab == tabLaunch) BtnConnectDB_Click(null, EventArgs.Empty);
+                    if (tabControl.SelectedTab == tabLaunch) BtnOpenSqlServer_Click(null, EventArgs.Empty);
                     break;
                 case 7:
                     if (tabControl.SelectedTab == tabLaunch) BtnRemote_Click(null, EventArgs.Empty);
@@ -1202,18 +1204,19 @@ public partial class MainForm : Form, IToolContext
         this.menuHide.Click += MenuHide_Click;
         this.menuTrayExit.Click += MenuTrayExit_Click;
         this.menuExit.Click += MenuExit_Click;
+        this.menuImportAccount.Click += MenuImportAccount_Click;
 
         this.txtSearch.TextChanged += TxtSearch_TextChanged;
         this.txtSearch.KeyDown += TxtSearch_KeyDown;
         this.btnAdd.Click += BtnAdd_Click;
-        this.btnImport.Click += BtnImport_Click;
         this.btnEdit.Click += BtnEdit_Click;
         this.btnDelete.Click += BtnDelete_Click;
 
         this.btnLaunch.Click += BtnLaunch_Click;
         this.btnSettings.Click += BtnSettings_Click;
         this.btnRefresh.Click += BtnRefresh_Click;
-        this.btnConnectDB.Click += BtnConnectDB_Click;
+        this.btnOpenSqlServer.Click += BtnOpenSqlServer_Click;
+        this.btnOpenBuiltInQuery.Click += BtnOpenBuiltInQuery_Click;
         this.btnRemote.Click += BtnRemote_Click;
         this.btnToolsSelectSourceDb.Click += BtnToolsSelectSourceDb_Click;
         this.btnToolsSelectTargetDb.Click += BtnToolsSelectTargetDb_Click;
@@ -1413,7 +1416,7 @@ public partial class MainForm : Form, IToolContext
             ShowToast($"账套「{added.Name}」已添加（代码 {added.Code}）");
         }
     }
-    private void BtnImport_Click(object? sender, EventArgs e) => ImportFromXml();
+    private void MenuImportAccount_Click(object? sender, EventArgs e) => ImportFromXml();
     private void BtnRefresh_Click(object? sender, EventArgs e) => RefreshAccountList();
 
     /// <summary>
@@ -3055,7 +3058,29 @@ public partial class MainForm : Form, IToolContext
         if (dialog.ShowDialog() == DialogResult.OK)
         {
             RegisterAllHotkeys();
+            // 2026-09-17 设置项里的「启用 AI」变更后立刻刷新菜单可见性
+            ApplyAiMenuVisibility();
         }
+    }
+
+    /// <summary>
+    /// 根据 settings.EnableAi 切换「AI 助理 / AI 助理设置 / 知识库管理」三个菜单项的 Visible。
+    /// 2026-09-17 陛下需求：默认隐藏 AI 相关菜单，设置启用后才显示。
+    /// </summary>
+    private void ApplyAiMenuVisibility()
+    {
+        bool enableAi;
+        try
+        {
+            enableAi = _dataService.LoadSettings().EnableAi;
+        }
+        catch
+        {
+            enableAi = false; // 设置加载失败时保守隐藏
+        }
+        menuAiChat.Visible = enableAi;
+        menuAiSettings.Visible = enableAi;
+        menuKnowledgeBase.Visible = enableAi;
     }
 
     private void TabControl_SelectedIndexChanged(object? sender, EventArgs e)
@@ -3069,7 +3094,7 @@ public partial class MainForm : Form, IToolContext
         }
     }
 
-    private void BtnConnectDB_Click(object? sender, EventArgs e)
+    private void BtnOpenSqlServer_Click(object? sender, EventArgs e)
     {
         if (this.dgvAccounts.SelectedRows.Count == 0) return;
         var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
@@ -3078,21 +3103,6 @@ public partial class MainForm : Form, IToolContext
 
         // 优先使用设置中的SSMS路径
         var settings = new DataService().LoadSettings();
-
-        // 根据设置选择启动 SSMS 还是内置查询工具
-        if (settings.QueryToolMode == QueryToolMode.BuiltIn)
-        {
-            // 启动内置 SQL 查询工具（走账套列表选中账套）
-            var sqlQueryTool = _toolExecutorService.Tools
-                .FirstOrDefault(t => t.Config.ClassName == "A3Tools.Plugins.Default.SqlQueryTool");
-            if (sqlQueryTool == null)
-            {
-                this.ShowError("未找到内置查询工具（SqlQueryTool），请检查 tools.json 是否启用。");
-                return;
-            }
-            _toolExecutorService.ExecuteTool(sqlQueryTool, account, this);
-            return;
-        }
 
         string ssmsPath;
 
@@ -3143,6 +3153,26 @@ public partial class MainForm : Form, IToolContext
             }
             catch { }
         }
+    }
+
+    /// <summary>
+    /// 打开内置 SQL 查询工具（2026-09-17 从 BtnConnectDB_Click 拆分，不再走 QueryToolMode 设置）。
+    /// </summary>
+    private void BtnOpenBuiltInQuery_Click(object? sender, EventArgs e)
+    {
+        if (this.dgvAccounts.SelectedRows.Count == 0) return;
+        var account = this.dgvAccounts.SelectedRows[0].DataBoundItem as Account;
+        if (account == null) return;
+        if (string.IsNullOrWhiteSpace(account.Database) || string.IsNullOrWhiteSpace(account.DbUser)) return;
+
+        var sqlQueryTool = _toolExecutorService.Tools
+            .FirstOrDefault(t => t.Config.ClassName == "A3Tools.Plugins.Default.SqlQueryTool");
+        if (sqlQueryTool == null)
+        {
+            this.ShowError("未找到内置查询工具（SqlQueryTool），请检查 tools.json 是否启用。");
+            return;
+        }
+        _toolExecutorService.ExecuteTool(sqlQueryTool, account, this);
     }
 
     private void BtnRemote_Click(object? sender, EventArgs e)

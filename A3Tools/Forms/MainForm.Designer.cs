@@ -17,6 +17,7 @@ partial class MainForm
     private ToolStripMenuItem menuFile = null!;
     private ToolStripMenuItem menuHelp = null!;
     private ToolStripMenuItem menuHotkeySettings = null!;
+    private ToolStripMenuItem menuImportAccount = null!;
     private ToolStripMenuItem menuExit = null!;
     private ToolStripMenuItem menuAbout = null!;
     private ToolStripMenuItem menuCheckUpdate = null!;
@@ -42,8 +43,8 @@ partial class MainForm
     private Button btnDelete = null!;
     private Button btnLaunch = null!;
     private Button btnSettings = null!;
-    private Button btnImport = null!;
-    private Button btnConnectDB = null!;
+    private Button btnOpenSqlServer = null!;
+    private Button btnOpenBuiltInQuery = null!;
     private Button btnRemote = null!;
     private Button btnRefresh = null!;
     private DataGridView dgvAccounts = null!;
@@ -89,6 +90,7 @@ partial class MainForm
         menuFile = new ToolStripMenuItem();
         menuCopyAccount = new ToolStripMenuItem();
         menuHotkeySettings = new ToolStripMenuItem();
+        menuImportAccount = new ToolStripMenuItem();
         menuExit = new ToolStripMenuItem();
         menuHelp = new ToolStripMenuItem();
         menuAbout = new ToolStripMenuItem();
@@ -161,26 +163,31 @@ partial class MainForm
         menuStrip.Text = "menuStrip1";
         // 
         // menuFile
-        // 
-        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuHotkeySettings, menuExit });
+        //
+        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuHotkeySettings, menuImportAccount, menuExit });
         menuFile.Name = "menuFile";
         menuFile.Size = new Size(106, 32);
         menuFile.Text = "文件(_F)";
-        // 
+        //
         // menuCopyAccount
-        // 
+        //
         menuCopyAccount.Name = "menuCopyAccount";
         menuCopyAccount.Size = new Size(270, 40);
         menuCopyAccount.Text = "复制账套信息";
-        // 
+        //
         // menuHotkeySettings
-        // 
+        //
         menuHotkeySettings.Name = "menuHotkeySettings";
         menuHotkeySettings.Size = new Size(270, 40);
         menuHotkeySettings.Text = "快捷键设置(_K)";
-        // 
-        // menuExit
-        // 
+        //
+        // menuImportAccount
+        //
+        menuImportAccount.Name = "menuImportAccount";
+        menuImportAccount.Size = new Size(270, 40);
+        menuImportAccount.Text = "导入账套(_I)";
+        //
+        // menuExit 
         menuExit.Name = "menuExit";
         menuExit.Size = new Size(270, 40);
         menuExit.Text = "退出(_X)";
@@ -411,18 +418,6 @@ partial class MainForm
         btnAdd.Name = "btnAdd";
         btnAdd.Margin = new Padding(0, 0, 10, 0);
 
-        btnImport = new Button();
-        btnImport.Text = "📥 导入";
-        btnImport.Size = new Size(110, btnHeight);
-        btnImport.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-        btnImport.FlatAppearance.BorderSize = 1;
-        btnImport.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
-        btnImport.BackColor = System.Drawing.Color.White;
-        btnImport.Font = new Font("微软雅黑", 10F);
-        btnImport.Cursor = System.Windows.Forms.Cursors.Hand;
-        btnImport.Name = "btnImport";
-        btnImport.Margin = new Padding(0, 0, 10, 0);
-
         btnEdit = new Button();
         btnEdit.Text = "✏️ 编辑";
         btnEdit.Size = new Size(110, btnHeight);
@@ -471,17 +466,29 @@ partial class MainForm
         btnSettings.Name = "btnSettings";
         btnSettings.Margin = new Padding(0, 0, 10, 0);
 
-        btnConnectDB = new Button();
-        btnConnectDB.Text = "🔗 链接数据库";
-        btnConnectDB.Size = new Size(110, btnHeight);
-        btnConnectDB.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-        btnConnectDB.FlatAppearance.BorderSize = 1;
-        btnConnectDB.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
-        btnConnectDB.BackColor = System.Drawing.Color.White;
-        btnConnectDB.Font = new Font("微软雅黑", 10F);
-        btnConnectDB.Cursor = System.Windows.Forms.Cursors.Hand;
-        btnConnectDB.Name = "btnConnectDB";
-        btnConnectDB.Margin = new Padding(0, 0, 10, 0);
+        btnOpenSqlServer = new Button();
+        btnOpenSqlServer.Text = "🗄 打开 SQL Server";
+        btnOpenSqlServer.Size = new Size(130, btnHeight);
+        btnOpenSqlServer.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        btnOpenSqlServer.FlatAppearance.BorderSize = 1;
+        btnOpenSqlServer.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
+        btnOpenSqlServer.BackColor = System.Drawing.Color.White;
+        btnOpenSqlServer.Font = new Font("微软雅黑", 10F);
+        btnOpenSqlServer.Cursor = System.Windows.Forms.Cursors.Hand;
+        btnOpenSqlServer.Name = "btnOpenSqlServer";
+        btnOpenSqlServer.Margin = new Padding(0, 0, 6, 0);
+
+        btnOpenBuiltInQuery = new Button();
+        btnOpenBuiltInQuery.Text = "🔧 内置查询";
+        btnOpenBuiltInQuery.Size = new Size(100, btnHeight);
+        btnOpenBuiltInQuery.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        btnOpenBuiltInQuery.FlatAppearance.BorderSize = 1;
+        btnOpenBuiltInQuery.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
+        btnOpenBuiltInQuery.BackColor = System.Drawing.Color.White;
+        btnOpenBuiltInQuery.Font = new Font("微软雅黑", 10F);
+        btnOpenBuiltInQuery.Cursor = System.Windows.Forms.Cursors.Hand;
+        btnOpenBuiltInQuery.Name = "btnOpenBuiltInQuery";
+        btnOpenBuiltInQuery.Margin = new Padding(0, 0, 10, 0);
 
         btnRemote = new Button();
         btnRemote.Text = "🖥️ 远程";
@@ -508,12 +515,12 @@ partial class MainForm
         btnRefresh.Margin = new Padding(0, 0, 0, 0);
 
         buttonRow.Controls.Add(btnAdd);
-        buttonRow.Controls.Add(btnImport);
         buttonRow.Controls.Add(btnEdit);
         buttonRow.Controls.Add(btnDelete);
         buttonRow.Controls.Add(btnLaunch);
         buttonRow.Controls.Add(btnSettings);
-        buttonRow.Controls.Add(btnConnectDB);
+        buttonRow.Controls.Add(btnOpenSqlServer);
+        buttonRow.Controls.Add(btnOpenBuiltInQuery);
         buttonRow.Controls.Add(btnRemote);
         buttonRow.Controls.Add(btnRefresh);
         tabLaunch.Controls.Add(buttonRow);
