@@ -57,6 +57,8 @@ public class SqlEditor : RichTextBox
         // RichTextBox 默认 AutoWordSelection = true → 鼠标拖选会"吸附"到单词边界，
         // 表现：选区莫名扩大/跳字、像不听使唤。VS / SSMS 都是 false → 字符级精确选择。
         // 保留：双击 = 选词、三击 = 选段（这两个不受 AutoWordSelection 影响）。
+        // ★ 2026-09-17: 构造函数设了但 Handle 创建后可能被底层 RichEdit 重置，
+        //   OnHandleCreated 中再次强制设一次 + EM_SETOPTIONS P/Invoke 兜底。
         AutoWordSelection = false;
 
         _highlightTimer = new System.Windows.Forms.Timer { Interval = 200 };
@@ -103,6 +105,13 @@ public class SqlEditor : RichTextBox
     {
         _highlightTimer.Stop();
         Highlight();
+    }
+
+    // ★ 2026-09-17: Handle 创建后再次强制关闭 AutoWordSelection（构造函数设的可能被 RichEdit 重置）
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        AutoWordSelection = false;
     }
 
     /// <summary>字体大小改变时触发（行号面板/状态栏监听）</summary>
