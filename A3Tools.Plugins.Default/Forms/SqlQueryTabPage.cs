@@ -33,6 +33,9 @@ public partial class SqlQueryTabPage : UserControl
     // 【2026-07-09 多结果集】所有结果集 DataGridView 共享的右键菜单（随 components 自动释放）
     private ContextMenuStrip ctxResultMenu = null!;
 
+    // 【2026-09-16 一键格式化 SQL】运行时构建的按钮（不动 Designer.cs），夹在 btnSave 和 lblHint 之间
+    private Button btnFormat = null!;
+
     // 【2026-07-09 大数据流式读】每读 N 行让出一次 UI 线程，让用户能点“停止”+ 状态栏实时刷新
     private const int _streamBatchSize = 1000;
     // 【2026-07-09 列宽自适应阈值】超过 N 行不开 AutoSizeColumnsMode（AllCells 扫所有行算列宽，100万行 + 50列量级会卡几秒）
@@ -96,6 +99,37 @@ public partial class SqlQueryTabPage : UserControl
         {
             if (!_suppressStatusClear) SetTabStatusIcon(ExecStatus.Idle);
         };
+
+        // 【2026-09-16 一键格式化 SQL】运行时构建按钮（不动 Designer.cs）
+        // 位置：btnSave(x=239, w=110, 末=349) 之后，lblHint 之前；lblHint 右移到 x=460 给按钮让位
+        btnFormat = new Button
+        {
+            Text = "✏ 格式化",
+            Location = new Point(354, 4),
+            Size = new Size(96, 36),
+            BackColor = Color.FromArgb(82, 196, 26),  // 绿色（与 执行蓝 / 停止灰 区分）
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            FlatAppearance = { BorderSize = 0 },
+            Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold),
+            Cursor = Cursors.Hand,
+        };
+        btnFormat.FlatAppearance.MouseOverBackColor = Color.FromArgb(56, 158, 13);
+        btnFormat.FlatAppearance.MouseDownBackColor = Color.FromArgb(46, 139, 9);
+        btnFormat.Click += (_, _) => PerformFormatSmart();
+        // ToolTip：补上快捷键 + 选区语义，避免用户猜
+        new ToolTip
+        {
+            IsBalloon = false,
+            InitialDelay = 400,
+            ReshowDelay = 200,
+            ShowAlways = true,
+        }.SetToolTip(btnFormat, "格式化 SQL 脚本\n快捷键: Ctrl+Shift+F\n有选区时只格式化选区；无选区时格式化整页");
+        pnlToolBar.Controls.Add(btnFormat);
+
+        // 给 btnFormat 让位 → lblHint 右移，文本末尾追加格式化快捷键
+        lblHint.Location = new Point(456, 14);
+        lblHint.Text = "提示: F5=执行(有选中则执行选中,否则执行全部)  Ctrl+L=清空消息  Ctrl+/=注释  Ctrl+Shift+/=取消注释  Ctrl+Shift+F=格式化";
     }
 
     private void SqlEditor_KeyDown(object? sender, KeyEventArgs e)
@@ -115,6 +149,72 @@ public partial class SqlQueryTabPage : UserControl
             rtbMessages.Clear();
             e.SuppressKeyPress = true;
         }
+        else if (e.Control && e.Shift && e.KeyCode == Keys.F)   // 【2026-09-16】一键格式化 SQL
+        {
+            PerformFormatSmart();
+            e.SuppressKeyPress = true;
+        }
+    }
+
+    /// <summary>
+    /// 一键格式化 SQL（2026-09-16 陛下需求）：
+    /// 有选区时只格式化选区，无选区时格式化整页。原地替换，保留光标/选区位置。
+    /// </summary>
+    public void PerformFormatSmart()
+    {
+        if (rtbEditor.ReadOnly) return;
+
+        int selStart = rtbEditor.SelectionStart;
+        int selLength = rtbEditor.SelectionLength;
+        bool hasSelection = selLength > 0;
+        string originalText = rtbEditor.Text;
+
+        string textToFormat = hasSelection
+            ? originalText.Substring(selStart, selLength)
+            : originalText;
+
+        if (string.IsNullOrWhiteSpace(textToFormat))
+        {
+            rtbMessages.AppendText("[格式化] 空内容，无需格式化\n");
+            return;
+        }
+
+        string formatted;
+        try
+        {
+            formatted = SqlFormatter.Format(textToFormat);
+        }
+        catch (Exception ex)
+        {
+            rtbMessages.AppendText($"[格式化失败] {ex.GetType().Name}: {ex.Message}\n");
+            return;
+        }
+
+        // 暂停高亮节流，避免选区文本替换时闪烁
+        rtbEditor.SuspendHighlight(true);
+        try
+        {
+            if (hasSelection)
+            {
+                rtbEditor.Select(selStart, selLength);
+                rtbEditor.SelectedText = formatted;
+                // 重新选中格式化后的范围（长度变了）
+                rtbEditor.Select(selStart, formatted.Length);
+            }
+            else
+            {
+                rtbEditor.Text = formatted;
+                rtbEditor.SelectionStart = 0;
+            }
+            rtbEditor.ScrollToCaret();
+        }
+        finally
+        {
+            rtbEditor.SuspendHighlight(false);
+        }
+
+        string scope = hasSelection ? $"选区 {selLength} 字符" : $"整页 {originalText.Length} 字符";
+        rtbMessages.AppendText($"[格式化] {scope} → {formatted.Length} 字符\n");
     }
 
     /// <summary>
