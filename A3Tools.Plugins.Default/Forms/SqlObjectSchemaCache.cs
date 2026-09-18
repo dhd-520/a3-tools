@@ -372,7 +372,7 @@ SELECT
     OBJECT_SCHEMA_NAME(o.object_id) AS SchemaName2,
     CASE WHEN o.type IN ('U','V','IF','TF','FN') THEN
         (
-            SELECT STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY c.column_id)
+            SELECT STRING_AGG(CAST(c.name AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY c.column_id)
             FROM sys.columns c
             WHERE c.object_id = o.object_id
         )
@@ -429,7 +429,7 @@ SELECT
     OBJECT_SCHEMA_NAME(o.object_id) AS SchemaName2,
     CASE WHEN o.type IN ('U','V','IF','TF','FN') THEN
         (
-            SELECT STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY c.column_id)
+            SELECT STRING_AGG(CAST(c.name AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY c.column_id)
             FROM sys.columns c
             WHERE c.object_id = o.object_id
         )

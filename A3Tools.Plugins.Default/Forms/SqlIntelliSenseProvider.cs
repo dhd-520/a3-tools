@@ -565,18 +565,17 @@ public static class SqlIntelliSenseProvider
 
         // prefix 是空 / 不是 alias → 拉所有 alias 的列 (兼容 "SELECT * FROM T1|" 这种还没输 alias 的场景)
         var all = new List<string>();
+        var pre = prefix ?? "";
         foreach (var kv in aliasMap)
         {
+            // ★ 2026-09-18 修复: 透传用户的 prefix 到内层, 让 GetColumnSuggestions 在 filter 之后再 Take(50)。
+            // 之前传 "" 导致 GetColumnSuggestions 不过滤, 直接拿前 50 个 → TOPITEMTYPEGUID (column_id 60+)
+            // 被砍掉, 弹窗里只剩 TOP 关键字。陛下实测 colsLen=2820/200+ 列, Take(50) 漏掉所有 TOP* 列。
             var cols = SqlObjectSchemaCache.GetColumnSuggestions(
-                connectionString, kv.Value.SchemaName, kv.Value.ObjectName, "");
+                connectionString, kv.Value.SchemaName, kv.Value.ObjectName, pre);
             foreach (var c in cols) if (seen.Add(c)) all.Add(c);
         }
-        if (all.Count == 0) return null;
-
-        var pre = prefix ?? "";
-        var matched = string.IsNullOrEmpty(pre)
-            ? all
-            : all.Where(c => c.StartsWith(pre, StringComparison.OrdinalIgnoreCase)).ToList();
-        return matched.Count == 0 ? null : matched;
+        // 内层已经按 prefix StartsWith 过滤+Take(50), 直接返回即可。
+        return all.Count == 0 ? null : all;
     }
 }
