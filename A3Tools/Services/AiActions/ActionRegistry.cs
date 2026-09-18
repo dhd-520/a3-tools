@@ -40,12 +40,14 @@ public class ActionRegistry
         Register(new ExecuteSqlAction());
         // ★ 2026-09-08 知识库管理（list/search/get/recommend 只读；create/add/update 普通确认）
         //   delete 高危：输入条目标题前 4 字确认
+        // ★ 2026-09-18 陛下需求：add_knowledge_entry 免确认（每次点确认麻烦）
+        //   写本地 JSON，add 内部有同名查重，可手动从知识库 UI 删除错误条目
         Register(new ListKnowledgeBasesAction());
         Register(new SearchKnowledgeAction());
         Register(new GetKnowledgeEntryAction());
         Register(new RecommendKnowledgeTargetAction());
         Register(new CreateKnowledgeBaseAction());
-        Register(new AddKnowledgeEntryAction());
+        Register(new AddKnowledgeEntryAction());  // ★ 免确认（2026-09-18）
         Register(new UpdateKnowledgeEntryAction());
         Register(new DeleteKnowledgeEntryAction());
         // ★ 2026-09-16 知识库导入导出（export/import 普通确认）

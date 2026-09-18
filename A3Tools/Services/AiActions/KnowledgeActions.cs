@@ -346,7 +346,11 @@ public class CreateKnowledgeBaseAction : IAiAction
 public class AddKnowledgeEntryAction : IAiAction
 {
     public string Name => "add_knowledge_entry";
-    public string Description => "在指定知识库添加一条知识条目。AI 在对话中识别到陛下想保存的知识点，或识别到对话中产生的重要事实时，调用此工具。SourceType 自动标记为「对话提取」，知识库 UI 会显示 💬 来源。";
+    // ★ 2026-09-18 陛下需求：加入知识不再弹确认框（每次点确认很麻烦）。add/update 同时改都不会自动覆盖：
+    //   - add：add 之前会查重（同名条目 → 拒绝，要求换标题或 update）；所以误调最多「条目建到错误库里」，可手动删
+    //   - 写本地 JSON 文件，下次启动还能看到，删一条无伤大雅
+    // ★ 仍保留二次确认的：高危 delete（输入前 4 字）/ create_knowledge_base / update_knowledge_entry / export / import
+    public string Description => "在指定知识库添加一条知识条目。AI 在对话中识别到陛下想保存的知识点，或识别到对话中产生的重要事实时，调用此工具。SourceType 自动标记为「对话提取」，知识库 UI 会显示 💬 来源。陛下已设此工具免确认，AI 直接调用即可。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -363,7 +367,9 @@ public class AddKnowledgeEntryAction : IAiAction
         required = new string[] { "base_name", "title", "content" }
     };
 
-    public bool RequiresConfirmation => true;
+    // ★ 2026-09-18 陛下需求：加入知识不再弹确认。陛下原话「每次点确认挺麻烦的」。
+    //   安全靠 add 内部的查重（同名条目→拒绝要求换名）+ entry content 上限校验兜底
+    public bool RequiresConfirmation => false;
     public string? ConfirmationPrompt => null;
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
