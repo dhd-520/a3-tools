@@ -64,12 +64,20 @@ $gitStatus = (& git status --porcelain)
 if ($gitStatus) {
     Warn "git working dir has uncommitted changes:"
     $gitStatus | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
-    # 非交互模式(Agent / CI): 默认继续;交互模式: 询问
-    if ([Environment]::UserInteractive) {
+    # ★ 2026-09-18 修复: PS 5.1 在 agent (OpenClaw) / pipe 环境 [Environment]::UserInteractive
+    #   仍返 $true, Read-Host 会卡死 ("y" | release.ps1 也救不了)。增加多重判断:
+    #   - [Console]::IsInputRedirected = true 是 pipe (agent)
+    #   - $env:CI / OPENCLAW_SESSIONNAME / AGENT_RUN 是 set
+    # - 满足任一即视作 agent,自动继续,不再问
+    $isAgent = $env:OPENCLAW_SESSIONNAME -or $env:CI -or $env:AGENT_RUN `
+        -or [Console]::IsInputRedirected `
+        -or $Host.Name -eq 'ServerRemoteHost'
+    $isRealInteractive = -not $isAgent -and [Environment]::UserInteractive
+    if ($isRealInteractive) {
         $ans = Read-Host "Continue? [y/N]"
         if ($ans -ne 'y' -and $ans -ne 'Y') { exit 1 }
     } else {
-        Warn "non-interactive mode -> auto continue"
+        Warn ("non-interactive/agent mode -> auto continue (UserInteractive=" + [Environment]::UserInteractive + ", IsInputRedirected=" + [Console]::IsInputRedirected + ", env=" + ($env:OPENCLAW_SESSIONNAME -or $env:CI -or $env:AGENT_RUN -or '') + ")")
     }
 }
 
@@ -294,25 +302,34 @@ if ($giteeToken) {
     if (-not $giteeRepo)  { $giteeRepo  = "A3ToolsRelease" }
 
     # 创建 release
-    $createBody = @{
-        access_token     = $giteeToken
-        tag_name         = $tag
-        name             = ("A3Tools v" + $Version)
-        body             = $ReleaseNotes
-        target_commitish = "master"
-        prerelease       = "false"
-    } | ConvertTo-Json -Depth 5
+    # ★ 2026-09-18 修复: PS 5.1 ConvertTo-Json 把含中文的 body 字段从 1KB 膨胀到 3.6MB
+    #   (3500x 廱胀, Gitee 拒绝, 返回 mojibake 提示), 同样问题也伤到 PATCH。
+    #   改用手工拼 JSON 函数 Build-GiteeReleaseJsonBytes, 单引号 here-string 不展开变量,
+    #   对 body/name/tag 做最小转义 (\\ \" \r \n \t)。
+    function Build-GiteeReleaseJsonBytes {
+        param(
+            [string]$Token, [string]$Tag, [string]$Name,
+            [string]$Body, [string]$TargetCommitish = "master", [string]$Prerelease = "false"
+        )
+        # JSON 字符串值的最小转义
+        $eb = $Body -replace '\\','\\\\' -replace '"','\"' -replace "`r",'' -replace "`n",'\n' -replace "`t",'\t'
+        $ec = $Name -replace '\\','\\\\' -replace '"','\"'
+        $et = $Tag -replace '\\','\\\\' -replace '"','\"'
+        $raw = '{"access_token":"' + $Token + '","tag_name":"' + $et + '","name":"' + $ec + '","target_commitish":"' + $TargetCommitish + '","prerelease":"' + $Prerelease + '","body":"' + $eb + '"}'
+        return ,([System.Text.Encoding]::UTF8.GetBytes($raw))
+    }
+    $createJsonBytes = Build-GiteeReleaseJsonBytes -Token $giteeToken -Tag $tag -Name ("A3Tools v" + $Version) -Body $ReleaseNotes
 
     $giteeReleaseId = $null
     try {
         # 【2026-07-09 中文乱码修复】Content-Type 必须带 charset=utf-8 + Body 显式 UTF-8 字节。
-        #   PS 5.1 不带 charset 时会按 Default encoding（系统区域，GBK）发，Gitee 收 GBK 中文 → mojibake
-        $jsonText = $createBody
+        # 【2026-09-18 修复】原本用 ConvertTo-Json + UTF8.GetBytes, 但 PS 5.1 ConvertTo-Json 把 body 廱胀 3500x。
+        #   现已改用手工拼 JSON 函数 Build-GiteeReleaseJsonBytes。
         $release = Invoke-RestMethod `
             -Uri ("https://gitee.com/api/v5/repos/" + $giteeOwner + "/" + $giteeRepo + "/releases") `
             -Method Post `
             -ContentType "application/json; charset=utf-8" `
-            -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonText))
+            -Body $createJsonBytes
         $giteeReleaseId = $release.id
         Ok (("Gitee release created (id=" + $giteeReleaseId + ")"))
     } catch {
@@ -467,7 +484,21 @@ Info ("Users will see v" + $Version + " on next launch via Help -> Check Update"
 if ($giteeReleaseId) {
     Info "Final verification..."
     try {
-        $verifyBytes = (Invoke-WebRequest -Uri ("https://gitee.com/api/v5/repos/" + $giteeOwner + "/" + $giteeRepo + "/releases/" + $giteeReleaseId) -UseBasicParsing).Content
+        # ★ 2026-09-18 修复: 之前用 Invoke-WebRequest + .Content 取 body, PS 5.1 会按
+        #   系统编码 (Latin-1/GBK) 误读 UTF-8 中文, 让陛下误以为 release 说明乱码。
+        #   改用 HttpWebRequest + Stream 取原始字节, 跳过 PS 字符串解码通道。
+        #   Worklist: 见 2026-09-18-release-ps1-fix-read-host-and-utf8-misdecode.md
+        $verifyUri = ("https://gitee.com/api/v5/repos/" + $giteeOwner + "/" + $giteeRepo + "/releases/" + $giteeReleaseId)
+        $verifyReq = [System.Net.HttpWebRequest]::Create($verifyUri)
+        $verifyReq.Headers.Add("Authorization", ("token " + $giteeToken))
+        $verifyReq.UserAgent = "A3Tools-release-verify"
+        $verifyResp = $verifyReq.GetResponse()
+        $verifyStream = $verifyResp.GetResponseStream()
+        $verifyMs = New-Object System.IO.MemoryStream
+        $verifyStream.CopyTo($verifyMs)
+        $verifyBytes = $verifyMs.ToArray()
+        $verifyStream.Close()
+        $verifyResp.Close()
         $verifyFile = Join-Path $env:TEMP ("verify_release_" + $Version + ".json")
         [System.IO.File]::WriteAllBytes($verifyFile, $verifyBytes)
 
