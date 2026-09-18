@@ -406,7 +406,7 @@ partial class MainForm
         int btnHeight = 41;
 
         btnAdd = new Button();
-        btnAdd.Text = "➕ 新增 ▾";
+        btnAdd.Text = "➕新增 ▾";
         btnAdd.Size = new Size(110, btnHeight);
         btnAdd.ContextMenuStrip = addMenu;
         btnAdd.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
@@ -419,7 +419,7 @@ partial class MainForm
         btnAdd.Margin = new Padding(0, 0, 10, 0);
 
         btnEdit = new Button();
-        btnEdit.Text = "✏️ 编辑";
+        btnEdit.Text = "✏️编辑";
         btnEdit.Size = new Size(110, btnHeight);
         btnEdit.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnEdit.FlatAppearance.BorderSize = 1;
@@ -431,7 +431,7 @@ partial class MainForm
         btnEdit.Margin = new Padding(0, 0, 10, 0);
 
         btnDelete = new Button();
-        btnDelete.Text = "🗑️ 删除";
+        btnDelete.Text = "🗑️删除";
         btnDelete.Size = new Size(110, btnHeight);
         btnDelete.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnDelete.FlatAppearance.BorderSize = 1;
@@ -443,7 +443,7 @@ partial class MainForm
         btnDelete.Margin = new Padding(0, 0, 10, 0);
 
         btnLaunch = new Button();
-        btnLaunch.Text = "🚀 启动";
+        btnLaunch.Text = "🚀启动";
         btnLaunch.Size = new Size(110, btnHeight);
         btnLaunch.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnLaunch.FlatAppearance.BorderSize = 0;
@@ -455,7 +455,7 @@ partial class MainForm
         btnLaunch.Margin = new Padding(0, 0, 10, 0);
 
         btnSettings = new Button();
-        btnSettings.Text = "⚙️ 设置";
+        btnSettings.Text = "⚙️设置";
         btnSettings.Size = new Size(110, btnHeight);
         btnSettings.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnSettings.FlatAppearance.BorderSize = 1;
@@ -467,8 +467,8 @@ partial class MainForm
         btnSettings.Margin = new Padding(0, 0, 10, 0);
 
         btnOpenSqlServer = new Button();
-        btnOpenSqlServer.Text = "🗄 打开 SQL Server";
-        btnOpenSqlServer.Size = new Size(130, btnHeight);
+        btnOpenSqlServer.Text = "🗄SQL Server";
+        btnOpenSqlServer.Size = new Size(110, btnHeight);
         btnOpenSqlServer.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnOpenSqlServer.FlatAppearance.BorderSize = 1;
         btnOpenSqlServer.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
@@ -479,8 +479,8 @@ partial class MainForm
         btnOpenSqlServer.Margin = new Padding(0, 0, 6, 0);
 
         btnOpenBuiltInQuery = new Button();
-        btnOpenBuiltInQuery.Text = "🔧 内置查询";
-        btnOpenBuiltInQuery.Size = new Size(100, btnHeight);
+        btnOpenBuiltInQuery.Text = "🔧内置查询";
+        btnOpenBuiltInQuery.Size = new Size(110, btnHeight);
         btnOpenBuiltInQuery.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnOpenBuiltInQuery.FlatAppearance.BorderSize = 1;
         btnOpenBuiltInQuery.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
@@ -491,7 +491,7 @@ partial class MainForm
         btnOpenBuiltInQuery.Margin = new Padding(0, 0, 10, 0);
 
         btnRemote = new Button();
-        btnRemote.Text = "🖥️ 远程";
+        btnRemote.Text = "🖥️远程";
         btnRemote.Size = new Size(110, btnHeight);
         btnRemote.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnRemote.FlatAppearance.BorderSize = 1;
@@ -503,8 +503,8 @@ partial class MainForm
         btnRemote.Margin = new Padding(0, 0, 10, 0);
 
         btnRefresh = new Button();
-        btnRefresh.Text = "🔄 刷新";
-        btnRefresh.Size = new Size(100, btnHeight);
+        btnRefresh.Text = "🔄刷新";
+        btnRefresh.Size = new Size(110, btnHeight);
         btnRefresh.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
         btnRefresh.FlatAppearance.BorderSize = 1;
         btnRefresh.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(200, 200, 200);
