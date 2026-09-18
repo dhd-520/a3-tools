@@ -529,6 +529,86 @@ public class UpdateKnowledgeEntryAction : IAiAction
 }
 
 /// <summary>
+/// 移动知识条目到另一个知识库（★ 2026-09-18 陛下需求）
+/// <para>语义：源库删 + 目标库新增（Id 重新生成，CreatedAt/UpdatedAt 重置，其他字段保留）。
+///   陛下已设免确认（移动是高频操作，源/目标都是陛下明确的）。</para>
+/// </summary>
+public class MoveKnowledgeEntryAction : IAiAction
+{
+    public string Name => "move_knowledge_entry";
+    public string Description => "将指定条目从源知识库移动到目标知识库。语义=源库删 + 目标库新增（Id/CreatedAt/UpdatedAt 重置，其他字段保留）。目标库重名时拒绝并提示换库或用 update。陛下已设免确认，AI 直接调用即可。";
+    public AiActionPermission Permission => AiActionPermission.WriteLocal;
+    public object ParametersSchema => new
+    {
+        type = "object",
+        properties = new Dictionary<string, object>
+        {
+            ["source_base_name"] = new { type = "string", description = "源知识库名称（先 list_knowledge_bases 确认名称）" },
+            ["target_base_name"] = new { type = "string", description = "目标知识库名称（先 list_knowledge_bases 确认名称）" },
+            ["entry_id"] = new { type = "string", description = "条目 ID（先 search_knowledge 拿）" }
+        },
+        required = new string[] { "source_base_name", "target_base_name", "entry_id" }
+    };
+
+    // ★ 2026-09-18 陛下拍板：免确认，只给个进度反馈
+    public bool RequiresConfirmation => false;
+    public string? ConfirmationPrompt => null;
+    public string GetImpactDescription(Dictionary<string, object?> arguments)
+    {
+        var src = arguments.TryGetValue("source_base_name", out var s) ? s?.ToString() ?? "" : "";
+        var dst = arguments.TryGetValue("target_base_name", out var d) ? d?.ToString() ?? "" : "";
+        var id = arguments.TryGetValue("entry_id", out var i) ? i?.ToString() ?? "" : "";
+        return $"移动条目 {id.Substring(0, Math.Min(8, id.Length))}：「{src}」→「{dst}」";
+    }
+
+    public Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
+    {
+        try
+        {
+            string srcName = arguments.TryGetValue("source_base_name", out var s) ? s?.ToString()?.Trim() ?? "" : "";
+            string dstName = arguments.TryGetValue("target_base_name", out var d) ? d?.ToString()?.Trim() ?? "" : "";
+            string entryId = arguments.TryGetValue("entry_id", out var i) ? i?.ToString()?.Trim() ?? "" : "";
+            if (string.IsNullOrEmpty(srcName)) return Task.FromResult(AiActionResult.Fail("请提供 source_base_name"));
+            if (string.IsNullOrEmpty(dstName)) return Task.FromResult(AiActionResult.Fail("请提供 target_base_name"));
+            if (string.IsNullOrEmpty(entryId)) return Task.FromResult(AiActionResult.Fail("请提供 entry_id"));
+
+            var mgr = new KnowledgeBaseManager();
+            var src = mgr.ListBases().FirstOrDefault(b => string.Equals(b.Name, srcName, StringComparison.OrdinalIgnoreCase));
+            if (src == null) return Task.FromResult(AiActionResult.Fail($"源知识库「{srcName}」不存在"));
+            var dst = mgr.ListBases().FirstOrDefault(b => string.Equals(b.Name, dstName, StringComparison.OrdinalIgnoreCase));
+            if (dst == null) return Task.FromResult(AiActionResult.Fail($"目标知识库「{dstName}」不存在"));
+
+            // 先读出条目 title，用于错误信息和成功反馈
+            var srcFull = mgr.GetBase(src.Id);
+            var srcEntry = srcFull?.Entries.FirstOrDefault(e => e.Id == entryId);
+            if (srcEntry == null)
+                return Task.FromResult(AiActionResult.Fail($"源知识库「{srcName}」中不存在条目 {entryId}"));
+
+            var moved = mgr.MoveEntry(src.Id, entryId, dst.Id);
+            if (moved == null)
+                return Task.FromResult(AiActionResult.Fail("移动失败（未知原因）"));
+
+            return Task.FromResult(AiActionResult.Ok(
+                $"已将「{moved.Title}」从「{srcName}」移动到「{dstName}」（新 ID={moved.Id}）",
+                new
+                {
+                    Title = moved.Title,
+                    SourceBaseName = srcName,
+                    TargetBaseName = dstName,
+                    OldEntryId = entryId,
+                    NewEntryId = moved.Id,
+                    moved.SourceType,
+                    moved.Tags
+                }));
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult(AiActionResult.Fail(ex.Message));
+        }
+    }
+}
+
+/// <summary>
 /// 删除知识条目（高危：陛下必须输入条目标题前 4 字确认）
 /// </summary>
 public class DeleteKnowledgeEntryAction : IAiAction

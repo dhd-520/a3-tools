@@ -209,6 +209,55 @@ public class KnowledgeBaseManager
         return true;
     }
 
+    /// <summary>
+    /// 移动条目到另一个知识库（★ 2026-09-18 陛下需求：AI助理可调用 跨库移动）
+    /// <para>语义：源库删 + 目标库新增。保留 title/content/tags/sourceFile/sourceReference/sourceType/contentHash，
+    ///   Id 重新生成（避免和目标库冲突），CreatedAt/UpdatedAt 重置（跨库 = 重新创建）。</para>
+    /// </summary>
+    /// <returns>新建条目（含新 Id）；失败返回 null</returns>
+    public KnowledgeEntry? MoveEntry(string sourceBaseId, string entryId, string targetBaseId)
+    {
+        if (sourceBaseId == targetBaseId)
+            throw new InvalidOperationException("源库和目标库不能相同");
+
+        var sourceKb = GetBase(sourceBaseId);
+        if (sourceKb == null) throw new InvalidOperationException($"源知识库不存在：{sourceBaseId}");
+        var targetKb = GetBase(targetBaseId);
+        if (targetKb == null) throw new InvalidOperationException($"目标知识库不存在：{targetBaseId}");
+
+        var entry = sourceKb.Entries.FirstOrDefault(e => e.Id == entryId);
+        if (entry == null) throw new InvalidOperationException($"源知识库中不存在条目 {entryId}");
+
+        // ★ 防重：目标库已有同名标题 → 拒绝（要求 AI 用 update 或换库）
+        var dup = targetKb.Entries.FirstOrDefault(e =>
+            string.Equals(e.Title, entry.Title, StringComparison.OrdinalIgnoreCase));
+        if (dup != null)
+            throw new InvalidOperationException(
+                $"目标知识库「{targetKb.Name}」已有同名条目「{entry.Title}」（ID={dup.Id}），请换库或用 update_knowledge_entry 修改");
+
+        // 1) 源库删除
+        sourceKb.Entries.RemoveAll(e => e.Id == entryId);
+        SaveBase(sourceKb);
+
+        // 2) 目标库新增（Id 重新生成，CreatedAt/UpdatedAt 重置）
+        var moved = new KnowledgeEntry
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = entry.Title,
+            Content = entry.Content,
+            Tags = entry.Tags,
+            SourceFile = entry.SourceFile,
+            SourceType = entry.SourceType,
+            SourceReference = entry.SourceReference,
+            ContentHash = entry.ContentHash,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        targetKb.Entries.Add(moved);
+        SaveBase(targetKb);
+        return moved;
+    }
+
     /// <summary>批量删除条目。返回实际删除数。</summary>
     public int DeleteEntries(string baseId, IEnumerable<string> entryIds)
     {

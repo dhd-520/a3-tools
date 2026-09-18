@@ -42,6 +42,8 @@ public class ActionRegistry
         //   delete 高危：输入条目标题前 4 字确认
         // ★ 2026-09-18 陛下需求：add_knowledge_entry 免确认（每次点确认麻烦）
         //   写本地 JSON，add 内部有同名查重，可手动从知识库 UI 删除错误条目
+        // ★ 2026-09-18 陛下需求：move_knowledge_entry 上线（跨库移动）
+        //   语义=源库删+目标库新增，免确认（高频操作）
         Register(new ListKnowledgeBasesAction());
         Register(new SearchKnowledgeAction());
         Register(new GetKnowledgeEntryAction());
@@ -50,6 +52,7 @@ public class ActionRegistry
         Register(new AddKnowledgeEntryAction());  // ★ 免确认（2026-09-18）
         Register(new UpdateKnowledgeEntryAction());
         Register(new DeleteKnowledgeEntryAction());
+        Register(new MoveKnowledgeEntryAction());  // ★ 2026-09-18 上线
         // ★ 2026-09-16 知识库导入导出（export/import 普通确认）
         Register(new ExportKnowledgeAction());
         Register(new ImportKnowledgeAction());

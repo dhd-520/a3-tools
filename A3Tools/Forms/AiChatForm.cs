@@ -1701,6 +1701,8 @@ img { max-width: 100%; }
         sb.AppendLine("- add_knowledge_entry: 添加知识条目，来源自动标记为「对话」（普通确认）");
         sb.AppendLine("- update_knowledge_entry: 更新已有条目（普通确认）");
         sb.AppendLine("- delete_knowledge_entry: 删除条目（高危：输入条目标题前 4 字确认）");
+        // ★ 2026-09-18 陛下需求：跨库移动条目
+        sb.AppendLine("- move_knowledge_entry: 跨库移动条目（免确认；语义=源库删+目标库新增，Id/CreatedAt/UpdatedAt 重置）");
         sb.AppendLine();
         sb.AppendLine("## 业务查询工作流（重要）");
         sb.AppendLine("1. 拿到陛下的查询问题，先用 list_tables 探索账套下有哪些表（如果不确定）");
