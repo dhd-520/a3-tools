@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using A3Tools.Models;
 using A3Tools.Services.AiActions;
 
@@ -199,9 +200,37 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             if (!string.IsNullOrEmpty(message.Content))
                 sb.Append(message.Content);
 
-            // 没有 tool_calls → 结束
+            // ★ 2026-09-20 修复：某些 AI 模型不支持标准 function calling，
+            //   会以纯文本形式输出工具调用（如 <function_calls>...</function_calls>）
+            //   需要解析文本格式的工具调用并执行
             if (message.ToolCalls == null || message.ToolCalls.Count == 0)
-                break;
+            {
+                var textToolCalls = ParseTextToolCalls(message.Content ?? string.Empty);
+                if (textToolCalls.Count > 0)
+                {
+                    // 找到文本格式的工具调用，替换为空的 tool_calls 并继续循环
+                    message.ToolCalls = textToolCalls;
+                    // 从累积内容中移除工具调用文本
+                    string cleanedContent = RemoveToolCallText(message.Content ?? string.Empty);
+                    if (!string.IsNullOrEmpty(cleanedContent))
+                    {
+                        sb.Clear(); // 清除之前累积的
+                        sb.Append(cleanedContent);
+                    }
+                    // 重新添加 assistant 消息（带 tool_calls）
+                    msgs.RemoveAt(msgs.Count - 1); // 移除之前添加的
+                    msgs.Add(new
+                    {
+                        role = "assistant",
+                        content = cleanedContent,
+                        tool_calls = message.ToolCalls
+                    });
+                }
+                else
+                {
+                    break; // 真正没有工具调用，结束循环
+                }
+            }
 
             // 执行每个 tool call
             foreach (var tc in message.ToolCalls)
@@ -325,7 +354,73 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         return null;
     }
 
-    // ========== OpenAI 响应 DTO ==========
+    /// <summary>
+    /// ★ 2026-09-20 解析文本格式的工具调用（某些 AI 模型不支持标准 function calling）
+    ///   支持格式: XML style <function_calls><invoke>...</invoke></function_calls>
+    /// </summary>
+    private static List<OpenAiToolCall> ParseTextToolCalls(string content)
+    {
+        var result = new List<OpenAiToolCall>();
+        if (string.IsNullOrWhiteSpace(content)) return result;
+
+        // 匹配 <invoke name="toolName">...<parameter ...</invoke>
+        var invokePattern = @"<invoke\s+name=""([^""]+)"">([\s\S]*?)</invoke>";
+        var matches = Regex.Matches(content, invokePattern, RegexOptions.IgnoreCase);
+
+        foreach (Match m in matches)
+        {
+            string toolName = m.Groups[1].Value.Trim();
+            string paramsBlock = m.Groups[2].Value;
+
+            // 解析 <parameter name="k">v</parameter>
+            var paramPattern = @"<parameter\s+name=""([^""]+)"">([^<]*)</parameter>";
+            var paramMatches = Regex.Matches(paramsBlock, paramPattern, RegexOptions.IgnoreCase);
+
+            var argsDict = new Dictionary<string, object?>();
+            foreach (Match p in paramMatches)
+            {
+                argsDict[p.Groups[1].Value.Trim()] = p.Groups[2].Value.Trim();
+            }
+
+            var argsJson = JsonSerializer.Serialize(argsDict);
+            result.Add(new OpenAiToolCall
+            {
+                Id = "txt_tool_call_" + result.Count,
+                Type = "function",
+                Function = new OpenAiFunction
+                {
+                    Name = toolName,
+                    Arguments = argsJson
+                }
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// ★ 2026-09-20 移除文本中的工具调用文本（function_calls/invoke/parameter 标签）
+    /// </summary>
+    private static string RemoveToolCallText(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return content;
+
+        // 移除 <function_calls>...</function_calls>
+        var result = Regex.Replace(content,
+            @"<function_calls>[\s\S]*?</function_calls>",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        // 移除 XML style: <function_calls><invoke...</invoke></function_calls>
+        result = Regex.Replace(result,
+            @"<function_calls>[\s\S]*?</function_calls>",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        return result.Trim();
+    }
+
+// ========== OpenAI 响应 DTO ==========
 
     private class OpenAiChatResponse
     {

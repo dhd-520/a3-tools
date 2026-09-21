@@ -59,7 +59,17 @@ namespace A3Tools.Common.DataAccess
 
         public async Task<int> ExecuteNonQueryAsync(string sql, CancellationToken ct = default)
         {
+            // ★ 2026-09-21 陛下反馈：HTTP 代理模式下复制表值函数等 DDL 失败时未报错
+            //   根因：之前只返回 result.AffectedRows，没检查 result.Success
+            //         → SQL 失败时返回 0，调用方分不清「成功但无影响行」和「失败」
+            //   修法：失败时抛 InvalidOperationException，与 Direct 模式行为一致（SqlException）
+            //         这样 BulkCopy / CREATE FUNCTION / ALTER TABLE 等所有调用方不用改代码就能感知失败
             var result = await SendRequestAsync("nonquery", sql, ct);
+            if (!result.Success)
+            {
+                throw new InvalidOperationException(
+                    $"HTTP 代理执行失败：{result.Message ?? "Unknown error"}");
+            }
             return result.AffectedRows;
         }
 

@@ -944,6 +944,110 @@ public class GetTableSchemaAction : IAiAction
 }
 
 /// <summary>
+/// ★ 2026-09-20 陛下需求：对比两个表的结构（找差异列 / 类型不一致 / 同名字段）
+///   用途：排查表结构漂移、找 JOIN 字段、确认两表字段映射关系
+/// </summary>
+public class CompareTableSchemasAction : IAiAction
+{
+    public string Name => "compare_table_schemas";
+    public string Description => "对比两个表的列结构差异：列出 A 独有 / B 独有 / 类型不一致的列，并返回同名列清单（用于提示 JOIN 候选），常用于排查表结构漂移或找 JOIN 字段";
+    public AiActionPermission Permission => AiActionPermission.ReadLocal;
+    public object ParametersSchema => new
+    {
+        type = "object",
+        properties = new Dictionary<string, object>
+        {
+            ["code"] = new { type = "string", description = "账套编码" },
+            ["table_a"] = new { type = "string", description = "第一个表名（如 S_SCM_CUSTOMER）" },
+            ["table_b"] = new { type = "string", description = "第二个表名（如 S_SCM_MEMBER）" }
+        },
+        required = new string[] { "code", "table_a", "table_b" }
+    };
+
+    public bool RequiresConfirmation => false;
+    public string GetImpactDescription(Dictionary<string, object?> arguments)
+    {
+        var code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
+        var ta = arguments.TryGetValue("table_a", out var tao) ? tao?.ToString() ?? "" : "";
+        var tb = arguments.TryGetValue("table_b", out var tbo) ? tbo?.ToString() ?? "" : "";
+        return $"对比账套 [{code}] 中表 [{ta}] 和 [{tb}] 的列结构（只读）";
+    }
+
+    public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
+    {
+        try
+        {
+            string code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
+            string tableA = arguments.TryGetValue("table_a", out var tao) ? tao?.ToString() ?? "" : "";
+            string tableB = arguments.TryGetValue("table_b", out var tbo) ? tbo?.ToString() ?? "" : "";
+            if (string.IsNullOrEmpty(code)) return AiActionResult.Fail("请提供账套编码");
+            if (string.IsNullOrEmpty(tableA)) return AiActionResult.Fail("请提供第一个表名");
+            if (string.IsNullOrEmpty(tableB)) return AiActionResult.Fail("请提供第二个表名");
+
+            var ds = new DataService();
+            var account = ds.FindAccount(code);
+            if (account == null) return AiActionResult.Fail($"账套 [{code}] 不存在");
+
+            var dataAccess = DataAccessFactory.Create(account);
+            // 并行获取两个表的 schema（避免串行等待）
+            var taskA = dataAccess.GetTableSchemaAsync(tableA, ct);
+            var taskB = dataAccess.GetTableSchemaAsync(tableB, ct);
+            await Task.WhenAll(taskA, taskB);
+
+            var colsA = taskA.Result;
+            var colsB = taskB.Result;
+
+            // 列名大小写不敏感比较
+            var mapA = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in colsA) mapA[col.Name] = col.TypeName;
+            var mapB = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in colsB) mapB[col.Name] = col.TypeName;
+
+            // A 独有
+            var onlyInA = colsA.Where(c => !mapB.ContainsKey(c.Name))
+                .Select(c => new { c.Name, type = c.TypeName }).ToList();
+            // B 独有
+            var onlyInB = colsB.Where(c => !mapA.ContainsKey(c.Name))
+                .Select(c => new { c.Name, type = c.TypeName }).ToList();
+            // 类型不一致 + 同名列（同时收集）
+            var typeMismatch = new List<object>();
+            var commonColumns = new List<object>();
+            foreach (var kvA in mapA)
+            {
+                if (mapB.TryGetValue(kvA.Key, out var typeB))
+                {
+                    if (string.Equals(kvA.Value, typeB, StringComparison.OrdinalIgnoreCase))
+                    {
+                        commonColumns.Add(new { name = kvA.Key, type = kvA.Value });
+                    }
+                    else
+                    {
+                        typeMismatch.Add(new { name = kvA.Key, type_a = kvA.Value, type_b = typeB });
+                    }
+                }
+            }
+
+            return AiActionResult.Ok(
+                $"对比完成：A 独有 {onlyInA.Count} 列 / B 独有 {onlyInB.Count} 列 / 类型不一致 {typeMismatch.Count} 列 / 同名列 {commonColumns.Count} 列",
+                new
+                {
+                    code,
+                    table_a = new { name = tableA, count = colsA.Count },
+                    table_b = new { name = tableB, count = colsB.Count },
+                    only_in_a = onlyInA,
+                    only_in_b = onlyInB,
+                    type_mismatch = typeMismatch,
+                    common_columns = commonColumns
+                });
+        }
+        catch (Exception ex)
+        {
+            return AiActionResult.Fail($"对比表结构失败：{ex.Message}");
+        }
+    }
+}
+
+/// <summary>
 /// ★ 2026-08-26 R2-D 业务查询：执行 SQL 查询（高危）
 /// </summary>
 public class ExecuteSqlAction : IAiAction

@@ -983,8 +983,20 @@ _ = wv2.EnsureCoreWebView2Async();
                 string summary = result.Summary;
                 await pnlMessagesScroll.InvokeAsync(() =>
                 {
-                    placeholderAi.Content = $"调用工具：{toolCallLog.Last().ToolName}\n结果：{summary}";
-                    RenderMessages();
+                    // ★ 2026-09-20 陛下反馈「调用工具时整个对话框闪烁刷新」
+                    //   根因：之前 RenderMessages() 会 Controls.Clear() + 重建所有气泡，
+                    //         AI 调一次工具就重建 N 个 WebView2 + NavigateToString 重新初始化 → 整屏闪
+                    //   修法：只更新占位气泡内容（已经创建过），不重建其他历史消息
+                    string toolName = toolCallLog.Last().ToolName;
+                    placeholderAi.Content = $"🔧 调用工具：{toolName}\n\n{summary}";
+                    var (bubble, isWv2) = FindBubbleForStream(placeholderAi);
+                    if (bubble != null && isWv2 && bubble is Microsoft.Web.WebView2.WinForms.WebView2 wv2 && wv2.CoreWebView2 != null)
+                    {
+                        string html = RenderMarkdownAsHtml(placeholderAi.Content);
+                        string escaped = System.Text.Json.JsonSerializer.Serialize(html);
+                        _ = wv2.CoreWebView2.ExecuteScriptAsync("document.body.innerHTML = " + escaped + ";");
+                    }
+                    ScrollToBottom();
                 });
                 return true;
             };
@@ -1691,7 +1703,15 @@ img { max-width: 100%; }
         sb.AppendLine("- delete_account: 删除账套（高危：输入账套编码确认）");
         sb.AppendLine("- list_tables: 列出账套下所有表（只读，AI 探索库结构用）");
         sb.AppendLine("- get_table_schema: 获取指定表的列结构（只读，AI 写 SQL 前必查）");
+        // ★ 2026-09-20 陛下需求：给 AI 开放表结构对比工具
+        sb.AppendLine("- compare_table_schemas: 对比两个表的列结构差异（A独有/B独有/类型不一致/同名列），用于排查结构漂移或找 JOIN 字段");
         sb.AppendLine("- execute_sql: 在账套上执行 SELECT 查询（高危：输入 EXECUTE 确认，只允许 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN）");
+        // ★ 2026-09-20 陛下需求：DDL 执行 + 视图定义（让 Skill 能复制表/视图结构）
+        sb.AppendLine("- get_view_definition: 获取视图的 CREATE VIEW 定义语句（SQL Server OBJECT_DEFINITION，只读）");
+        sb.AppendLine("- execute_ddl: 执行 DDL（CREATE/ALTER/DROP/TRUNCATE，高危必须确认，禁止 INSERT/UPDATE/DELETE/EXEC，支持 dry_run=true 只看不执行）");
+        // ★ 2026-09-20 陛下需求：AI 可调用陛下编写的 Skill（多步骤工作流）
+        sb.AppendLine("- list_skills: 列出所有可用 Skill（陛下自编工作流，存放在 DATA/skills/*.md）");
+        sb.AppendLine("- load_skill: 读取 Skill 完整内容（Markdown正文），按步骤调用现有工具完成");
         // ★ 2026-09-08 知识库管理 Action（让 AI 能直接保存/检索知识）
         sb.AppendLine("- list_knowledge_bases: 列出所有知识库（只读）");
         sb.AppendLine("- search_knowledge: 跨库 BM25 检索条目（只读，回答技术问题前可调）");
@@ -1707,8 +1727,21 @@ img { max-width: 100%; }
         sb.AppendLine("## 业务查询工作流（重要）");
         sb.AppendLine("1. 拿到陛下的查询问题，先用 list_tables 探索账套下有哪些表（如果不确定）");
         sb.AppendLine("2. 用 get_table_schema 看相关表的列名 / 类型（如果不确定列名）");
+        // ★ 2026-09-20 陛下需求：当陛下要求对比两张表时，优先调 compare_table_schemas
+        sb.AppendLine("2.5. 如果陛下要求对比两张表结构，调 compare_table_schemas（返回 A独有/B独有/类型不一致/同名列）");
         sb.AppendLine("3. 用 execute_sql 拼 SQL 查询（必须 SELECT/WITH，禁止 INSERT/UPDATE/DELETE/DROP/CREATE/ALTER/TRUNCATE）");
         sb.AppendLine("4. 拿到结果后用自然语言组织给陛下（中文表格 / 摘要）");
+        sb.AppendLine();
+        // ★ 2026-09-20 陛下需求：让 AI 能调用陛下编写的 Skill（多步骤工作流）
+        sb.AppendLine("## Skill 调用工作流（重要）");
+        sb.AppendLine("陛下可以在 DATA/skills/*.md 里编写自己的多步骤工作流（如「升级账套」、「同步数据」）。AI 必须按下面流程使用：");
+        sb.AppendLine("1. 陛下提到某个工作流关键词时（如「升级账套」、「同步」、「对账」等），先调 list_skills 看是否有现成 Skill");
+        sb.AppendLine("2. 找到匹配 description 的 Skill，调 load_skill 读取完整内容（会拿到 Markdown 正文 + 参数说明）");
+        sb.AppendLine("3. 确认必要参数（如 source_code / target_code）→ 若陛下没提供，先问清楚");
+        sb.AppendLine("4. 严格按 Skill 正文中的步骤顺序执行，每步调用对应工具（execute_ddl/create_knowledge_base/add_knowledge_entry 等）");
+        sb.AppendLine("5. 高危操作（execute_ddl 涉及 CREATE/ALTER/DROP、delete_account、delete_knowledge_entry 等）必须走「dry_run → 陛下确认 → 真正执行」三步走");
+        sb.AppendLine("6. 每完成一个 Phase 向陛下汇报进度，最后汇总变更让陛下复核");
+        sb.AppendLine("7. ★ 重要：Skill 是陛下的私人工作流，只在陛下明确要求或场景明显匹配时才调用，别主动引申无关 Skill");
         sb.AppendLine();
         // ★ 2026-09-08 知识库互动工作流（陛下要求：AI 能直接新增知识库内容）
         sb.AppendLine("## 知识库互动工作流（重要）");
