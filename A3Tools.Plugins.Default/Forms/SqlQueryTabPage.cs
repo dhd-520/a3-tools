@@ -290,7 +290,10 @@ public partial class SqlQueryTabPage : UserControl
         try
         {
             rtbEditor.Text = text;
-            rtbEditor.HighlightNow();
+            // ★ 2026-09-22 陛下反馈修复大文档首次加载慢: 跳过重置为黑色
+            // editor.Text = text 后所有字符默认已是黑色, 5-6s 的"全量重置"是白做功。
+            // 5 轮正则设色仍跑,关键字/字符串/数字/注释高亮完整。
+            rtbEditor.HighlightNow(resetColors: false);
         }
         finally
         {
