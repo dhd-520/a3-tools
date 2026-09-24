@@ -119,6 +119,16 @@ if (-not $githubToken -and -not $ghCli) {
 #    支持中文！Gitee API 存 UTF-8 正确（v2.4.0 起的 "mojibake" 是 PowerShell 5.1
 #    Invoke-WebRequest | ConvertFrom-Json 解码 bug，不是 Gitee bug）。
 #    实际验证：D:\work\A3Tools\worklist\2026-07-17-release-ps1-fix-and-powershell-utf8-misdiagnosis.md
+#
+# ★ 2026-09-24 陛下反馈修复 v2.6.2 mojibake: 如果 -ReleaseNotes 是文件路径,
+#    必须用 [IO.File]::ReadAllText(path, UTF8) 读取,不能用 Get-Content -Raw
+#    (PS 5.1 默认系统编码 GBK,会把 UTF-8 文件当 GBK 解码 -> mojibake)
+#    自动检测: Test-Path $ReleaseNotes 是文件路径就走 UTF-8 读取,不是则视为原始字符串
+if ($ReleaseNotes -and (Test-Path $ReleaseNotes -PathType Leaf)) {
+    Info ("Loading ReleaseNotes from file (UTF-8): " + $ReleaseNotes)
+    $ReleaseNotes = [System.IO.File]::ReadAllText($ReleaseNotes, [System.Text.Encoding]::UTF8)
+}
+
 if (-not $ReleaseNotes) {
     $ReleaseNotes = @'
 ## A3Tools vNEW_VERSION
