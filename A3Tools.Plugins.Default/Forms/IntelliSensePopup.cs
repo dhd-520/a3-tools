@@ -144,8 +144,12 @@ public class IntelliSensePopup : Form
             catch { /* 不让 Opacity 失败把整个弹窗拖死 */ }
         }
 
-        if (listBox.Items.Count > 0)
-            listBox.SelectedIndex = 0;
+        // ★ 2026-09-24 陛下反馈修复: 联想去掉默认选中第一个。
+        // 原因: 用户输完后习惯性按回车,如果默认第一个 → 直接用了第一项,可能不是想要的。
+        // SSMS / VS 标准行为: 联想 popup 不默认选中任何项,需 ↓ 选 → Enter 确认。
+        // 改动: 不设 SelectedIndex(默认 -1),鼠标 hover 才高亮(MouseMove 已实现)。
+        // Enter/Tab 拦截逻辑保持原"无选中即不替换",所以即使 popup visible 时按 Enter 也只是关 popup,不会补全。
+        // listBox.Items.Count > 0 检查仍保留(空列表时不必设),但不设 SelectedIndex。
 
         if (!Visible)
         {
@@ -200,7 +204,9 @@ public class IntelliSensePopup : Form
         listBox.Height = popupHeight;
         ClientSize = new Size(listBox.Width + 2, popupHeight + 2);
 
-        listBox.SelectedIndex = 0;
+        // ★ 2026-09-24 陛下反馈修复: 联想去掉默认选中第一个(Filter 时也不选)
+        // 理由同 ShowNearCaret: 用户连续打字时不想被默认选中干扰。
+        // 用户想选 → 按 ↓ 或鼠标 hover;不想选 → 直接 Enter 跳过。
     }
 
     public void MoveSelection(int delta)

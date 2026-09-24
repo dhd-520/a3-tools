@@ -122,7 +122,11 @@ public class SqlEditor : RichTextBox
             Highlight(from, to);
         };
 
-        _intelliSenseTimer = new System.Windows.Forms.Timer { Interval = 50 };
+        // ★ 2026-09-24 陛下反馈修复联想闪烁: 防抖 800ms
+        // 原因: 之前 Interval=50,每次按键立刻触发,输入过程中持续闪烁。
+        // 新行为: 用户停手 800ms 后才触发联想,连续打字期间 timer 反复 Stop+Start 重置倒计时。
+        // 与 _highlightTimer(200ms 高亮节流) 独立——高亮仍 200ms(为了接近实时的反馈)。
+        _intelliSenseTimer = new System.Windows.Forms.Timer { Interval = 800 };
         _intelliSenseTimer.Tick += (_, _) =>
         {
             _intelliSenseTimer.Stop();
@@ -1096,6 +1100,12 @@ public class SqlEditor : RichTextBox
     private void IndentMultipleLines(int lineStart, int lineEnd, bool addIndent)
     {
         if (lineStart < 0 || lineEnd < lineStart) return;
+
+        // ★ 2026-09-24 陛下反馈修复缩进后选中丢失: 保存用户原始选区用于缩进后还原。
+        // IndentMultipleLines 是 HandleTabIndent/HandleShiftTabIndent 共用入口,
+        // 调用方已读过 selStart/selLen,这里再读一次当前 SelectionStart/SelectionLength 作为兜底。
+        int selStartAtMethodEntry = SelectionStart;
+        int selLenAtMethodEntry = SelectionLength;
         // 考虑选区延伸到 lineEnd+1 的下一行 (GetLineFromCharIndex(selStart+selLen) 
         // 当 selLen>0 且选区末尾正好是 \n 之后的位置时, 会返下一行)。
         // 逻辑: 如果选区以行尾换行结尾, 跨行范围 -= 1 (避免空行被加缩进)。
@@ -1154,6 +1164,69 @@ public class SqlEditor : RichTextBox
             _suppressHighlight = false;
             _suppressIntelliSense = false;
         }
+
+        // ★ 2026-09-24 陛下反馈修复缩进后高亮丢失 + 选中丢失:
+        //   1. 缩进后手动调 Highlight() 重设受影响的行范围的关键字颜色
+        //      (因为 _suppressHighlight=true 时 OnTextChanged 没触发增量高亮,关键字会变默认黑色)
+        //   2. 还原用户原本的选区(缩进后选区字符位置会整体平移)
+        // ★★★ v2 修复选中丢失 bug: 起点位移 = IndentText.Length (只算选中起点行)
+        //                  终点位移 = IndentText.Length × (realLineEnd - lineStart + 1)
+        //                  长度增量 = 终点位移 - 起点位移 = IndentText.Length × (realLineEnd - lineStart)
+        // 之前误用 totalShift = charShift × linesAffected,导致起点位移过大,
+        // "每缩进一次选中就少一点" 即起点位移多算了 (linesAffected-1) 个缩进宽度。
+        int charShift = addIndent ? IndentText.Length : -IndentText.Length;
+        int linesAffected = Math.Max(1, realLineEnd - lineStart + 1);
+
+        // 1. 重设色: 直接调 Highlight 增量高亮受影响行
+        try { Highlight(lineStart, realLineEnd); }
+        catch { /* Highlight 内部已有四重检查,这里再兜底 */ }
+
+        // 2. 还原选区
+        if (IsDisposed || !IsHandleCreated) return;
+        try
+        {
+            int origSelStart = selStartAtMethodEntry;
+            int origSelLen = selLenAtMethodEntry;
+
+            // 原始选区终点(在 text 替换前)
+            int origSelEnd = origSelStart + origSelLen;
+
+            // 原始选区起点所在行号(在原文本中)
+            int origSelStartLine = GetLineFromCharIndex(origSelStart);
+            int origSelEndLine = (origSelLen > 0 && origSelEnd <= TextLength) ? GetLineFromCharIndex(origSelEnd) : origSelStartLine;
+
+            // 原始选区起点落在缩进范围(lineStart ~ realLineEnd)内的哪一行
+            // 落在 lineStart 行 → 起点位移 = 1 个 charShift
+            // 落在 lineStart+1 行 → 起点位移 = 2 个 charShift
+            // 落在 lineStart+k 行 → 起点位移 = (k+1) 个 charShift
+            int startRowOffset = 0;
+            if (origSelStartLine >= lineStart && origSelStartLine <= realLineEnd)
+                startRowOffset = origSelStartLine - lineStart;  // 0-indexed: lineStart 是第 0 行
+
+            int endRowOffset = startRowOffset;
+            if (origSelEndLine >= lineStart && origSelEndLine <= realLineEnd)
+                endRowOffset = origSelEndLine - lineStart;
+            else if (origSelEndLine > realLineEnd)
+                endRowOffset = linesAffected - 1;  // 选区终点在最后一行
+
+            int startShift = charShift * (startRowOffset + 1);  // 起点位移 = (所在行 + 1) × charShift
+            int endShift = charShift * (endRowOffset + 1);      // 终点位移 = (所在行 + 1) × charShift
+
+            // addIndent 时: 起点/终点 charShift=+4,移右;removeIndent 时移左(可能到负)
+            int newSelStart = origSelStart + startShift;
+            int newSelLen = Math.Max(0, (origSelEnd + endShift) - newSelStart);
+
+            // 边界保护: 选区不能超出当前 TextLength
+            if (newSelStart < 0) newSelStart = 0;
+            if (newSelStart > TextLength) newSelStart = TextLength;
+            if (newSelStart + newSelLen > TextLength) newSelLen = TextLength - newSelStart;
+
+            SelectionStart = newSelStart;
+            SelectionLength = newSelLen;
+            // 让光标可见(滚动到选区)
+            ScrollToCaret();
+        }
+        catch { /* 选区还原失败不影响主流程 */ }
     }
 
     /// <summary>从指定行行首去掉最多 4 空格</summary>

@@ -138,11 +138,79 @@ public static class SqlIntelliSenseProvider
         }
 
         // ===== -0. SELECT/WHERE/ON 后空白 → 弹列 =====
+        // ★ 2026-09-24 陛下反馈修复列联想误触: 别名/表名验证 (方案 B)
+        // 场景: `SELECT * FROM S_SCM_SEORDER |` (caret 后是空格)
+        //   现状: DetectContext 扫到 `S_SCM_SEORDER` (非关键字) + caret 在 word 后 → 返 AfterColumnKeyword → 弹列。
+        //         但 S_SCM_SEORDER 可能不是该 SQL 里已识别的表/别名,只是用户刚输完的前缀。
+        //   修复: 在弹列前先验柢:
+        //         1) word 是空 → 上一轮非关键字 word 在 caret 处 (原逻辑不动)
+        //         2) word 非空 → 拿去 SqlAliasResolver.Parse 看是否在 aliasMap 中;不在 → 降级到对象联想。
+        //   额外验证: 即使 aliasMap 没命中,也查 schema cache 看是否真存在该对象名。
+        //             存在 → 可能是刚输完的对象 (例 `FROM SE|` 后用户输完想输表),仍按列逻辑弹
+        //                    (符合 SSMS 行为:FROM 输完表名后下一上下文默认弹列)。
+        //             不存在 → 完全没出现过,降级到对象联想弹表。
         if (ctx == SqlContextKind.AfterColumnKeyword)
         {
-            // ★ 2026-09-14: 透传 caretOffset, 让 SqlAliasResolver.Parse 缩到当前语句
-            var cols = GetAllColumnsFromAliases(connectionString, fullSql, caretOffset, prefix);
-            if (cols != null && cols.Count > 0) return cols;
+            if (!string.IsNullOrEmpty(fullSql))
+            {
+                // ★ 2026-09-24 v2 陛下反馈问题 3 仍未解决修复: 空白位置判定。
+                // 根因: 之前 IsKnownTableOrAlias("S_SCM_SEORDER") 返 true (aliasMap 末段),
+                //       所以未降级 → 仍弹列。
+                // 真正的判定: caret 与 word 之间是否有空白/逗号/末尾 → 决定列上下文还是对象上下文。
+                //   - 有空白: 用户输完表名,准备输列条件 → 弹列 (符合 SSMS 行为)
+                //   - 无空白: 用户还在输 word (可能未输完,可能刚输完想输逗号或下一表)
+                //             → 弹对象 (表/视图/表值函数),不弹列
+                int caret = caretOffset;
+                bool hasSeparatorBetweenWordAndCaret = false;
+                if (caret > 0 && caret <= fullSql.Length)
+                {
+                    // 从 caret-1 向前扫,遇到 word 首字符就停;中间有空白/逗号则为 true
+                    int scan = caret - 1;
+                    while (scan >= 0)
+                    {
+                        char c = fullSql[scan];
+                        if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#')
+                            break;  // 到达 word 首字符
+                        if (char.IsWhiteSpace(c) || c == ',' || c == '\t' || c == '\r' || c == '\n')
+                        {
+                            hasSeparatorBetweenWordAndCaret = true;
+                            break;
+                        }
+                        // 其他符号 (. ( 等 → 不是 separator
+                        scan--;
+                    }
+                }
+
+                if (!hasSeparatorBetweenWordAndCaret)
+                {
+                    // ★ 关键场景: `SELECT * FROM S_SCM_SEORDER|` (caret 紧接 R 后,无空格)
+                    // 用户表达:"我没有输入任何空格表明我的表已经输入完成了"
+                    // → 这是对象上下文 (用户还在输 / 准备输逗号 / 准备输下一表),不弹列。
+                    ctx = SqlContextKind.AfterObjectKeyword;
+                }
+                else if (!string.IsNullOrEmpty(prefix))
+                {
+                    // 有空白 → 才检查 word 是否真在 aliasMap/schema 中(避免 `FROM NonExistingTable ` 误弹列)
+                    string lastWord = ExtractLastWordBeforeCaret(fullSql, caretOffset);
+                    bool isKnown = IsKnownTableOrAlias(lastWord, fullSql, caretOffset, connectionString);
+                    if (!isKnown)
+                    {
+                        ctx = SqlContextKind.AfterObjectKeyword;
+                    }
+                }
+            }
+
+            if (ctx == SqlContextKind.AfterColumnKeyword)
+            {
+                // ★ 2026-09-14: 透传 caretOffset, 让 SqlAliasResolver.Parse 缩到当前语句
+                var cols = GetAllColumnsFromAliases(connectionString, fullSql, caretOffset, prefix);
+                if (cols != null && cols.Count > 0) return cols;
+                // 降级补底: aliasMap 查出 0 列也走对象路径
+                if (cols == null || cols.Count == 0)
+                {
+                    ctx = SqlContextKind.AfterObjectKeyword;
+                }
+            }
         }
 
         // ===== -0. FROM/JOIN 后空白 → 弹对象 =====
@@ -577,5 +645,82 @@ public static class SqlIntelliSenseProvider
         }
         // 内层已经按 prefix StartsWith 过滤+Take(50), 直接返回即可。
         return all.Count == 0 ? null : all;
+    }
+
+    /// <summary>
+    /// ★ 2026-09-24 陛下反馈修复列联想误触 (方案 B 配套): 提取 caret 之前的最后一个标识符 word。
+    /// 例: "SELECT * FROM S_SCM_SEORDER |" caret 在末尾 → 返 "S_SCM_SEORDER"
+    ///     "SELECT * FROM T1 a|" caret 在 a 后 → 返 "a"
+    ///     "SELECT * FROM T1 a|" caret 在空格前 → 返 "a"
+    /// 不包括 schema. / alias. 点号,只返点号后的末段。
+    /// </summary>
+    private static string ExtractLastWordBeforeCaret(string fullSql, int caretOffset)
+    {
+        if (string.IsNullOrEmpty(fullSql) || caretOffset <= 0) return "";
+        int end = caretOffset;
+        // 先跳过尾部空白,定位到实际 word 末尾
+        while (end > 0 && char.IsWhiteSpace(fullSql[end - 1])) end--;
+        int start = end;
+        while (start > 0)
+        {
+            char c = fullSql[start - 1];
+            if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#')
+                start--;
+            else
+                break;
+        }
+        if (start >= end) return "";
+        return fullSql.Substring(start, end - start);
+    }
+
+    /// <summary>
+    /// ★ 2026-09-24 陛下反馈修复列联想误触 (方案 B): 验证 word 是否在该 SQL 已识别的表/别名/对象中。
+    /// 用于 AfterColumnKeyword 分支前置过滤,避免 `SELECT * FROM S_SCM_SEORDER |` 误弹列。
+    /// 验证优先级:
+    ///   1. aliasMap.ContainsKey(word) - 已解析的 FROM/JOIN 别名 (例 `FROM T1 a` 输 "a")
+    ///   2. aliasMap.Values 里 ObjectName 匹配 - 已解析的真实表名 (例 `FROM T1` 输 "T1")
+    ///   3. SqlObjectSchemaCache 真实存在该对象 - 用户输完想输表 (例 `FROM SE|` 后输完才进列)
+    ///   4. 都没有 → 降级到对象联想
+    /// </summary>
+    private static bool IsKnownTableOrAlias(string word, string fullSql, int caretOffset, string? connectionString)
+    {
+        if (string.IsNullOrEmpty(word)) return true;  // 空 word 不验证,沿用原逻辑
+        var aliasMap = SqlAliasResolver.Parse(fullSql, caretOffset);
+        // 1. 别名直命中
+        if (aliasMap.ContainsKey(word)) return true;
+        // 2. ObjectName 匹配 (从裸对象名入 aliasMap 的情况)
+        foreach (var kv in aliasMap)
+        {
+            if (string.Equals(kv.Value.ObjectName, word, StringComparison.OrdinalIgnoreCase))
+                return true;
+            // key 是 schema.object 的形式也匹配末段
+            if (kv.Key.Equals(word, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        // 3. schema cache 真实存在 (陛下 `FROM S_SCM_SEORDER|` 输完后想输表,但表名在该账套里)
+        if (!string.IsNullOrEmpty(connectionString))
+        {
+            try
+            {
+                var suggestions = SqlObjectSchemaCache.GetObjectSuggestions(
+                    connectionString, word,
+                    new[] { SqlObjectSchemaCache.ObjectKind.Table,
+                            SqlObjectSchemaCache.ObjectKind.View,
+                            SqlObjectSchemaCache.ObjectKind.TableValuedFunction });
+                if (suggestions != null && suggestions.Count > 0)
+                {
+                    // 精确命中 word 或 word 是 schema.object 的末段
+                    foreach (var s in suggestions)
+                    {
+                        var lastDot = s.LastIndexOf('.');
+                        var namePart = lastDot >= 0 ? s.Substring(lastDot + 1) : s;
+                        if (string.Equals(namePart, word, StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+            }
+            catch { /* cache 未加载返空 → 走降级路径 */ }
+        }
+        return false;
     }
 }
