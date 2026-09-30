@@ -17,6 +17,7 @@ public partial class CrossDbCopyFormForm : Form
 
     // 用于存储搜索到的表单数据
     private DataTable? _searchResults;
+    private DataView? _dataView;
 
     public CrossDbCopyFormForm(IToolContext context, Account? currentAccount)
     {
@@ -49,6 +50,16 @@ public partial class CrossDbCopyFormForm : Form
                 }
             }
         };
+
+        // 快速过滤行
+        txtFilterName.TextChanged += (s, e) => ApplyFilter();
+        txtFilterSolution.TextChanged += (s, e) => ApplyFilter();
+        txtFilterBizGroup.TextChanged += (s, e) => ApplyFilter();
+        txtFilterGroup.TextChanged += (s, e) => ApplyFilter();
+
+        dgvSearchResults.ColumnWidthChanged += (s, e) => SyncFilterRowPositions();
+        dgvSearchResults.ColumnAdded += (s, e) => SyncFilterRowPositions();
+        dgvSearchResults.DataSourceChanged += (s, e) => SyncFilterRowPositions();
 
         // 点击表头处理：点击checkbox列全选/取消全选
         dgvSearchResults.ColumnHeaderMouseClick += (s, e) =>
@@ -359,6 +370,9 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     }
                     // 先设置数据源
                     dgvSearchResults.DataSource = dt;
+                    _dataView = dt.DefaultView;
+                    ApplyFilter();
+                    SyncFilterRowPositions();
                     // 再插入checkbox列作为第一列
                     var checkCol = new DataGridViewCheckBoxColumn();
                     checkCol.HeaderText = "选择";
@@ -507,7 +521,7 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         var success = await CopyFormsAsync(
             txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
             txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
-            txtObjectGuids.Text.Trim(), chkDeleteFirst.Checked, chkCopyStoredProcs.Checked);
+            txtObjectGuids.Text.Trim(), chkDeleteFirst.Checked, chkCopyStoredProcs.Checked, chkCopyTableStructure.Checked);
 
         if (success)
         {
@@ -554,12 +568,12 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
     private async Task<bool> CopyFormsAsync(
         string srcServer, string srcDbName, string srcUser, string srcPassword,
         string tgtServer, string tgtDbName, string tgtUser, string tgtPassword,
-        string objectGuids, bool deleteFirst, bool copyStoredProcs)
+        string objectGuids, bool deleteFirst, bool copyStoredProcs, bool copyTableStructures)
     {
         // Http 代理模式
         if (IsHttpMode)
         {
-            return await CopyFormsHttpAsync(objectGuids, deleteFirst, copyStoredProcs);
+            return await CopyFormsHttpAsync(objectGuids, deleteFirst, copyStoredProcs, copyTableStructures);
         }
 
         // 直连模式：保持原逻辑
@@ -619,6 +633,16 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                         }));
                         CopyStoredProcsForObject(srcConn, tgtConn, objectGuid, deleteFirst);
                     }
+
+                    // 复制表结构（仅当勾选时）
+                    if (copyTableStructures)
+                    {
+                        this.Invoke(new Action(() =>
+                        {
+                            lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
+                        }));
+                        CopyTableStructuresForObject(srcConn, tgtConn, objectGuid);
+                    }
                 }
 
                 return true;
@@ -636,7 +660,7 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
 
     // ==================== Http 代理模式核心复制 ====================
 
-    private async Task<bool> CopyFormsHttpAsync(string objectGuids, bool deleteFirst, bool copyStoredProcs)
+    private async Task<bool> CopyFormsHttpAsync(string objectGuids, bool deleteFirst, bool copyStoredProcs, bool copyTableStructures)
     {
         try
         {
@@ -687,6 +711,16 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                         lblProgress.Text = "正在复制存储过程：" + objectGuid + " (" + current + "/" + total + ")";
                     }));
                     await CopyStoredProcsForObjectHttpAsync(srcDA, tgtDA, objectGuid, deleteFirst);
+                }
+
+                // 复制表结构（仅当勾选时）
+                if (copyTableStructures)
+                {
+                    this.Invoke(new Action(() =>
+                    {
+                        lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
+                    }));
+                    await CopyTableStructuresForObjectHttpAsync(srcDA, tgtDA, objectGuid);
                 }
             }
 
@@ -837,6 +871,456 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 应用过滤：根据 4 个 txtFilter* 动态过滤 DataView (AND 子串匹配)
+    /// </summary>
+    private void ApplyFilter()
+    {
+        if (_dataView == null) return;
+        var filters = new List<string>();
+        var name = txtFilterName.Text.Trim();
+        if (!string.IsNullOrEmpty(name))
+            filters.Add($"[名称] LIKE '%{EscapeLike(name)}%'");
+        var solution = txtFilterSolution.Text.Trim();
+        if (!string.IsNullOrEmpty(solution))
+            filters.Add($"[解决方案] LIKE '%{EscapeLike(solution)}%'");
+        var bizGroup = txtFilterBizGroup.Text.Trim();
+        if (!string.IsNullOrEmpty(bizGroup))
+            filters.Add($"[业务分组] LIKE '%{EscapeLike(bizGroup)}%'");
+        var group = txtFilterGroup.Text.Trim();
+        if (!string.IsNullOrEmpty(group))
+            filters.Add($"[分组] LIKE '%{EscapeLike(group)}%'");
+        _dataView.RowFilter = filters.Count > 0 ? string.Join(" AND ", filters) : "";
+    }
+
+    /// <summary>
+    /// 同步过滤行 TextBox 位置/宽度与 dgvSearchResults 列对齐
+    /// </summary>
+    private void SyncFilterRowPositions()
+    {
+        if (dgvSearchResults.Columns.Count == 0) return;
+        int x = dgvSearchResults.Left - pnlFilterRow.Left;
+        if (dgvSearchResults.RowHeadersVisible)
+            x += dgvSearchResults.RowHeadersWidth;
+        if (dgvSearchResults.Columns.Contains("chk") && dgvSearchResults.Columns["chk"].Visible)
+            x += dgvSearchResults.Columns["chk"].Width;
+        int y = (pnlFilterRow.ClientSize.Height - txtFilterName.PreferredHeight) / 2;
+        if (y < 0) y = 0;
+
+        if (dgvSearchResults.Columns.Contains("名称") && dgvSearchResults.Columns["名称"].Visible)
+        {
+            txtFilterName.Visible = true;
+            txtFilterName.Location = new Point(x, y);
+            txtFilterName.Width = dgvSearchResults.Columns["名称"].Width;
+            x += txtFilterName.Width;
+        }
+        else { txtFilterName.Visible = false; }
+
+        if (dgvSearchResults.Columns.Contains("解决方案") && dgvSearchResults.Columns["解决方案"].Visible)
+        {
+            txtFilterSolution.Visible = true;
+            txtFilterSolution.Location = new Point(x, y);
+            txtFilterSolution.Width = dgvSearchResults.Columns["解决方案"].Width;
+            x += txtFilterSolution.Width;
+        }
+        else { txtFilterSolution.Visible = false; }
+
+        if (dgvSearchResults.Columns.Contains("业务分组") && dgvSearchResults.Columns["业务分组"].Visible)
+        {
+            txtFilterBizGroup.Visible = true;
+            txtFilterBizGroup.Location = new Point(x, y);
+            txtFilterBizGroup.Width = dgvSearchResults.Columns["业务分组"].Width;
+            x += txtFilterBizGroup.Width;
+        }
+        else { txtFilterBizGroup.Visible = false; }
+
+        if (dgvSearchResults.Columns.Contains("分组") && dgvSearchResults.Columns["分组"].Visible)
+        {
+            txtFilterGroup.Visible = true;
+            txtFilterGroup.Location = new Point(x, y);
+            txtFilterGroup.Width = dgvSearchResults.Columns["分组"].Width;
+        }
+        else { txtFilterGroup.Visible = false; }
+    }
+
+    /// <summary>
+    /// 转义 DataView.RowFilter LIKE 模式中的单引号
+    /// </summary>
+    private static string EscapeLike(string s) => s.Replace("'", "''");
+
+    /// <summary>
+    /// 复制表结构（直连模式）：查 S_DATA 去重 VIEWNAME, 对比源/目标库
+    ///   - 源无 -> 跳过
+    ///   - 目标无 -> 生成 CREATE TABLE 脚本并执行
+    ///   - 都有 -> 加缺失列
+    /// </summary>
+    private void CopyTableStructuresForObject(SqlConnection srcConn, SqlConnection tgtConn, string objectGuid)
+    {
+        try
+        {
+            var viewNameSql = @"SELECT DISTINCT VIEWNAME FROM dbo.S_DATA
+                                WHERE OBJECTGUID = @guid AND ISNULL(VIEWNAME, '') <> ''";
+            var viewNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = new SqlCommand(viewNameSql, srcConn))
+            {
+                cmd.Parameters.AddWithValue("@guid", objectGuid);
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    var vn = reader.GetString(0).Trim();
+                    if (!string.IsNullOrEmpty(vn))
+                        viewNames.Add(vn);
+                }
+            }
+
+            foreach (var viewName in viewNames)
+            {
+                CopyOneTableStructure(srcConn, tgtConn, viewName);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[表结构] 复制失败：{ex.Message}");
+            this.Invoke(new Action(() =>
+            {
+                lblProgress.Text = $"✗ 表结构复制失败：{ex.Message}";
+                lblProgress.ForeColor = Color.Red;
+            }));
+        }
+    }
+
+    /// <summary>
+    /// 复制单张表的结构（直连模式，CREATE TABLE 生成 + 缺失列添加）
+    /// </summary>
+    private void CopyOneTableStructure(SqlConnection srcConn, SqlConnection tgtConn, string viewName)
+    {
+        try
+        {
+            if (!TableExistsInDb(srcConn, viewName))
+            {
+                System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 源库不存在，跳过");
+                return;
+            }
+
+            // 拉一次源列 + 自增列, 后面两个分支都用到
+            var srcCols = GetColumnsFromDb(srcConn, viewName);
+            var identityCols = GetIdentityColumnNames(srcConn, viewName);
+
+            if (!TableExistsInDb(tgtConn, viewName))
+            {
+                // 目标不存在 -> 生成 CREATE TABLE 脚本, 在目标库执行
+                //   不需要源库访问目标库 (跨库权限/HTTP 模式都适用)
+                var createSql = BuildCreateTableSql(viewName, srcCols, identityCols);
+                using var cmd = new SqlCommand(createSql, tgtConn);
+                cmd.ExecuteNonQuery();
+                System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已在目标库创建");
+                this.Invoke(new Action(() =>
+                {
+                    lblProgress.Text = $"✓ {viewName} 表结构已创建";
+                    lblProgress.ForeColor = Color.Green;
+                }));
+                return;
+            }
+
+            // 双方都存在 -> 加缺失列
+            var tgtCols = GetColumnsFromDb(tgtConn, viewName);
+            var missing = srcCols.Where(sc => !tgtCols.Any(tc => string.Equals(tc.Name, sc.Name, StringComparison.OrdinalIgnoreCase))).ToList();
+
+            if (missing.Count == 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 双方一致, 无需补列");
+                return;
+            }
+
+            foreach (var col in missing)
+            {
+                var alterSql = $"ALTER TABLE [dbo].[{viewName}] ADD [{col.Name}] {col.Type}";
+                using var cmd = new SqlCommand(alterSql, tgtConn);
+                cmd.ExecuteNonQuery();
+                System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已加列 {col.Name} {col.Type}");
+            }
+            this.Invoke(new Action(() =>
+            {
+                lblProgress.Text = $"✓ {viewName} 已补 {missing.Count} 个缺失列";
+                lblProgress.ForeColor = Color.Green;
+            }));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 复制失败：{ex.Message}");
+            this.Invoke(new Action(() =>
+            {
+                lblProgress.Text = $"✗ {viewName} 复制失败：{ex.Message}";
+                lblProgress.ForeColor = Color.Red;
+            }));
+        }
+    }
+
+    /// <summary>
+    /// 检查表是否存在 (INFORMATION_SCHEMA.TABLES)
+    /// </summary>
+    private bool TableExistsInDb(SqlConnection conn, string tableName)
+    {
+        var sql = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @name";
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@name", tableName);
+        return Convert.ToInt32(cmd.ExecuteScalar() ?? 0) > 0;
+    }
+
+    /// <summary>
+    /// 获取表的自增列名集合
+    /// </summary>
+    private HashSet<string> GetIdentityColumnNames(SqlConnection conn, string tableName)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var sql = "SELECT name FROM sys.identity_columns WHERE object_id = OBJECT_ID(@name)";
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@name", tableName);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                result.Add(reader.GetString(0));
+            }
+        }
+        catch { }
+        return result;
+    }
+
+    /// <summary>
+    /// 获取表的列定义 (名称 + 完整类型字符串 + 是否自增)
+    /// </summary>
+    private List<(string Name, string Type)> GetColumnsFromDb(SqlConnection conn, string tableName)
+    {
+        var result = new List<(string, string)>();
+        var sql = @"SELECT COLUMN_NAME, DATA_TYPE,
+                    ISNULL(CHARACTER_MAXIMUM_LENGTH, 0),
+                    ISNULL(NUMERIC_PRECISION, 0),
+                    ISNULL(NUMERIC_SCALE, 0),
+                    IS_NULLABLE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = @name
+                    ORDER BY ORDINAL_POSITION";
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@name", tableName);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var colName = reader.GetString(0);
+            var dataType = reader.GetString(1).ToUpper();
+            var charMax = reader.GetInt32(2);
+            var numPrec = reader.GetInt32(3);
+            var numScale = reader.GetInt32(4);
+            var isNullable = reader.GetString(5) == "YES";
+
+            string typeStr;
+            if (dataType == "VARCHAR" || dataType == "NVARCHAR" || dataType == "CHAR" || dataType == "NCHAR" || dataType == "BINARY" || dataType == "VARBINARY")
+                typeStr = charMax == -1 ? $"{dataType}(MAX)" : $"{dataType}({charMax})";
+            else if (dataType == "DECIMAL" || dataType == "NUMERIC")
+                typeStr = $"{dataType}({numPrec},{numScale})";
+            else
+                typeStr = dataType;
+
+            if (!isNullable)
+                typeStr += " NOT NULL";
+
+            result.Add((colName, typeStr));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 生成 CREATE TABLE 脚本 (含 IDENTITY 自增列)
+    /// </summary>
+    private string BuildCreateTableSql(string tableName, List<(string Name, string Type)> columns, HashSet<string> identityCols)
+    {
+        if (columns.Count == 0)
+            return $"CREATE TABLE [dbo].[{tableName}] ([_placeholder_] INT NULL)";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"CREATE TABLE [dbo].[{tableName}] (");
+        var parts = new List<string>();
+        foreach (var col in columns)
+        {
+            var typeStr = col.Type;
+            if (identityCols.Contains(col.Name))
+            {
+                typeStr = typeStr.Replace(" NOT NULL", "");
+                typeStr += " IDENTITY(1,1)";
+            }
+            parts.Add($"    [{col.Name}] {typeStr}");
+        }
+        sb.AppendLine(string.Join("," + Environment.NewLine, parts));
+        sb.AppendLine(")");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 复制表结构 (Http 代理模式)
+    /// </summary>
+    private async Task CopyTableStructuresForObjectHttpAsync(IDataAccess srcDA, IDataAccess tgtDA, string objectGuid)
+    {
+        try
+        {
+            var viewNameSql = $@"SELECT DISTINCT VIEWNAME FROM dbo.S_DATA
+                                 WHERE OBJECTGUID = '{ProxyHelper.EscapeSql(objectGuid)}' AND ISNULL(VIEWNAME, '') <> ''";
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(srcDA, viewNameSql);
+            var viewNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow row in dt.Rows)
+            {
+                var vn = row[0]?.ToString()?.Trim();
+                if (!string.IsNullOrEmpty(vn))
+                    viewNames.Add(vn);
+            }
+
+            foreach (var viewName in viewNames)
+            {
+                await CopyOneTableStructureHttpAsync(srcDA, tgtDA, viewName);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[表结构] 复制失败：{ex.Message}");
+            this.Invoke(new Action(() =>
+            {
+                lblProgress.Text = $"✗ 表结构复制失败：{ex.Message}";
+                lblProgress.ForeColor = Color.Red;
+            }));
+        }
+    }
+
+    /// <summary>
+    /// Http 模式: 复制单张表结构 (CREATE TABLE + 缺失列)
+    /// </summary>
+    private async Task CopyOneTableStructureHttpAsync(IDataAccess srcDA, IDataAccess tgtDA, string viewName)
+    {
+        try
+        {
+            var escaped = ProxyHelper.EscapeSql(viewName);
+
+            // 源是否存在
+            var srcExistSql = $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{escaped}'";
+            var srcExists = Convert.ToInt32(await ProxyHelper.ExecuteScalarAsync(srcDA, srcExistSql) ?? 0) > 0;
+            if (!srcExists)
+            {
+                System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 源库不存在，跳过");
+                return;
+            }
+
+            // 拉一次源列 + 自增列
+            var srcCols = await GetColumnsHttpAsync(srcDA, viewName);
+            var identityCols = await GetIdentityColumnNamesHttpAsync(srcDA, viewName);
+
+            // 目标是否存在
+            var tgtExistSql = $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{escaped}'";
+            var tgtExists = Convert.ToInt32(await ProxyHelper.ExecuteScalarAsync(tgtDA, tgtExistSql) ?? 0) > 0;
+
+            if (!tgtExists)
+            {
+                var createSql = BuildCreateTableSql(viewName, srcCols, identityCols);
+                var result = await ProxyHelper.ExecuteBatchAsync(tgtDA, createSql);
+                if (!result.Success)
+                    throw new Exception($"创建表 {viewName} 失败: {result.Message}");
+                System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已在目标库创建");
+                this.Invoke(new Action(() =>
+                {
+                    lblProgress.Text = $"✓ {viewName} 表结构已创建";
+                    lblProgress.ForeColor = Color.Green;
+                }));
+                return;
+            }
+
+            // 双方都有 -> 加缺失列
+            var tgtCols = await GetColumnsHttpAsync(tgtDA, viewName);
+            var missing = srcCols.Where(sc => !tgtCols.Any(tc => string.Equals(tc.Name, sc.Name, StringComparison.OrdinalIgnoreCase))).ToList();
+
+            if (missing.Count == 0) return;
+
+            foreach (var col in missing)
+            {
+                var alterSql = $"ALTER TABLE [dbo].[{viewName}] ADD [{col.Name}] {col.Type}";
+                await ProxyHelper.ExecuteNonQueryAsync(tgtDA, alterSql);
+                System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已加列 {col.Name} {col.Type}");
+            }
+            this.Invoke(new Action(() =>
+            {
+                lblProgress.Text = $"✓ {viewName} 已补 {missing.Count} 个缺失列";
+                lblProgress.ForeColor = Color.Green;
+            }));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 复制失败：{ex.Message}");
+            this.Invoke(new Action(() =>
+            {
+                lblProgress.Text = $"✗ {viewName} 复制失败：{ex.Message}";
+                lblProgress.ForeColor = Color.Red;
+            }));
+        }
+    }
+
+    /// <summary>
+    /// Http 模式: 获取自增列名集合
+    /// </summary>
+    private async Task<HashSet<string>> GetIdentityColumnNamesHttpAsync(IDataAccess da, string tableName)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var escaped = ProxyHelper.EscapeSql(tableName);
+            var sql = $"SELECT name FROM sys.identity_columns WHERE object_id = OBJECT_ID('{escaped}')";
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+            foreach (DataRow row in dt.Rows)
+            {
+                var name = row[0]?.ToString();
+                if (!string.IsNullOrEmpty(name))
+                    result.Add(name);
+            }
+        }
+        catch { }
+        return result;
+    }
+
+    /// <summary>
+    /// Http 模式: 获取表的列定义
+    /// </summary>
+    private async Task<List<(string Name, string Type)>> GetColumnsHttpAsync(IDataAccess da, string viewName)
+    {
+        var result = new List<(string, string)>();
+        var escaped = ProxyHelper.EscapeSql(viewName);
+        var sql = $@"SELECT COLUMN_NAME, DATA_TYPE,
+                      ISNULL(CHARACTER_MAXIMUM_LENGTH, 0),
+                      ISNULL(NUMERIC_PRECISION, 0),
+                      ISNULL(NUMERIC_SCALE, 0),
+                      IS_NULLABLE
+                      FROM INFORMATION_SCHEMA.COLUMNS
+                      WHERE TABLE_NAME = '{escaped}'
+                      ORDER BY ORDINAL_POSITION";
+        var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+        foreach (DataRow row in dt.Rows)
+        {
+            var colName = row[0]?.ToString() ?? "";
+            var dataType = (row[1]?.ToString() ?? "").ToUpper();
+            var charMax = Convert.ToInt32(row[2] ?? 0);
+            var numPrec = Convert.ToInt32(row[3] ?? 0);
+            var numScale = Convert.ToInt32(row[4] ?? 0);
+            var isNullable = (row[5]?.ToString() ?? "") == "YES";
+
+            string typeStr;
+            if (dataType == "VARCHAR" || dataType == "NVARCHAR" || dataType == "CHAR" || dataType == "NCHAR" || dataType == "BINARY" || dataType == "VARBINARY")
+                typeStr = charMax == -1 ? $"{dataType}(MAX)" : $"{dataType}({charMax})";
+            else if (dataType == "DECIMAL" || dataType == "NUMERIC")
+                typeStr = $"{dataType}({numPrec},{numScale})";
+            else
+                typeStr = dataType;
+            if (!isNullable)
+                typeStr += " NOT NULL";
+
+            result.Add((colName, typeStr));
+        }
+        return result;
     }
 
     /// <summary>

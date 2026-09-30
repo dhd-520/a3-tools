@@ -35,6 +35,12 @@ partial class CrossDbCopyFormForm
     private Panel pnlCheckboxes;
     private CheckBox chkDeleteFirst;
     private CheckBox chkCopyStoredProcs;
+    private CheckBox chkCopyTableStructure;
+    private Panel pnlFilterRow;
+    private TextBox txtFilterName;
+    private TextBox txtFilterSolution;
+    private TextBox txtFilterBizGroup;
+    private TextBox txtFilterGroup;
     private Panel pnlButtons;
     private Button btnConfirm;
     private Button btnCancel;
@@ -91,6 +97,12 @@ partial class CrossDbCopyFormForm
         pnlCheckboxes = new Panel();
         chkDeleteFirst = new CheckBox();
         chkCopyStoredProcs = new CheckBox();
+        chkCopyTableStructure = new CheckBox();
+        pnlFilterRow = new Panel();
+        txtFilterName = new TextBox();
+        txtFilterSolution = new TextBox();
+        txtFilterBizGroup = new TextBox();
+        txtFilterGroup = new TextBox();
         pnlButtons = new Panel();
         btnConfirm = new Button();
         btnCancel = new Button();
@@ -476,6 +488,7 @@ partial class CrossDbCopyFormForm
         // 
         pnlCheckboxes.Controls.Add(chkDeleteFirst);
         pnlCheckboxes.Controls.Add(chkCopyStoredProcs);
+        pnlCheckboxes.Controls.Add(chkCopyTableStructure);
         pnlCheckboxes.Dock = DockStyle.Fill;
         pnlCheckboxes.Location = new Point(3, 473);
         pnlCheckboxes.Name = "pnlCheckboxes";
@@ -501,6 +514,16 @@ partial class CrossDbCopyFormForm
         chkCopyStoredProcs.Size = new Size(280, 35);
         chkCopyStoredProcs.TabIndex = 24;
         chkCopyStoredProcs.Text = "同时复制关联存储过程";
+        //
+        // chkCopyTableStructure
+        //
+        chkCopyTableStructure.AutoSize = true;
+        chkCopyTableStructure.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        chkCopyTableStructure.Location = new Point(953, 3);
+        chkCopyTableStructure.Name = "chkCopyTableStructure";
+        chkCopyTableStructure.Size = new Size(280, 35);
+        chkCopyTableStructure.TabIndex = 26;
+        chkCopyTableStructure.Text = "同时复制表结构";
         // 
         // pnlButtons
         // 
@@ -569,6 +592,7 @@ partial class CrossDbCopyFormForm
         pnlSearch.Controls.Add(btnAddSelected);
         pnlSearch.Controls.Add(btnClearSelected);
         pnlSearch.Controls.Add(lblSearchProgress);
+        pnlSearch.Controls.Add(pnlFilterRow);
         pnlSearch.Controls.Add(dgvSearchResults);
         pnlSearch.Dock = DockStyle.Fill;
         pnlSearch.Location = new Point(3, 623);
@@ -637,6 +661,63 @@ partial class CrossDbCopyFormForm
         btnClearSelected.Size = new Size(141, 41);
         btnClearSelected.TabIndex = 32;
         btnClearSelected.Text = "清空选项";
+        //
+        // pnlFilterRow
+        //
+        pnlFilterRow.BackColor = Color.FromArgb(245, 248, 250);
+        pnlFilterRow.BorderStyle = BorderStyle.FixedSingle;
+        pnlFilterRow.Controls.Add(txtFilterName);
+        pnlFilterRow.Controls.Add(txtFilterSolution);
+        pnlFilterRow.Controls.Add(txtFilterBizGroup);
+        pnlFilterRow.Controls.Add(txtFilterGroup);
+        pnlFilterRow.Location = new Point(10, 45);
+        pnlFilterRow.Name = "pnlFilterRow";
+        pnlFilterRow.Size = new Size(1225, 28);
+        pnlFilterRow.TabIndex = 33;
+        //
+        // txtFilterName
+        //
+        txtFilterName.BorderStyle = BorderStyle.FixedSingle;
+        txtFilterName.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        txtFilterName.ForeColor = Color.DimGray;
+        txtFilterName.Location = new Point(4, 1);
+        txtFilterName.Name = "txtFilterName";
+        txtFilterName.PlaceholderText = "过滤 名称";
+        txtFilterName.Size = new Size(200, 35);
+        txtFilterName.TabIndex = 0;
+        //
+        // txtFilterSolution
+        //
+        txtFilterSolution.BorderStyle = BorderStyle.FixedSingle;
+        txtFilterSolution.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        txtFilterSolution.ForeColor = Color.DimGray;
+        txtFilterSolution.Location = new Point(208, 1);
+        txtFilterSolution.Name = "txtFilterSolution";
+        txtFilterSolution.PlaceholderText = "过滤 解决方案";
+        txtFilterSolution.Size = new Size(200, 35);
+        txtFilterSolution.TabIndex = 1;
+        //
+        // txtFilterBizGroup
+        //
+        txtFilterBizGroup.BorderStyle = BorderStyle.FixedSingle;
+        txtFilterBizGroup.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        txtFilterBizGroup.ForeColor = Color.DimGray;
+        txtFilterBizGroup.Location = new Point(412, 1);
+        txtFilterBizGroup.Name = "txtFilterBizGroup";
+        txtFilterBizGroup.PlaceholderText = "过滤 业务分组";
+        txtFilterBizGroup.Size = new Size(200, 35);
+        txtFilterBizGroup.TabIndex = 2;
+        //
+        // txtFilterGroup
+        //
+        txtFilterGroup.BorderStyle = BorderStyle.FixedSingle;
+        txtFilterGroup.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        txtFilterGroup.ForeColor = Color.DimGray;
+        txtFilterGroup.Location = new Point(616, 1);
+        txtFilterGroup.Name = "txtFilterGroup";
+        txtFilterGroup.PlaceholderText = "过滤 分组";
+        txtFilterGroup.Size = new Size(400, 35);
+        txtFilterGroup.TabIndex = 3;
         btnClearSelected.UseVisualStyleBackColor = false;
         btnClearSelected.Click += BtnClearSelected_Click;
         // 
@@ -656,13 +737,13 @@ partial class CrossDbCopyFormForm
         dgvSearchResults.AllowUserToDeleteRows = false;
         dgvSearchResults.BackgroundColor = Color.White;
         dgvSearchResults.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-        dgvSearchResults.Location = new Point(10, 45);
+        dgvSearchResults.Location = new Point(10, 75);
         dgvSearchResults.Name = "dgvSearchResults";
         dgvSearchResults.ReadOnly = true;
         dgvSearchResults.RowHeadersWidth = 72;
         dgvSearchResults.RowTemplate.Height = 25;
         dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvSearchResults.Size = new Size(1225, 242);
+        dgvSearchResults.Size = new Size(1225, 212);
         dgvSearchResults.TabIndex = 31;
         // 
         // CrossDbCopyFormForm
@@ -688,6 +769,8 @@ partial class CrossDbCopyFormForm
         pnlCheckboxes.ResumeLayout(false);
         pnlCheckboxes.PerformLayout();
         pnlButtons.ResumeLayout(false);
+        pnlFilterRow.ResumeLayout(false);
+        pnlFilterRow.PerformLayout();
         pnlSearch.ResumeLayout(false);
         pnlSearch.PerformLayout();
         ((System.ComponentModel.ISupportInitialize)dgvSearchResults).EndInit();
