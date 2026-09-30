@@ -2091,6 +2091,23 @@ img { max-width: 100%; }
         sb.AppendLine("6. 每完成一个 Phase 向陛下汇报进度，最后汇总变更让陛下复核");
         sb.AppendLine("7. ★ 重要：Skill 是陛下的私人工作流，只在陛下明确要求或场景明显匹配时才调用，别主动引申无关 Skill");
         sb.AppendLine();
+        // ★ 2026-09-30 陛下要求：Skill 优先级规则（通用，与 Skill 数量无关）
+        sb.AppendLine("## ⚠️ Skill 优先级规则（重要，2026-09-30 陛下要求）");
+        sb.AppendLine("Skill 是陛下编写的多步骤工作流（存在 DATA/skills/*.md, 由 SkillRegistry.Instance.List() 读取）。");
+        sb.AppendLine("**当陛下本次请求可能命中任何 Skill 时, 必须先调 list_skills**：");
+        sb.AppendLine("1. 拿到所有 Skill 的 description（含触发关键词 + 匹配场景 + 参数）");
+        sb.AppendLine("2. 仔细对比陛下本次请求, 挑出最匹配的 Skill（不要只看第一个）");
+        sb.AppendLine("3. 调 load_skill(name) 读取 Markdown 正文, 严格按步骤顺序执行");
+        sb.AppendLine("4. **不命中任何 Skill** 时, 才退回到下面的工具调用流程");
+        sb.AppendLine();
+        sb.AppendLine("Skill vs 工具直调 判断准则：");
+        sb.AppendLine("- 涉及「多步骤」「流程」「按规则做」 → 几乎一定有 Skill, 先 list_skills");
+        sb.AppendLine("- 单一 SELECT 查询 / 列出账套 / 查表结构 → 不需要 Skill, 直接 execute_sql");
+        sb.AppendLine("- 单纯问答、不涉及写操作 → 不需要 Skill");
+        sb.AppendLine();
+        sb.AppendLine("陛下可能表达 Skill 意图的措辞：「按流程」「按上次那样做」「按 Skill」「按工作流」");
+        sb.AppendLine("「加到知识库」「提取表结构」「升级账套」「数据迁移」等动作词也要警惕是否对应 Skill");
+        sb.AppendLine();
         // ★ 2026-09-08 知识库互动工作流（陛下要求：AI 能直接新增知识库内容）
         sb.AppendLine("## 知识库互动工作流（重要）");
         sb.AppendLine("陛下明确要求你能在对话里直接管理知识库。按下面场景判断：");

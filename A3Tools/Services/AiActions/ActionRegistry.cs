@@ -56,6 +56,10 @@ public class ActionRegistry
         // ★ 2026-09-16 知识库导入导出（export/import 普通确认）
         Register(new ExportKnowledgeAction());
         Register(new ImportKnowledgeAction());
+        // ★ 2026-09-30 陛下要求：AI 调用 Skill 的两个工具（list_skills / load_skill）
+        // 之前漏注册导致 AI 在 system prompt 里看到工具但实际调用时找不到
+        Register(new ListSkillsAction());
+        Register(new LoadSkillAction());
     }
 
     private void Register(IAiAction action)
