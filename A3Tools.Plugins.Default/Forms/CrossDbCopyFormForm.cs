@@ -634,14 +634,22 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                         CopyStoredProcsForObject(srcConn, tgtConn, objectGuid, deleteFirst);
                     }
 
-                    // 复制表结构（仅当勾选时）
+                    // 复制表结构（仅当勾选时, 且 OBJECTTYPE IN ('1','5') 录入表单）
                     if (copyTableStructures)
                     {
-                        this.Invoke(new Action(() =>
+                        var objType = GetObjectType(srcConn, objectGuid);
+                        if (objType == "1" || objType == "5")
                         {
-                            lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
-                        }));
-                        CopyTableStructuresForObject(srcConn, tgtConn, objectGuid);
+                            this.Invoke(new Action(() =>
+                            {
+                                lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
+                            }));
+                            CopyTableStructuresForObject(srcConn, tgtConn, objectGuid);
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[表结构] {objectGuid} OBJECTTYPE={objType ?? "(null)"}, 不是录入表单 (1/5), 跳过表结构复制");
+                        }
                     }
                 }
 
@@ -713,14 +721,22 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     await CopyStoredProcsForObjectHttpAsync(srcDA, tgtDA, objectGuid, deleteFirst);
                 }
 
-                // 复制表结构（仅当勾选时）
+                // 复制表结构（仅当勾选时, 且 OBJECTTYPE IN ('1','5') 录入表单）
                 if (copyTableStructures)
                 {
-                    this.Invoke(new Action(() =>
+                    var objType = await GetObjectTypeHttpAsync(srcDA, objectGuid);
+                    if (objType == "1" || objType == "5")
                     {
-                        lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
-                    }));
-                    await CopyTableStructuresForObjectHttpAsync(srcDA, tgtDA, objectGuid);
+                        this.Invoke(new Action(() =>
+                        {
+                            lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
+                        }));
+                        await CopyTableStructuresForObjectHttpAsync(srcDA, tgtDA, objectGuid);
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[表结构] {objectGuid} OBJECTTYPE={objType ?? "(null)"}, 不是录入表单 (1/5), 跳过表结构复制");
+                    }
                 }
             }
 
@@ -951,6 +967,19 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
     private static string EscapeLike(string s) => s.Replace("'", "''");
 
     /// <summary>
+    /// 查 S_OBJECT.OBJECTTYPE（直连模式），返回 null 表示表单不存在
+    /// ★ 2026-09-30 陛下要求：只有 OBJECTTYPE IN ('1','5') 的录入表单才复制表结构
+    /// </summary>
+    private string? GetObjectType(SqlConnection conn, string objectGuid)
+    {
+        var sql = "SELECT OBJECTTYPE FROM S_OBJECT WHERE GUID = @guid";
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@guid", objectGuid);
+        var result = cmd.ExecuteScalar();
+        return result?.ToString()?.Trim();
+    }
+
+    /// <summary>
     /// 复制表结构（直连模式）：查 S_DATA 去重 VIEWNAME, 对比源/目标库
     ///   - 源无 -> 跳过
     ///   - 目标无 -> 生成 CREATE TABLE 脚本并执行
@@ -1155,6 +1184,17 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         sb.AppendLine(string.Join("," + Environment.NewLine, parts));
         sb.AppendLine(")");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 查 S_OBJECT.OBJECTTYPE（Http 模式），返回 null 表示表单不存在
+    /// ★ 2026-09-30 陛下要求：只有 OBJECTTYPE IN ('1','5') 的录入表单才复制表结构
+    /// </summary>
+    private async Task<string?> GetObjectTypeHttpAsync(IDataAccess da, string objectGuid)
+    {
+        var sql = $"SELECT OBJECTTYPE FROM S_OBJECT WHERE GUID = '{ProxyHelper.EscapeSql(objectGuid)}'";
+        var result = await ProxyHelper.ExecuteScalarAsync(da, sql);
+        return result?.ToString()?.Trim();
     }
 
     /// <summary>

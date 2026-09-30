@@ -480,6 +480,7 @@ partial class CrossDbCopyAppFormForm
         pnlSearch.Controls.Add(btnClearSelected);
         pnlSearch.Controls.Add(lblSearchProgress);
         pnlSearch.Controls.Add(dgvSearchResults);
+        pnlSearch.AutoScroll = true;
         pnlSearch.Dock = DockStyle.Fill;
         pnlSearch.Location = new Point(13, 464);
         pnlSearch.Name = "pnlSearch";
@@ -572,6 +573,7 @@ partial class CrossDbCopyAppFormForm
         dgvSearchResults.RowHeadersWidth = 72;
         dgvSearchResults.RowTemplate.Height = 25;
         dgvSearchResults.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        dgvSearchResults.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         dgvSearchResults.Size = new Size(1179, 370);
         dgvSearchResults.TabIndex = 31;
         // 
