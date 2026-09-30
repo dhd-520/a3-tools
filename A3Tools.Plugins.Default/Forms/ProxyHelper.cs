@@ -163,10 +163,12 @@ internal static class ProxyHelper
         string tableName, string whereField, string whereValue,
         bool deleteFirst, string tag = "")
     {
-        // 1. 获取目标表列名
-        var columns = await GetTableColumnsAsync(tgtDA, tableName);
+        // ★ 2026-09-29 陛下反馈修复列不匹配静默失败: 取源∩目标列的交集
+        // 之前只取目标列名,然后 SELECT 源表;如果目标有源没有的列,SELECT 抛异常被吞掉
+        // 改成: 同时查源和目标列,只复制两表都有的列(保持目标列顺序,数据按目标列位置写入)
+        var columns = await GetCommonColumnsAsync(srcDA, tgtDA, tableName);
         if (columns.Count == 0)
-            throw new Exception($"目标表 {tableName} 不存在或没有列");
+            throw new Exception($"表 {tableName} 源库与目标库无共同列,无法复制");
 
         // 2. 删除已有数据 / 检查存在性
         if (deleteFirst)
@@ -207,9 +209,10 @@ internal static class ProxyHelper
         string tableName, string parentField, string parentGuid,
         bool deleteFirst, string tag = "")
     {
-        var columns = await GetTableColumnsAsync(tgtDA, tableName);
+        // ★ 2026-09-29 陛下反馈修复列不匹配静默失败: 取交集列
+        var columns = await GetCommonColumnsAsync(srcDA, tgtDA, tableName);
         if (columns.Count == 0)
-            throw new Exception($"目标表 {tableName} 不存在或没有列");
+            throw new Exception($"表 {tableName} 源库与目标库无共同列,无法复制");
 
         if (deleteFirst)
         {
@@ -236,9 +239,10 @@ internal static class ProxyHelper
         string tableName, string[] keyColumns, string[] keyValues,
         bool deleteFirst, string tag = "")
     {
-        var columns = await GetTableColumnsAsync(tgtDA, tableName);
+        // ★ 2026-09-29 陛下反馈修复列不匹配静默失败: 取交集列
+        var columns = await GetCommonColumnsAsync(srcDA, tgtDA, tableName);
         if (columns.Count == 0)
-            throw new Exception($"目标表 {tableName} 不存在或没有列");
+            throw new Exception($"表 {tableName} 源库与目标库无共同列,无法复制");
 
         var whereParts = keyColumns.Select((c, i) => $"[{c}] = '{EscapeSql(keyValues[i])}'");
         var whereClause = string.Join(" AND ", whereParts);
@@ -306,6 +310,30 @@ internal static class ProxyHelper
             columns.Add(row[0]?.ToString() ?? "");
         }
         return columns;
+    }
+
+    /// <summary>
+    /// ★ 2026-09-29 陛下反馈修复列不匹配: 同时查源表和目标表列,返回交集(保持目标列顺序)
+    /// 用于 CopyTableDataAsync/ByParentGuidAsync/ByKeysAsync: 只复制两表都有的列
+    /// </summary>
+    public static async Task<List<string>> GetCommonColumnsAsync(IDataAccess srcDA, IDataAccess tgtDA, string tableName)
+    {
+        // 并行查源/目标列,节省一半时间
+        var srcTask = GetTableColumnsAsync(srcDA, tableName);
+        var tgtTask = GetTableColumnsAsync(tgtDA, tableName);
+        await Task.WhenAll(srcTask, tgtTask);
+
+        var srcColumns = srcTask.Result;
+        var tgtColumns = tgtTask.Result;
+
+        if (tgtColumns.Count == 0)
+            throw new Exception($"目标表 {tableName} 不存在或没有列");
+        if (srcColumns.Count == 0)
+            throw new Exception($"源表 {tableName} 不存在或没有列");
+
+        var srcSet = new HashSet<string>(srcColumns, StringComparer.OrdinalIgnoreCase);
+        // 保持目标列顺序(数据按目标列位置写入,顺序必须匹配)
+        return tgtColumns.Where(c => srcSet.Contains(c)).ToList();
     }
 
     // ==================== 工具方法 ====================

@@ -303,10 +303,19 @@ public static class SqlObjectSchemaCache
         var obj = entry.Objects.FirstOrDefault(o =>
             o.Name.Equals(objectName, StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrEmpty(schema) || o.SchemaName.Equals(schema, StringComparison.OrdinalIgnoreCase)));
-        if (obj == null || string.IsNullOrEmpty(obj.Columns)) return new();
+        if (obj == null) return new();
+
+        // 列名懒加载：cache 没有时同步调 LoadColumnsForObject（限制超时 3秒避免卡 UI）
+        string colsCsv = obj.Columns ?? "";
+        if (string.IsNullOrEmpty(colsCsv) && !string.IsNullOrEmpty(schema))
+        {
+            var lazy = LoadColumnsForObject(connectionString, schema, objectName, timeoutMs: 3000);
+            colsCsv = string.Join(",", lazy);
+        }
+        if (string.IsNullOrEmpty(colsCsv)) return new();
 
         // Columns 是 "ColA,ColB,ColC" 格式（轻量，不引入 second map）
-        var cols = obj.Columns.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var cols = colsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
         var matches = cols
             .Where(c => string.IsNullOrEmpty(columnPrefix)
                 || c.StartsWith(columnPrefix, StringComparison.OrdinalIgnoreCase))
@@ -320,6 +329,61 @@ public static class SqlObjectSchemaCache
     {
         _cache.Clear();
     }
+
+    /// <summary>
+    /// 按需加载单个对象的列名（兼容 SQL Server 2008+，避开 STRING_AGG）。
+    /// 调用者：弹出 IntelliSense 列名 / 对象资源管理器展开节点。
+    /// </summary>
+    public static List<string> LoadColumnsForObject(string connectionString, string schemaName, string objectName, int timeoutMs = 3000)
+    {
+        if (string.IsNullOrEmpty(connectionString) || string.IsNullOrEmpty(schemaName) || string.IsNullOrEmpty(objectName))
+            return new List<string>();
+
+        try
+        {
+            using var conn = new SqlConnection(connectionString);
+            conn.Open();
+            const string sql = @"SELECT c.name FROM sys.columns c INNER JOIN sys.objects o ON c.object_id = o.object_id INNER JOIN sys.schemas s ON o.schema_id = s.schema_id WHERE s.name = @schema AND o.name = @object ORDER BY c.column_id";
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@schema", schemaName);
+            cmd.Parameters.AddWithValue("@object", objectName);
+            cmd.CommandTimeout = Math.Max(5, timeoutMs / 1000);
+            using var r = cmd.ExecuteReader();
+            var cols = new List<string>();
+            while (r.Read())
+                cols.Add(r.GetString(0));
+            return cols;
+        }
+        catch (Exception ex)
+        {
+            LogLoadFailure("LoadColumnsForObject", connectionString, ex);
+            return new List<string>();
+        }
+    }
+
+    /// <summary>统一的失败日志入口（不让 catch 静默吞）</summary>
+    private static void LogLoadFailure(string source, string connStr, Exception ex)
+    {
+        try
+        {
+            string dbHint = "";
+            try
+            {
+                var b = new SqlConnectionStringBuilder(connStr);
+                dbHint = $"[{b.DataSource}/{b.InitialCatalog}] ";
+            }
+            catch { }
+            var dir = System.IO.Path.Combine(
+                System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".",
+                "diag");
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(dir, "schema-load-error.log"),
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {dbHint}{source}: {ex}\n---\n");
+        }
+        catch { /* 日志也写不动就别挣扎了 */ }
+    }
+
 
     /// <summary>清掉指定 server 下所有库的缓存</summary>
     public static void InvalidateServer(string server)
@@ -362,36 +426,27 @@ public static class SqlObjectSchemaCache
             using var conn = new SqlConnection(connStr);
             await conn.OpenAsync();
 
-            // sys.objects.type 列对照：U=Table, V=View, IF=Inline TVF, TF=Multi-stmt TVF, FN=Scalar Function, P=Procedure, TR=Trigger
-            // 存储过程/触发器没有列，跳过 ColumnsCsv
+            // 列名懒加载（避开老 SQL Server 没有 STRING_AGG 的兼容问题 + 5000+ 函数相关子查询性能）
             const string sql = @"
 SELECT
-    s.name           AS SchemaName,
-    o.name           AS ObjectName,
-    o.type           AS ObjectType,
-    OBJECT_SCHEMA_NAME(o.object_id) AS SchemaName2,
-    CASE WHEN o.type IN ('U','V','IF','TF','FN') THEN
-        (
-            SELECT STRING_AGG(CAST(c.name AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY c.column_id)
-            FROM sys.columns c
-            WHERE c.object_id = o.object_id
-        )
-    END AS ColumnsCsv
+    s.name AS SchemaName,
+    o.name AS ObjectName,
+    o.type AS ObjectType
 FROM sys.objects o
 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
-WHERE o.type IN ('U','V','IF','TF','FN','P','TR')  -- 7 种
-  AND o.is_ms_shipped = 0                           -- 排除系统对象
+WHERE o.type IN ('U','V','IF','TF','FN','P','TR')
+  AND o.is_ms_shipped = 0
   AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest')
 ORDER BY s.name, o.name";
 
-            using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 5 };
+            using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
             using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
                 var schema = r.GetString(0);
                 var name = r.GetString(1);
                 var type = r.GetString(2).Trim();
-                var cols = r.IsDBNull(4) ? null : r.GetString(4);
+                var cols = null as string;  // 列名懒加载
 
                 var kind = type switch
                 {
@@ -406,9 +461,10 @@ ORDER BY s.name, o.name";
                 list.Add(new DbObject(schema, name, kind, cols));
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 加载失败（无权限/网络抖）-> 返回空列表，让 UI 退化为只显示关键字
+            // 失败：只记录日志，让外层 return list 兜底（list 此时是空的，等价于空列表）
+            LogLoadFailure("LoadFromDbAsync", connStr, ex);
         }
         return list;
     }
@@ -423,17 +479,9 @@ ORDER BY s.name, o.name";
         {
             const string sql = @"
 SELECT
-    s.name           AS SchemaName,
-    o.name           AS ObjectName,
-    o.type           AS ObjectType,
-    OBJECT_SCHEMA_NAME(o.object_id) AS SchemaName2,
-    CASE WHEN o.type IN ('U','V','IF','TF','FN') THEN
-        (
-            SELECT STRING_AGG(CAST(c.name AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY c.column_id)
-            FROM sys.columns c
-            WHERE c.object_id = o.object_id
-        )
-    END AS ColumnsCsv
+    s.name AS SchemaName,
+    o.name AS ObjectName,
+    o.type AS ObjectType
 FROM sys.objects o
 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
 WHERE o.type IN ('U','V','IF','TF','FN','P','TR')
@@ -450,7 +498,7 @@ ORDER BY s.name, o.name";
                 var schema = row[0]?.ToString() ?? "";
                 var name = row[1]?.ToString() ?? "";
                 var type = (row[2]?.ToString() ?? "").Trim();
-                var cols = row[4]?.ToString();
+                var cols = null as string;  // 列名懒加载
 
                 var kind = type switch
                 {
@@ -465,9 +513,10 @@ ORDER BY s.name, o.name";
                 list.Add(new DbObject(schema, name, kind, cols));
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 加载失败 -> 返回空列表
+            // 失败：只记录日志，让外层 return list 兜底
+            LogLoadFailure("LoadFromDbViaHttpAsync", "", ex);
         }
         return list;
     }

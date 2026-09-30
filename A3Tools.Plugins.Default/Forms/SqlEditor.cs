@@ -29,6 +29,11 @@ public class SqlEditor : RichTextBox
     // Select + SelectionColor 引起的 RichTextBox 闪烁（richEdit 重绘不双缓冲，
     // 每设色都刷一次 → 闪）。
     private const int WM_SETREDRAW = 0x000B;
+    // ★ 2026-09-29 陛下反馈修复 Ctrl+Z 来回撤销: 禁用 RichTextBox 自带的 undo
+    // 注意: EM_SETUNDOLIMIT = WM_USER + 162 = 0x04A2,不是 0xC4 (0xC4 是 EM_GETLINE!)
+    private const int EM_SETUNDOLIMIT = 0x04A2;
+    // EM_EMPTYUNDOBUFFER = 0x00CD,清空 richedit undo buffer,作为兜底保险
+    private const int EM_EMPTYUNDOBUFFER = 0x00CD;
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
@@ -97,10 +102,48 @@ public class SqlEditor : RichTextBox
     private readonly System.Windows.Forms.Timer _intelliSenseTimer;
     private bool _suppressIntelliSense;
 
+    // ★ 2026-09-29 陛下反馈修复 Ctrl+Z 只能撤一步: 自定义撤销栈
+    // 原因: RichTextBox.Undo() 被 WndProc 自定义拦截吃掉,只撤一步
+    // 方案: 自己维护文本快照栈，每次 TextChanged 把旧文本压栈
+    private struct UndoState
+    {
+        public string Text;
+        public int CursorStart;
+    }
+    private readonly System.Collections.Generic.Stack<UndoState> _undoStack = new();
+    private readonly System.Collections.Generic.Stack<UndoState> _redoStack = new();
+    private string _lastCommittedText = "";
+    private int _lastCommittedCursor;
+    private bool _suspendUndo;
+    private bool _undoInitialized;
+    // ★ 2026-09-29 v6 重写: 500ms 去抖定时器,停止输入 500ms 后才记录一次撤销状态
+    private readonly System.Windows.Forms.Timer _undoDebounceTimer;
+    private const int MaxUndoLevels = 200;
+
     public SqlEditor()
     {
         // 默认字体设大2个字号，使用Consolas等宽字体更适合SQL
         Font = new System.Drawing.Font("Consolas", 12f);
+
+        // ★ 2026-09-29 陛下反馈修复 Ctrl+Z 来回撤销: Handle 创建后关闭 RichTextBox native undo
+        // 原因: PerformUndo() 设置 Text 后,richedit 控件自己的 WndProc 还会反向再撤一次
+        //       (它把 PerformUndo 的 Text 改动当作"最近一次修改"塞进自己的 undo 队列,然后 Ctrl+Z 又被
+        //        它 native 处理,反向撤销回去 → 看到 Text 在两个状态间振荡)
+        // 方案: EM_SETUNDOLIMIT(wParam=0) → 关掉 richedit 内置 undo 队列,只走我们自己的 PerformUndo
+        // ★ 2026-09-29 v6: 撤销去抖定时器 - 500ms 内连续输入合并成一个撤销步骤
+        _undoDebounceTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        _undoDebounceTimer.Tick += (_, _) =>
+        {
+            _undoDebounceTimer.Stop();
+            CommitUndoSnapshot();
+        };
+
+        HandleCreated += (_, _) =>
+        {
+            // ★ 2026-09-29 陛下反馈修复 Ctrl+Z 来回撤销: 关掉 richedit native undo
+            SendMessage(Handle, EM_SETUNDOLIMIT, IntPtr.Zero, IntPtr.Zero);
+            SendMessage(Handle, EM_EMPTYUNDOBUFFER, IntPtr.Zero, IntPtr.Zero);
+        };
 
         // 【2026-07-15 选中修复】关闭单词级自动选择
         // RichTextBox 默认 AutoWordSelection = true → 鼠标拖选会"吸附"到单词边界，
@@ -762,7 +805,26 @@ public class SqlEditor : RichTextBox
 
     protected override void OnTextChanged(EventArgs e)
     {
+        // ★ 2026-09-29 v6 重写撤销跟踪: 500ms 去抖定时器
+        // 不再每次 TextChanged 立即压栈,改成: 每次变化只重启 500ms 定时器,
+        // 定时器到点才把"自上次提交以来的状态变化"作为一个撤销步骤。
+        // 优点: 跟 SSMS 一致,一段连续输入 = 一个撤销步骤;
+        //       避免被富文本各种 deferred 事件干扰(慢按 Ctrl+Z 时富文本有时间反向 undo)
+        if (!_undoInitialized)
+        {
+            _lastCommittedText = Text;
+            _lastCommittedCursor = SelectionStart;
+            _undoInitialized = true;
+        }
+        else if (!_suspendUndo)
+        {
+            // 重启去抖定时器: 500ms 内再有变化就重新计时
+            _undoDebounceTimer.Stop();
+            _undoDebounceTimer.Start();
+        }
+
         base.OnTextChanged(e);
+
         ViewChanged?.Invoke(this, EventArgs.Empty);
 
         // ★ 2026-09-22 陛下反馈修复大文档卡顿: 计算增量高亮的行范围
@@ -869,6 +931,20 @@ public class SqlEditor : RichTextBox
         if (e.Control && e.KeyCode == Keys.H && !e.Shift && !e.Alt)
         {
             ShowSearchReplace(true);
+            e.SuppressKeyPress = true;
+            return;
+        }
+        // Ctrl+Y = 重做（Redo，类似 SSMS）
+        if (e.Control && e.KeyCode == Keys.Y && !e.Shift && !e.Alt)
+        {
+            PerformRedo();
+            e.SuppressKeyPress = true;
+            return;
+        }
+        // Ctrl+Z = 撤回（Undo，类似 SSMS）
+        if (e.Control && e.KeyCode == Keys.Z && !e.Shift && !e.Alt)
+        {
+            PerformUndo();
             e.SuppressKeyPress = true;
             return;
         }
@@ -1656,6 +1732,97 @@ public class SqlEditor : RichTextBox
             SendMessage(Handle, WM_VSCROLL, (IntPtr)(SB_THUMBPOSITION | (vScroll << 16)), IntPtr.Zero);
             SendMessage(Handle, WM_HSCROLL, (IntPtr)(SB_THUMBPOSITION | (hScroll << 16)), IntPtr.Zero);
             _isHighlighting = false;
+        }
+    }
+
+
+    /// <summary>★ 2026-09-29 v6: 去抖定时器到点时,把当前已稳定的 text 提交为撤销步骤</summary>
+    private void CommitUndoSnapshot()
+    {
+        if (!_undoInitialized) return;
+        if (_suspendUndo) return;  // PerformUndo/Redo 期间不提交
+
+        var currentText = Text;
+        var currentCursor = SelectionStart;
+
+        if (_lastCommittedText == currentText) return;  // 无变化
+
+        _undoStack.Push(new UndoState
+        {
+            Text = _lastCommittedText,
+            CursorStart = _lastCommittedCursor
+        });
+
+        if (_undoStack.Count > MaxUndoLevels)
+        {
+            // 保留最新的 MaxUndoLevels 条 (items[0] 是最旧的)
+            var items = _undoStack.ToArray();
+            _undoStack.Clear();
+            for (int i = items.Length - 1; i >= 1; i--)
+            {
+                _undoStack.Push(items[i]);
+            }
+        }
+
+        _redoStack.Clear();  // 任何新编辑清空 redo 栈
+
+        _lastCommittedText = currentText;
+        _lastCommittedCursor = currentCursor;
+    }
+
+    /// <summary>★ 2026-09-29 v6: 撤销栈里有东西就回滚一格;同时把当前状态推到 redo 栈</summary>
+    private void PerformUndo()
+    {
+        if (_undoStack.Count == 0) return;
+        // ★ v6 修复: 撤销前先停掉去抖定时器并强制提交(避免定时器在 undo 后又把当前 redo 状态进 undo 栈)
+        _undoDebounceTimer.Stop();
+        CommitUndoSnapshot();
+
+        var current = new UndoState { Text = Text, CursorStart = SelectionStart };
+        var prev = _undoStack.Pop();
+        _redoStack.Push(current);
+
+        _suspendUndo = true;
+        try
+        {
+            Text = prev.Text;
+            SelectionStart = Math.Min(prev.CursorStart, Text.Length);
+            ScrollToCaret();
+            // ★ v6 修复: 同步更新 _lastCommittedText,否则下次输入会把撤销前的旧 text 当作 prev
+            _lastCommittedText = Text;
+            _lastCommittedCursor = SelectionStart;
+        }
+        finally
+        {
+            _suspendUndo = false;
+        }
+    }
+
+    /// <summary>★ 2026-09-29 v6: 重做栈里有东西就前进一格</summary>
+    private void PerformRedo()
+    {
+        if (_redoStack.Count == 0) return;
+        // ★ v6 修复: 同 PerformUndo - 先停定时器+提交,避免 redo 后定时器把 redo 状态塞进 undo 栈
+        _undoDebounceTimer.Stop();
+        CommitUndoSnapshot();
+
+        var current = new UndoState { Text = Text, CursorStart = SelectionStart };
+        var next = _redoStack.Pop();
+        _undoStack.Push(current);
+
+        _suspendUndo = true;
+        try
+        {
+            Text = next.Text;
+            SelectionStart = Math.Min(next.CursorStart, Text.Length);
+            ScrollToCaret();
+            // ★ v6 修复: 同步 _lastCommittedText
+            _lastCommittedText = Text;
+            _lastCommittedCursor = SelectionStart;
+        }
+        finally
+        {
+            _suspendUndo = false;
         }
     }
 }
