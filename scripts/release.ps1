@@ -247,11 +247,38 @@ try {
 }
 
 # 8) 推送 tag（只到 A3ToolsRelease 发布仓库）
+# ★ 2026-09-30 陛下反馈修复 tag 暴露源码 bug:
+#   - 之前 `git tag $tag` 用 HEAD (源码 commit), push 到 A3ToolsRelease 后
+#     `git clone A3ToolsRelease && git checkout v2.6.x` 能拿到完整源码 (违反 release 仓库"纯zip"约定)
+#   - 改为: 在 A3ToolsRelease/master 之上建一个 release marker 空 commit, tag 指向 marker
+#     marker 文件树 = init 文件树 = 只有 README.md, 不带任何源码
 $tag = "v" + $Version
 Info ("Pushing tag " + $tag + " to A3ToolsRelease only")
 try {
     & git tag -d $tag 2>$null | Out-Null
-    & git tag $tag
+
+    # 8.1) 找 A3ToolsRelease/master 的 tree (init 的空 tree, 只有 README.md)
+    #      fetch 一下确保本地有最新 remote refs
+    & git fetch A3ToolsRelease master 2>$null | Out-Null
+    $releaseMasterSha = (& git rev-parse A3ToolsRelease/master 2>$null)
+    if (-not $releaseMasterSha) {
+        Err "A3ToolsRelease/master 不存在 - 请先确认远程仓库已初始化"
+        exit 1
+    }
+    $releaseTreeSha = (& git rev-parse "$releaseMasterSha^{tree}").Trim()
+
+    # 8.2) 在 release tree 上建一个空 commit 做 marker
+    #      message = "release v<Version>" 让 release 列表一眼能看出是哪个版本
+    $markerMsg = ("release v" + $Version + "`r`n`r`nRelease marker commit on A3ToolsRelease. `r`nNo source code here - this repo is for release zip assets only.")
+    $markerSha = (& git commit-tree $releaseTreeSha -m $markerMsg).Trim()
+    if (-not $markerSha) {
+        Err "无法创建 release marker commit"
+        exit 1
+    }
+    Info ("  release marker commit: " + $markerSha.Substring(0, 7))
+
+    # 8.3) tag 指向 marker (不是 HEAD)
+    & git tag $tag $markerSha
     # ★ 2026-08-19 拆分：只推 A3ToolsRelease。源仓库不打 tag（污染列表）。
     $releaseRemote = "A3ToolsRelease"
     $found = $false
