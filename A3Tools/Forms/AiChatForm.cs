@@ -37,6 +37,15 @@ public partial class AiChatForm : Form
     private AiProviderConfig? _currentProvider;
     private CancellationTokenSource? _cts;
     private bool _isSending = false;
+
+    // ★ 2026-09-30 陛下反馈：打开历史会话大量消息卡
+    //   改为虚拟列表: 初始只渲染最后 10 条, 往上滚到底触发加载更多 (每次 +10)
+    //   窗口上限 25 (用户/AI 发新消息时维持, 不无限增长)
+    private int _visibleStartIndex;   // flpMessages.Controls 里第一个气泡对应的 _currentSession.Messages 索引
+    private bool _isLoadingOlder;     // 防重入 (Scroll 事件可能短时间内多次触发)
+    private const int InitialWindowSize = 10;
+    private const int LoadMoreBatchSize = 10;
+    private const int MaxWindowSize = 25;
     private List<ChatToolCallRecord>? _pendingToolCallLog;
 
     public AiChatForm()
@@ -60,6 +69,20 @@ public partial class AiChatForm : Form
         pnlInput.Resize += (_, _) => LayoutInputPanel();
         splitChat.Panel2.Resize += (_, _) => LayoutInputPanel();
         pnlSidebar.Resize += (_, _) => LayoutSidebar();
+
+        // ★ 2026-09-30 虚拟列表: Scroll 事件监听"滚到顶", 触发 LoadOlderMessages
+        //   (但 Scroll 事件在某些场景不触发, 见下方 EnsureScrollPollTimer 注释)
+        pnlMessagesScroll.Scroll += PnlMessagesScroll_Scroll;
+
+        // ★ 2026-09-30 v4 根因修复: 不依赖 Scroll 事件, 构造时直接启动轮询 Timer
+        //   原因: 陛下报告 "多次滚动都不加载, 日志文件也没" — 二哈看代码发现
+        //   EnsureScrollPollTimer() 只在 Scroll handler 里调, 如果 Scroll 事件不触发
+        //   Timer 永远不启动, LoadOlder 永远不进, 日志没一行
+        //   修法: 构造时直接启动 Timer, Scroll handler 只是个 fallback
+        EnsureScrollPollTimer();
+        DebugLog("===== AI scroll diag started (v4) =====");
+        DebugLog($"current dir = {AppDomain.CurrentDomain.BaseDirectory}");
+        DebugLog($"form created, _visibleStartIndex={_visibleStartIndex}");
 
         // ★ 2026-08-27 修陛下反馈「打开聊天框后不自动滚动到最下方」：
         //   窗体完全显示后 + layout 完成后才滚到底（构造函数里 RenderMessages 时控件还没 layout 完，Maximum=0 滚不动）
@@ -237,26 +260,219 @@ public partial class AiChatForm : Form
 
     private void RenderMessages()
     {
+        // ★ 2026-09-30 虚拟列表: 切换会话/重画时只渲染最后 N 条
+        flpMessages.SuspendLayout();
         flpMessages.Controls.Clear();
-        if (_currentSession == null) return;
+        if (_currentSession == null) { flpMessages.ResumeLayout(true); return; }
 
-        // 先同步宽度
         SyncMessagesWidth();
 
-        // ★ 2026-08-29 方案 A：陛下原话「不能根据内容自动撑开么」
-        //   flpMessages.AutoSize=true + Dock=Top → 按内容自动撑高
-        //   pnlMessagesScroll.AutoScroll=true → 负责滚动条
-        //   完全不需要算高度 / y / AutoScrollMinSize
-        foreach (var msg in _currentSession.Messages)
+        int total = _currentSession.Messages.Count;
+        if (total == 0) { flpMessages.ResumeLayout(true); return; }
+
+        // 初始窗口: 只显示最后 InitialWindowSize 条
+        _visibleStartIndex = Math.Max(0, total - InitialWindowSize);
+
+        // 若有更早消息, 加一个 "加载更早" sentinel 在最顶部
+        if (_visibleStartIndex > 0)
         {
+            flpMessages.Controls.Add(CreateLoadMoreSentinel(_visibleStartIndex));
+        }
+
+        for (int i = _visibleStartIndex; i < total; i++)
+        {
+            var msg = _currentSession.Messages[i];
             var bubble = CreateBubbleRow(msg, source: "Render");
             flpMessages.Controls.Add(bubble);
         }
 
-        // ★ 2026-08-29 诊断日志：加载历史/重画时记录 flp 高度 vs 滚动容器高度（2026-09-02 删除）
-
+        flpMessages.ResumeLayout(true);
         ScrollToBottom();
     }
+
+    /// <summary>
+    /// 往上滚到顶时, 把更早的消息 prepend 到 flpMessages.Controls (每次 +10)
+    /// ★ 关键: prepend 后必须保持滚动位置 (用户视觉上看不出跳变)
+    ///   FlowLayoutPanel.Add() 总是 append 到末尾, 所以要按"从老到新"顺序 Add,
+    ///   才能让 Add 出的控件顺序 = 视觉上从上到下的顺序
+    /// </summary>
+    private void LoadOlderMessages(int count)
+    {
+        if (_isLoadingOlder || _currentSession == null) return;
+        int total = _currentSession.Messages.Count;
+        if (_visibleStartIndex <= 0) return;
+
+        int newStart = Math.Max(0, _visibleStartIndex - count);
+        int actuallyLoad = _visibleStartIndex - newStart;
+        if (actuallyLoad <= 0) return;
+
+        DebugLog($"LoadOlderMessages ENTER: count={count} vStart={_visibleStartIndex} newStart={newStart} actuallyLoad={actuallyLoad} total={total} controlsBefore={flpMessages.Controls.Count}");
+
+        _isLoadingOlder = true;
+        try
+        {
+            // 1) 记录当前滚动 Y (滚动条值)
+            int oldScrollY = pnlMessagesScroll.VerticalScroll.Value;
+
+            // 2) 移除顶部 sentinel (它是索引 0)
+            if (flpMessages.Controls.Count > 0 && flpMessages.Controls[0].Tag is SentinelLoadMore)
+            {
+                flpMessages.Controls.RemoveAt(0);
+            }
+
+            // 3) ★★ v2 修法: 先按"从老到新"顺序 add (全部堆到末尾), 再用 SetChildIndex 移到顶部
+            //   ★ v5 修法: 不在循环里算 prependedHeight (那时 layout 没跑, PreferredSize 错的)
+            //              改在 ResumeLayout + PerformLayout 后用 lastNewBubble.Bottom 算真实高度
+            flpMessages.SuspendLayout();
+            var newBubbles = new System.Collections.Generic.List<Control>();
+            for (int i = newStart; i < _visibleStartIndex; i++)  // forward: msg80, 81, ..., 89
+            {
+                var msg = _currentSession.Messages[i];
+                var bubble = CreateBubbleRow(msg, source: "LoadOlder");
+                flpMessages.Controls.Add(bubble);  // append 到末尾
+                newBubbles.Add(bubble);
+            }
+            // 把新气泡从末尾移到顶部, 按顺序排 (b80 在 index 0, b89 在 index 9)
+            for (int i = 0; i < newBubbles.Count; i++)
+            {
+                flpMessages.Controls.SetChildIndex(newBubbles[i], i);
+            }
+            _visibleStartIndex = newStart;
+
+            // 4) 加新 sentinel 在 index 0 (最顶部)
+            if (_visibleStartIndex > 0)
+            {
+                var newSentinel = CreateLoadMoreSentinel(_visibleStartIndex);
+                flpMessages.Controls.Add(newSentinel);  // append
+                flpMessages.Controls.SetChildIndex(newSentinel, 0);  // 移到最顶部
+            }
+            flpMessages.ResumeLayout(true);
+            pnlMessagesScroll.PerformLayout();
+
+            // 5) ★ v5: 算"实际 prepended 高度" (layout 后用真实 Y 坐标, 不用 PreferredSize 估算)
+            //   = 最后一个新气泡的 Bottom (flp 坐标系里, 它在新气泡底部)
+            //   例: newSentinel.Top=14 (Padding.Top), 10 个气泡依次排, lastNew.Bottom=14+10气泡高+sentinel高
+            //   视口需要向下挪这个高度, 让用户原本看到的 msg90 还在屏幕同一位置
+            int actualPrependedHeight = 0;
+            if (newBubbles.Count > 0)
+            {
+                Control lastNew = newBubbles[newBubbles.Count - 1];
+                actualPrependedHeight = lastNew.Bottom + lastNew.Margin.Bottom;
+                // 如果有新 sentinel, 它在最顶部, lastNew.Bottom 不含 sentinel 高度
+                // 实际上 sentinel 之上没有内容, lastNew.Bottom 已经包含从顶部到 lastNew 底部的所有内容
+            }
+
+            // 7) ★ v12: Timer 延迟 + 直接 VerticalScroll.Value (代替 v11 的 ScrollControlIntoView)
+            //   v11 失败原因: 调用时 max=6595 没变, originalFirst.Top=0, ScrollControlIntoView 认为控件已可见, 不滚动
+            //   v12: BeginInvoke 触发后, 500ms Timer 重试, 每次重新 PerformLayout + 取 originalFirst.Top
+            //       直到 max 增长 (说明 WebView2 注册完成), 再设 Value
+            //   ★ v11 SmartScrollToBottom 保护: 我们设的位置不在底部, ResizeObserver 的 SmartScrollToBottom 不再触发
+            int capturedNewBubblesCount = newBubbles.Count;
+            int capturedOldY = oldScrollY;
+            int initialMax = pnlMessagesScroll.VerticalScroll.Maximum;
+            DebugLog($"scroll preserve v12 scheduled: oldY={capturedOldY} prepended={actualPrependedHeight} (newBubbles={capturedNewBubblesCount}) initialMax={initialMax}");
+            try
+            {
+                var deferTimer = new System.Windows.Forms.Timer { Interval = 200 };  // 5fps
+                int tries = 0;
+                deferTimer.Tick += (_, _) =>
+                {
+                    tries++;
+                    try
+                    {
+                        // 强制 layout 让控件位置更新
+                        flpMessages.PerformLayout();
+                        pnlMessagesScroll.PerformLayout();
+
+                        int originalFirstIdx = 1 + capturedNewBubblesCount;
+                        if (originalFirstIdx >= flpMessages.Controls.Count)
+                        {
+                            DebugLog($"v12 try {tries}: idx OOR {originalFirstIdx} >= {flpMessages.Controls.Count}");
+                            return;
+                        }
+
+                        Control originalFirst = flpMessages.Controls[originalFirstIdx];
+                        int targetY = originalFirst.Top;
+                        int maxY = pnlMessagesScroll.VerticalScroll.Maximum;
+
+                        DebugLog($"v12 try {tries}: originalFirst.Top={targetY} maxY={maxY} (initialMax={initialMax})");
+
+                        // 如果 max 还没增长 (WebView2 未注册), 等下一轮
+                        if (maxY <= initialMax && tries < 10)
+                        {
+                            return;  // 继续 tick
+                        }
+
+                        // 设 Value
+                        if (targetY > maxY) targetY = maxY;
+                        if (targetY < 0) targetY = 0;
+                        pnlMessagesScroll.VerticalScroll.Value = targetY;
+                        int actualY = pnlMessagesScroll.VerticalScroll.Value;
+                        DebugLog($"v12 try {tries} SET: targetY={targetY} actualY={actualY} maxY={maxY}");
+
+                        // 成功 (或 10 次都没等来 max 增长, 强行停)
+                        if (actualY == targetY || tries >= 10)
+                        {
+                            deferTimer.Stop();
+                            deferTimer.Dispose();
+                            DebugLog($"v12 TIMER stopped at try {tries}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"v12 try {tries} EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                        deferTimer.Stop();
+                        deferTimer.Dispose();
+                    }
+                };
+                deferTimer.Start();
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"v12 Timer start FAILED: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        finally
+        {
+            _isLoadingOlder = false;
+        }
+        DebugLog($"LoadOlderMessages EXIT: vStart={_visibleStartIndex} controlsAfter={flpMessages.Controls.Count}");
+    }
+
+    /// <summary>
+    /// "加载更早消息" 顶部占位 panel, 视觉提示用户还有更早内容
+    /// ★ 不用按钮: Scroll 事件检测到 Value=0 自动 LoadOlder, 避免点击触发
+    ///   Tag = SentinelLoadMore 标记, 方便 LoadOlderMessages 识别/移除
+    /// </summary>
+    private Panel CreateLoadMoreSentinel(int remainingOlder)
+    {
+        var lbl = new Label
+        {
+            Text = "↑ 往上滚加载更早 " + remainingOlder + " 条消息...",
+            AutoSize = false,
+            Height = 28,
+            Dock = DockStyle.Top,
+            TextAlign = System.Drawing.ContentAlignment.MiddleCenter,
+            Font = new System.Drawing.Font("Microsoft YaHei UI", 9F),
+            ForeColor = System.Drawing.Color.FromArgb(150, 150, 150),
+            BackColor = System.Drawing.Color.Transparent,
+            Cursor = System.Windows.Forms.Cursors.Default,
+            Margin = new Padding(0, 4, 0, 4),
+        };
+        var p = new Panel
+        {
+            Width = flpMessages.ClientSize.Width,
+            Height = 36,
+            BackColor = System.Drawing.Color.Transparent,
+            Margin = new Padding(0),
+        };
+        p.Controls.Add(lbl);
+        p.Tag = new SentinelLoadMore();
+        return p;
+    }
+
+    /// <summary> Sentinel 标签 (区分"加载更多"panel 和普通气泡 row) </summary>
+    private sealed class SentinelLoadMore { }
 
     /// <summary>
     /// 创建一条消息气泡 row（方案 A v4：Label 直接当气泡）
@@ -528,7 +744,11 @@ public partial class AiChatForm : Form
                             LayoutBubbleRow(row, wv2, avatarInRow, isUser);
                         }
                         RelayoutMessages();
-                        ScrollToBottom(); // ★★★ 2026-09-02 WebView2 高度回来后立刻滚到底
+                        // ★ 2026-09-30 v11 陛下日志证据 + 通用修法:
+                        //   WebView2 ResizeObserver 每次 AI 气泡高度变化都触发
+                        //   之前无条件 ScrollToBottom → 用户在历史中被拽到底部
+                        //   修法: 只有用户在底部时才滚, 不在底部就不动
+                        SmartScrollToBottom();
                     }
                     catch
                     {
@@ -641,7 +861,8 @@ _ = wv2.EnsureCoreWebView2Async();
             }
         }
         RelayoutMessages();
-        ScrollToBottom();
+        // ★ 2026-09-30 v11: 用 SmartScrollToBottom (只在用户底部才滚, 不在就不动)
+        SmartScrollToBottom();
     }
 
     /// <summary>
@@ -783,12 +1004,39 @@ _ = wv2.EnsureCoreWebView2Async();
 
     /// <summary>
     /// ★ 2026-08-29 方案 A 简化版：在 flpMessages 末尾追加一个 row
+    /// ★ 2026-09-30 虚拟列表: 维持窗口上限 MaxWindowSize
+    ///   - 用户发新消息 / AI 开始流式 → _currentSession.Messages.Add + 这里 append
+    ///   - 若总气泡数(含 sentinel) > MaxWindowSize 且 _visibleStartIndex > 0
+    ///     → 移除最顶部 sentinel (索引 0) + 移除最早气泡 (原索引 1, 现 0),
+    ///       _visibleStartIndex += 1, 让窗口从末尾掉一条出去
+    ///   - 若 _visibleStartIndex == 0 (即历史已全部渲染) → 不再移除, 突破上限
     /// </summary>
     private void AddMessageBubbleNew(ChatMessage msg)
     {
         if (_currentSession == null) return;
         var row = CreateBubbleRow(msg, source: "AddNew");
+        flpMessages.SuspendLayout();
         flpMessages.Controls.Add(row);
+
+        // 窗口维护: 移除顶部 sentinel + 最早气泡, 维持总条目数 <= MaxWindowSize
+        while (flpMessages.Controls.Count > MaxWindowSize && _visibleStartIndex > 0)
+        {
+            // 索引 0 一定是 sentinel (LoadOlder 阶段已确保); 索引 1 是最早气泡
+            if (flpMessages.Controls.Count >= 1 && flpMessages.Controls[0].Tag is SentinelLoadMore)
+            {
+                flpMessages.Controls.RemoveAt(0);
+            }
+            if (flpMessages.Controls.Count >= 1 && !(flpMessages.Controls[0].Tag is SentinelLoadMore))
+            {
+                flpMessages.Controls.RemoveAt(0);
+                _visibleStartIndex++;
+            }
+            else
+            {
+                break;  // safety
+            }
+        }
+        flpMessages.ResumeLayout(true);
     }
 
     private TextBox RenderMarkdownTextBox_Old(string markdown, bool isError, int labelMaxW)
@@ -844,6 +1092,96 @@ _ = wv2.EnsureCoreWebView2Async();
         return s.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&amp;", "&")
                 .Replace("&quot;", "\"").Replace("&#39;", "'").Replace("&nbsp;", " ");
     }
+
+    /// <summary>
+    /// ★ 2026-09-30 虚拟列表 Scroll 事件
+    ///   用户滚到顶 (VerticalScroll.Value == 0) 且还有更早消息 → LoadOlderMessages
+    ///   防抖: _isLoadingOlder 防止短时间内多次触发
+    /// </summary>
+    private System.Windows.Forms.Timer? _scrollPollTimer;
+    private int _lastSeenScrollValue = -1;
+
+    /// <summary>
+    /// ★ Bug fix 2026-09-30 v3: Scroll 事件 + e.NewValue 不可靠 (用户报告多次滚动不触发)
+    ///   改用 Application.Idle 轮询 VerticalScroll.Value: 简单、可靠、不依赖 ScrollEventArgs 语义
+    ///   每次 Idle 检查: 若 Value 跌到 <= 5 且之前 > 5 → 触发 LoadOlder
+    ///   用 _lastSeenScrollValue 记录上次, 只在"刚滚到顶"时触发一次 (不会重复上/滚)
+    /// </summary>
+    private void PnlMessagesScroll_Scroll(object? sender, ScrollEventArgs e)
+    {
+        // ★ v4: 加日志, 验证 Scroll 事件到底触不触发 (之前怀疑根本不触发, 现在看证据)
+        DebugLog($"Scroll event fired: Type={e.Type} Orient={e.ScrollOrientation} NewValue={e.NewValue}");
+        EnsureScrollPollTimer();  // 兜底 (正常情况 Timer 早就启动了)
+    }
+
+    private void EnsureScrollPollTimer()
+    {
+        if (_scrollPollTimer != null) return;
+        _scrollPollTimer = new System.Windows.Forms.Timer { Interval = 80 };  // 12fps 足够
+        _scrollPollTimer.Tick += ScrollPollTimer_Tick;
+        _scrollPollTimer.Start();
+        DebugLog("ensureScrollPollTimer started");
+    }
+
+    private void ScrollPollTimer_Tick(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_isLoadingOlder) return;
+            if (_visibleStartIndex <= 0) return;
+            if (_currentSession == null || _currentSession.Messages.Count == 0) return;
+            if (!pnlMessagesScroll.IsHandleCreated) return;
+
+            int curVal = pnlMessagesScroll.VerticalScroll.Value;
+            bool visible = pnlMessagesScroll.VerticalScroll.Visible;
+            int maxV = pnlMessagesScroll.VerticalScroll.Maximum;
+
+            // 只在"刚跌到顶"时触发 (curVal <= 5 且上次 > 5)
+            if (curVal <= 5 && _lastSeenScrollValue > 5)
+            {
+                DebugLog($"poll tick: curVal={curVal} lastSeen={_lastSeenScrollValue} max={maxV} visible={visible} -> TRIGGER LoadOlder (vStart={_visibleStartIndex} total={_currentSession.Messages.Count})");
+                LoadOlderMessages(LoadMoreBatchSize);
+            }
+            _lastSeenScrollValue = curVal;
+        }
+        catch (Exception ex)
+        {
+            DebugLog($"ScrollPollTimer_Tick EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+
+
+    /// <summary>
+    /// ★ 2026-09-30 v11 陛下提示根因: "刷新气泡就定位到最底部"
+    ///   之前 WebView2 ResizeObserver / OnContainerResized 等多处无条件 ScrollToBottom
+    ///   不管用户在不在底部都跳, 导致用户在历史中被拽回底部
+    ///   修法: 只在用户已经在底部 (100px 内) 才滚, 不在就不动
+    ///   - 流式输出: 用户在底部 → 跟着滚 ✓
+    ///   - 首次加载: RenderMessages 后用户在底部 → 跟着滚 ✓
+    ///   - 加载历史: 用户在顶部 (看老消息) → 不动 ✓
+    /// </summary>
+    private void SmartScrollToBottom()
+    {
+        if (!pnlMessagesScroll.IsHandleCreated) return;
+        int curVal = pnlMessagesScroll.VerticalScroll.Value;
+        int maxVal = pnlMessagesScroll.VerticalScroll.Maximum;
+        // 用户在底部 100px 内 → 跟着滚 (流式体验)
+        bool userAtBottom = (maxVal - curVal) <= 100;
+        if (userAtBottom)
+        {
+            ScrollToBottom();
+        }
+        // else: 用户在历史中, 不动 (历史浏览体验)
+    }
+
+    /// <summary>
+    /// ★ 2026-09-30: 诊断阶段使用, 修复完成后改为空实现 (no-op)
+    ///   - 调用点全部保留 (修复过程中加的诊断点), 编译通过
+    ///   - 方法体为空, 不再写日志文件, 性能无开销
+    ///   - 后续真要加调试日志, 把方法体填回去就行
+    /// </summary>
+    private static void DebugLog(string msg) { }
 
     private void ScrollToBottom()
     {
@@ -1079,21 +1417,31 @@ _ = wv2.EnsureCoreWebView2Async();
         // 閫愬瓧绗︽祦寮忔樉绀?       
          var buffer = new StringBuilder();
         DateTime lastRenderTime = DateTime.MinValue;
-        const int renderThrottleMs = 60;
+        // ★ 2026-09-30 陛下反馈 AI 助理流式刷新太快一直闪
+        //   60ms 约 16fps, 加上 WebView2 跨进程 ExecuteScriptAsync + Label 整行 LayoutBubbleRow
+        //   频繁重排, 肉眼明显闪烁. 改为 200ms (5fps) + 最少 3 字符间隔
+        //   仍能看出逐字/逐行渲染, 但不会闪.
+        const int renderThrottleMs = 200;
+        const int minCharsBetweenRenders = 3;
+        int charsSinceLastRender = 0;
         foreach (char c in fullText)
         {
             if (_cts?.IsCancellationRequested == true) break;
             buffer.Append(c);
+            charsSinceLastRender++;
             string currentText = buffer.ToString();
 
             bool isParagraphEnd = (c == '\n' || c == '.' || c == '?' || c == '!');
-            bool shouldRender = isParagraphEnd || (DateTime.UtcNow - lastRenderTime).TotalMilliseconds >= renderThrottleMs;
+            bool shouldRender = isParagraphEnd
+                || (charsSinceLastRender >= minCharsBetweenRenders
+                    && (DateTime.UtcNow - lastRenderTime).TotalMilliseconds >= renderThrottleMs);
             if (!shouldRender)
             {
                 aiMsg.Content = currentText;
                 continue;
             }
             lastRenderTime = DateTime.UtcNow;
+            charsSinceLastRender = 0;
 
             Microsoft.Web.WebView2.WinForms.WebView2? wv2ForLambda = (isWv2 ? bubble as Microsoft.Web.WebView2.WinForms.WebView2 : null);
             string htmlForLambda = isWv2 ? RenderMarkdownAsHtml(currentText) : "";
