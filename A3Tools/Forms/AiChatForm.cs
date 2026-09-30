@@ -861,8 +861,9 @@ _ = wv2.EnsureCoreWebView2Async();
             }
         }
         RelayoutMessages();
-        // ★ 2026-09-30 v11: 用 SmartScrollToBottom (只在用户底部才滚, 不在就不动)
-        SmartScrollToBottom();
+        // ★ 2026-09-30 修陛下反馈「流试输出不跟滚」：流式上下文直接 ScrollToBottom (内部 retry 等 WebView2 撑开)
+        //   SmartScrollToBottom 保留给非流式场景 (LoadOlder / WebView2 ResizeObserver 等), 避免拽用户
+        ScrollToBottom();
     }
 
     /// <summary>
