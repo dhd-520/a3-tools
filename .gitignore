@@ -52,3 +52,6 @@ publish/RELEASE_NOTES_*.md
 # Gitee token + .NET user-specific
 *.pfx
 *.snupkg
+# backup files (*.bak / *.bak-*)
+*.bak
+*.bak-*
