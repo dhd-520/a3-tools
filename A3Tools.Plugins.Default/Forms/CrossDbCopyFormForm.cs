@@ -332,7 +332,7 @@ LEFT JOIN S_BUSINESSTYPE F ON B.BUSINESSTYPEGUID = F.GUID
 LEFT JOIN S_OBJECTGROUP G1 ON A.OBJECTGROUPGUID=G1.GUID
 LEFT JOIN S_OBJECTGROUP G2 ON G1.PARENTGUID=G2.GUID
 LEFT JOIN S_OBJECTGROUP G3 ON G2.PARENTGUID=G3.GUID
-WHERE A.NAME LIKE '%{escapedKeyword}%' OR F.NAME LIKE '%{escapedKeyword}%' OR G1.NAME LIKE '%{escapedKeyword}%' OR G2.NAME LIKE '%{escapedKeyword}%' OR G3.NAME LIKE '%{escapedKeyword}%'
+WHERE A.NAME LIKE '%{escapedKeyword}%' OR A.CODE LIKE '%{escapedKeyword}%' OR F.NAME LIKE '%{escapedKeyword}%' OR G1.NAME LIKE '%{escapedKeyword}%' OR G2.NAME LIKE '%{escapedKeyword}%' OR G3.NAME LIKE '%{escapedKeyword}%'
 ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.NAME,''),A.NAME";
 
                 DataTable dt;
