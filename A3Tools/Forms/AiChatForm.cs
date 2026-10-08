@@ -1,4 +1,4 @@
-﻿﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Services;
+using A3Tools.Services.AiActions.AiAssistantLogging;
 using A3Tools.Services.ChatStore;
 using Markdig;
 
@@ -31,12 +32,97 @@ public partial class AiChatForm : Form
     private readonly OpenAiCompatibleBackend _backend = new();
     private readonly MarkdownPipeline _mdPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
 
+    /// <summary>
+    /// ★★★ 2026-10-07 根治 WebView2 DPI 空白问题（陛下多次反馈「气泡下方大片空白/内容不全」）：
+    ///   反射探针证实根因：CoreWebView2Controller.BoundsMode 默认 UseRawPixels，
+    ///   WinForms wrapper 把 wv2.Height(DIP) 当物理像素传进 Bounds，而 RasterizationScale=1.75，
+    ///   → CSS viewport = wv2.Height ÷ 1.75（vpH 永远只有控件高度的 57%），
+    ///   → HWND 物理高 = wv2.Height×1.75 但浏览器只画顶部 57%，下面 43% 空白。
+    ///   修法：把 BoundsMode 改成 UseRasterizationScale，Bounds 按 CSS 像素解释：
+    ///     CSS viewport = Bounds = wv2.Height，物理 = wv2.Height×1.75（正好填满 HWND）。
+    ///   于是 wv2.Height = contentH 即可完美填满，零空白零裁切。
+    /// </summary>
+    private static Microsoft.Web.WebView2.Core.CoreWebView2Controller? GetController(Microsoft.Web.WebView2.WinForms.WebView2 wv2)
+    {
+        // ★★★ 2026-10-08 鲁棒性提升：WebView2 1.0.1829.34016 反射字段名可能改名 / 嵌套，
+        //   按字段名列表 + CoreWebView2 内嵌 controller 字段 依次找
+        try
+        {
+            var t = typeof(Microsoft.Web.WebView2.WinForms.WebView2);
+            string[] names = { "_coreWebView2Controller", "_controller", "controller", "_coreWebView2" };
+            foreach (var n in names)
+            {
+                var fi = t.GetField(n,
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (fi != null)
+                {
+                    var v = fi.GetValue(wv2);
+                    if (v is Microsoft.Web.WebView2.Core.CoreWebView2Controller c1) return c1;
+                    if (v is Microsoft.Web.WebView2.Core.CoreWebView2 c2)
+                    {
+                        // 从 CoreWebView2 内部找 controller 字段
+                        var ct = c2.GetType();
+                        foreach (var cfi in ct.GetFields(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                        {
+                            if (cfi.FieldType == typeof(Microsoft.Web.WebView2.Core.CoreWebView2Controller))
+                                return (Microsoft.Web.WebView2.Core.CoreWebView2Controller)cfi.GetValue(c2);
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// ★★★ 2026-10-08 终极修法（陛下反馈「单气泡 70% 但文字只填 49%」）：
+    ///   不再依赖 BoundsMode 切换，留在默认 UseRawPixels，但手动让 Bounds 按物理像素 × DPI。
+    ///   反射复核：wrapper 每次 resize 会把 Bounds 重置回 ClientSize(DIP) → vpW = ClientSize/1.75 = 49%框宽（气泡仅 49% 充满）。
+    ///   本方法在每次 Resize 后强设 Bounds = ClientSize × DPI/96（按物理像素），
+    ///     vpW = Bounds / RasterizationScale = (ClientSize × 1.75) / 1.75 = ClientSize ✓ 完美填满
+    ///     vpH 同理 → 文字 wrap 到气泡可视宽度
+    ///   wv2.Resize 钩子同步重设，保证 wrapper 覆盖后立刻压回去。
+    /// </summary>
+    private static void ForceWebView2Dpi(Microsoft.Web.WebView2.WinForms.WebView2 wv2)
+    {
+        var ctrl = GetController(wv2);
+        if (ctrl == null) return;
+        try { ctrl.ShouldDetectMonitorScaleChanges = false; } catch { }
+        // ★★★ 2026-10-08 终极根治：RasterizationScale=1.0
+        //   WinForms ClientSize 是物理像素（168 DPI → 1.75x 缩放）
+        //   RasterizationScale=1.75 时 viewport=物理/1.75 = 气泡 57%（裁切 + 不换行）
+        //   改 1.0 → viewport=物理像素 = 气泡完整尺寸 → WinForms 布局(物理像素) 完美匹配 WebView2 viewport(CSS像素)
+        //   文本从 1.75x 锐利变 1x，但保证完整显示
+        try { ctrl.RasterizationScale = 1.0; } catch { }
+        try { ctrl.BoundsMode = Microsoft.Web.WebView2.Core.CoreWebView2BoundsMode.UseRawPixels; } catch { }
+        try
+        {
+            ctrl.Bounds = new System.Drawing.Rectangle(0, 0, wv2.ClientSize.Width, wv2.ClientSize.Height);
+        }
+        catch { }
+    }
+
+    private static void ConfigureWebView2Dpi(Microsoft.Web.WebView2.WinForms.WebView2 wv2)
+    {
+        ForceWebView2Dpi(wv2);
+        // ★★★ 同步 Resize 钩子：wrapper 每次 Resize 重置后立刻压回 RasterizationScale=1.0
+        try
+        {
+            wv2.Resize += (s, e) => ForceWebView2Dpi(wv2);
+        }
+        catch { }
+    }
+
     private AiChatConfig _config = new();
     private IChatStore _store = null!;
     private ChatSession _currentSession = null!;
     private AiProviderConfig? _currentProvider;
     private CancellationTokenSource? _cts;
     private bool _isSending = false;
+
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOMOVE = 0x0002;
 
     // ★ 2026-09-30 陛下反馈：打开历史会话大量消息卡
     //   改为虚拟列表: 初始只渲染最后 10 条, 往上滚到底触发加载更多 (每次 +10)
@@ -129,6 +215,11 @@ public partial class AiChatForm : Form
     private void LoadConfig()
     {
         _config = _configService.LoadConfig();
+        // ★ 2026-10-07 修陛下反馈「日志开关取消勾选仍记录」：
+        //   AiAssistantLogger.Enabled 是进程级静态字段（默认 true）
+        //   之前只在 AiSettingsForm 打开时 / 保存时同步，AiChatForm 启动不会同步
+        //   导致：配置 EnableAiLog=false 但 Enabled 仍为 true，日志照写
+        AiAssistantLogger.Enabled = _config.EnableAiLog;
         cmbProvider.Items.Clear();
         foreach (var p in _config.Providers.Where(x => x.Enabled))
         {
@@ -508,8 +599,9 @@ public partial class AiChatForm : Form
             //     ## 标题 / ### 标题 / **粗体** / `代码` / 表格 / 列表 / 引用 / 链接
             //   之前走 Unicode 符号改造（标题变 ━━，表格变 │─┼─）是给 Label 准备的，
             //   错误地作用到了 WebView2 路径 → 导致标题/表格内容被破坏
-            //   现在只保留 RemoveThinkTags：DeepSeek/Qwen 推理模型的 <think>...</think> 是思考过程，气泡里不显示
-            displayContent = RemoveThinkTags(displayContent ?? string.Empty);
+            // ★ 2026-10-08 陛下要求：think 块不需显示给陛下看（21 行长的 <think>...</think> 占大量空白）
+            //   重新加回：AI 响应走 RemoveThinkTags 去掉内部思考过程，只保留给陛下的内容
+            displayContent = RemoveThinkTags(displayContent ?? string.Empty).Trim();
         }
         else
         {
@@ -659,6 +751,8 @@ public partial class AiChatForm : Form
             {
                 Width = bubbleMaxW,
                 Height = 80,
+                MinimumSize = new System.Drawing.Size(0, 0),  // ★ 不许有最小尺寸限制
+                MaximumSize = new System.Drawing.Size(int.MaxValue, int.MaxValue),  // ★ 取消任何最大尺寸约束
                 DefaultBackgroundColor = isError
                     ? System.Drawing.Color.FromArgb(255, 245, 245)
                     : System.Drawing.Color.FromArgb(244, 248, 251),
@@ -687,10 +781,15 @@ public partial class AiChatForm : Form
                 LayoutBubbleRow(row, wv2, avatarInRow, isUser);
                 // RelayoutMessages();  // ★ 2026-08-31 流式时不重排避免闪烁
             };
-            // ★ 订阅 WebMessageReceived：HTML 里的 ResizeObserver 主动推送高度
+            // ★ 2026-10-07 用系统真实 DPI 换算（不猜倍数、不校准）
+            //   JS 报 scrollHeight（纯 CSS 像素），C# 用 DeviceDpi/96 换算成 device pixel
+            //   之前校准失败是因为 innerHeight 在 viewport 变化前就测了，导致比例偏大
+            //   DeviceDpi 是系统报告的真实 DPI，不是猜的
             wv2.CoreWebView2InitializationCompleted += (s, e) =>
             {
                 if (!e.IsSuccess || wv2.CoreWebView2 == null) return;
+                // ★★★ 2026-10-07 根治 DPI 空白：修正 BoundsMode 语义
+                ConfigureWebView2Dpi(wv2);
                 wv2.CoreWebView2.WebMessageReceived += (s2, e2) =>
                 {
                     try
@@ -722,12 +821,51 @@ public partial class AiChatForm : Form
                         if (!doc.RootElement.TryGetProperty("h", out var hProp)) return;
                         int realH = hProp.GetInt32();
                         if (realH <= 0) return;
-                        // ★ 2026-08-31 陛下诊断：getBoundingClientRect().bottom-top 已经包含 margin/padding，
-                        //   WebView2 控件 Height == 浏览器渲染区高度，
-                        //   但渲染区 < scrollHeight（滚动条预留 + 浏览器内部 padding），
-                        //   所以加 +20px 缓冲让控件高度 > 实际内容高度，避免最后几行被裁剪
-                        int newH = (int)(realH * 1.8);  // ★ 2026-08-31：按比例 +15% 缓冲，5行~18px，10行~36px，100行~360px
-                        if (Math.Abs(newH - wv2.Height) < 4) return;
+                        // ★★★ 2026-10-07 陛下反馈「内容总高度有问题」log 诊断确认：
+                        //   h_visible=12375, h_body=12367, h_scroll=12374
+                        //   → h_visible 比 h_body 多 8px 是最后一个<p>的 margin-bottom 撑出 overflow:hidden
+                        //   → h_body 才是用户肉眼真正看到的高度
+                        //   → h_scroll=12374 是 scrollHeight（含内容但不含 margin collapse 溢出）
+                        //   现在用 h_body 作为 newH 依据（避开 margin collapse 污染）
+                        int hScroll = doc.RootElement.TryGetProperty("h_scroll", out var hsProp) ? hsProp.GetInt32() : 0;
+                        int hVisible = doc.RootElement.TryGetProperty("h_visible", out var hvProp) ? hvProp.GetInt32() : 0;
+                        int hBody = doc.RootElement.TryGetProperty("h_body", out var hbProp) ? hbProp.GetInt32() : 0;
+                        int hHtml = doc.RootElement.TryGetProperty("h_html", out var hhProp) ? hhProp.GetInt32() : 0;
+                        try { System.IO.File.AppendAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebView2Debug.log"), $"notify: h_used={realH}, h_scroll={hScroll}, h_visible={hVisible}, h_body={hBody}, h_html={hHtml}, wv2.H={wv2.Height}, DeviceDpi={wv2.DeviceDpi}\n"); } catch { }
+                        // ★★★ 2026-10-08 诊断强化：记录 controller 真实状态，定位为何 Mode B 不生效
+                        try
+                        {
+                            var _ctrl = GetController(wv2);
+                            string _mode = "?", _raster = "?", _bounds = "?";
+                            if (_ctrl != null)
+                            {
+                                try { _mode = _ctrl.BoundsMode.ToString(); } catch { }
+                                try { _raster = _ctrl.RasterizationScale.ToString("F2"); } catch { }
+                                try { _bounds = _ctrl.Bounds.ToString(); } catch { }
+                            }
+                            else
+                            {
+                                _mode = "CTRL_NULL";
+                            }
+                            System.IO.File.AppendAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebView2Debug.log"), $"  ctrl: mode={_mode}, raster={_raster}, bounds={_bounds}\n");
+                        } catch { }
+                        // ★★★ 2026-10-08 终极修法（同步 Resize 钩子强制 Mode B 后 vpH = wv2.Height）：
+                        //   Mode B 下 vpH = Bounds.H = wv2.Height（CSS 像素解释），
+                        //   所以 wv2.Height = contentH 即可让内容完整填满气泡，不需 ×DPI/96。
+                        //   + 10px buffer 吃掉 wrapper 边缘 / 行高舍入
+                        int contentH = hVisible > 0 ? hVisible : (hBody > 0 ? hBody : realH);
+                        int newH = contentH + 10;
+                        wv2.Height = newH;
+                        // ★ BackColor 跟气泡背景色同色，掩盖 WinForms WebView2 HWND > viewport 的底部空白
+                        try { wv2.BackColor = wv2.DefaultBackgroundColor; } catch { }
+                        // ★★★ 2026-10-07 修陛下反馈「历史会话底部差很多内容」：
+                        //   之前的 SmartScrollToBottom 用 (newMax - curVal) <= 100 判断
+                        //   错：wv2 异步长大后 newMax 暴涨，curVal 还在老位置 → 差值巨大 → 误判"用户不在底部" → 不滚
+                        //   修法：增长 wv2 前先记录用户是否在老底部，涨完再决定是否跟滚
+                        int _oldMax = pnlMessagesScroll.VerticalScroll.Maximum;
+                        int _oldCur = pnlMessagesScroll.VerticalScroll.Value;
+                        int _visibleH = pnlMessagesScroll.ClientSize.Height;
+                        bool _userWasAtBottom = (_oldMax > 0) && (_oldCur + _visibleH >= _oldMax - 50);
                         wv2.Height = newH;
                         var row = wv2.Parent as Panel;
                         if (row != null)
@@ -744,11 +882,19 @@ public partial class AiChatForm : Form
                             LayoutBubbleRow(row, wv2, avatarInRow, isUser);
                         }
                         RelayoutMessages();
-                        // ★ 2026-09-30 v11 陛下日志证据 + 通用修法:
-                        //   WebView2 ResizeObserver 每次 AI 气泡高度变化都触发
-                        //   之前无条件 ScrollToBottom → 用户在历史中被拽到底部
-                        //   修法: 只有用户在底部时才滚, 不在底部就不动
-                        SmartScrollToBottom();
+                        // ★★★ 2026-10-07 手动跟滚新底部：wv2 增长后跟滚新底部
+                        //   （SmartScrollToBottom 的判断在 wv2 长大后会失准）
+                        if (_userWasAtBottom)
+                        {
+                            int _newMax = pnlMessagesScroll.VerticalScroll.Maximum;
+                            int _newCur = _newMax - _visibleH;
+                            if (_newCur < 0) _newCur = 0;
+                            if (_newCur > pnlMessagesScroll.VerticalScroll.Maximum) _newCur = pnlMessagesScroll.VerticalScroll.Maximum;
+                            if (_newCur != _oldCur)
+                            {
+                                pnlMessagesScroll.VerticalScroll.Value = _newCur;
+                            }
+                        }
                     }
                     catch
                     {
@@ -1161,10 +1307,20 @@ _ = wv2.EnsureCoreWebView2Async();
     ///   - 流式输出: 用户在底部 → 跟着滚 ✓
     ///   - 首次加载: RenderMessages 后用户在底部 → 跟着滚 ✓
     ///   - 加载历史: 用户在顶部 (看老消息) → 不动 ✓
+    /// ★ 2026-10-07 增强: 加 _streamFreezeUntil 冻结机制
+    ///   AI 流式完后 WebView2 还会有 N 多次 ResizeObserver 延迟触发
+    /// (代码块字体加载、表格交宽调整、ScrollToBottom 内部又 Timer 调 8 次重试)
+    /// 之前总问牌频发拽回底部 → 陛下手不能向上滚 -> 冻结 5 秒期间所有调送到 队底都不滚
     /// </summary>
+    private DateTime _streamFreezeUntil = DateTime.MinValue;
+    // ★ 2026-10-07 wv2.Height 赋值节流：JS 端每帧都报高度，C# 端最快 150ms 应用一次
+    //  防止流式输出时 wv2 反复撑缩让 WebView2 反复进入低 DPI 重渲染（陛下反馈「屏幕闪烁一会模糊一会清晰」的根因）
+    private DateTime _lastHeightApply = DateTime.MinValue;
     private void SmartScrollToBottom()
     {
         if (!pnlMessagesScroll.IsHandleCreated) return;
+        // ★ 2026-10-07 冻结机制: AI 流式后总调送到 的 ResizeObserver 闪烁事件被冻住
+        if (DateTime.UtcNow < _streamFreezeUntil) return;
         int curVal = pnlMessagesScroll.VerticalScroll.Value;
         int maxVal = pnlMessagesScroll.VerticalScroll.Maximum;
         // 用户在底部 100px 内 → 跟着滚 (流式体验)
@@ -1206,10 +1362,14 @@ _ = wv2.EnsureCoreWebView2Async();
                 int max = pnlMessagesScroll.VerticalScroll.Maximum;
                 if (max > 0)
                 {
-                    // ★ 使用 ScrollToControl 不起作用、臫动跳，需要选个能跳出中间状态
-                    pnlMessagesScroll.VerticalScroll.Value = max;
+                    // ★ 每次赋值前重新读 max：Refresh() 后 Maximum 可能会变（WebView2 扩张后）
+                    //   之前用缓存的 max，第二次 Value=max 可能越界报 ArgumentOutOfRangeException
+                    var vs = pnlMessagesScroll.VerticalScroll;
+                    vs.Value = Math.Min(max, vs.Maximum);
                     pnlMessagesScroll.Refresh();
-                    pnlMessagesScroll.VerticalScroll.Value = max;
+                    max = pnlMessagesScroll.VerticalScroll.Maximum;
+                    if (max > 0 && pnlMessagesScroll.VerticalScroll.Value != max)
+                        pnlMessagesScroll.VerticalScroll.Value = Math.Min(max, pnlMessagesScroll.VerticalScroll.Maximum);
                 }
             }
             finally
@@ -1294,6 +1454,8 @@ _ = wv2.EnsureCoreWebView2Async();
         btnCancel.Visible = true;
         lblStatus.Text = "AI 思考中...";
         lblStatus.ForeColor = System.Drawing.Color.FromArgb(24, 144, 255);
+        // ★ 2026-10-07 清除上一轮冻结：新对话开始 → 允许自动滚跟随流式输出
+        _streamFreezeUntil = DateTime.MinValue;
 
         _cts = new CancellationTokenSource();
 
@@ -1325,15 +1487,27 @@ _ = wv2.EnsureCoreWebView2Async();
                     // ★ 2026-09-20 陛下反馈「调用工具时整个对话框闪烁刷新」
                     //   根因：之前 RenderMessages() 会 Controls.Clear() + 重建所有气泡，
                     //         AI 调一次工具就重建 N 个 WebView2 + NavigateToString 重新初始化 → 整屏闪
-                    //   修法：只更新占位气泡内容（已经创建过），不重建其他历史消息
+                    //   原修法：只 FindBubbleForStream 占位气泡 + ExecuteScriptAsync 重设 innerHTML
+                    //         但重设 innerHTML 会重新初始化页面，滚动位置 / ResizeObserver 都丢失
+                    // ★ 2026-10-07 陛下要求：工具调用要累计显示（看总共调了哪些）
+                    //   新修法：调 HTML 里的 openAppendToolBlock(name, summary)
+                    //         JS 在 DOM 中 appendChild(jump) 追加一个 tool-call-card div，不重设 innerHTML
+                    //         滚动位置 / ResizeObserver 都保留住
                     string toolName = toolCallLog.Last().ToolName;
-                    placeholderAi.Content = $"🔧 调用工具：{toolName}\n\n{summary}";
+                    // ★ 同时往 placeholderAi.Content 里累加，方便历史回看 / SaveSession 后再加载能恢复
+                    if (string.IsNullOrEmpty(placeholderAi.Content))
+                        placeholderAi.Content = $"🔧 调用工具：{toolName}\n{summary}";
+                    else
+                        placeholderAi.Content += $"\n\n🔧 调用工具：{toolName}\n{summary}";
                     var (bubble, isWv2) = FindBubbleForStream(placeholderAi);
                     if (bubble != null && isWv2 && bubble is Microsoft.Web.WebView2.WinForms.WebView2 wv2 && wv2.CoreWebView2 != null)
                     {
-                        string html = RenderMarkdownAsHtml(placeholderAi.Content);
-                        string escaped = System.Text.Json.JsonSerializer.Serialize(html);
-                        _ = wv2.CoreWebView2.ExecuteScriptAsync("document.body.innerHTML = " + escaped + ";");
+                        // ★ 用 appendTool 字符串调 JS 端 openAppendToolName，不要重设 innerHTML
+                        //   参数转 JSON 防注入；toolName / summary 转 base64 避免引号 / 换行引起 JS 语法问题
+                        string nameJson = System.Text.Json.JsonSerializer.Serialize(toolName);
+                        string summaryJson = System.Text.Json.JsonSerializer.Serialize(summary ?? string.Empty);
+                        string script = "window.openAppendToolBlock(" + nameJson + "," + summaryJson + ");";
+                        _ = wv2.CoreWebView2.ExecuteScriptAsync(script);
                     }
                     ScrollToBottom();
                 });
@@ -1344,6 +1518,10 @@ _ = wv2.EnsureCoreWebView2Async();
 
             // AI 返回最终文本 → 替换占位 → 流式显示
             await StreamDisplayAsync(placeholderAi, turnResult.FinalContent);
+            // ★ 2026-10-07 陛下反馈「AI 完成后手不能向上滚」
+            //   流式完成后 WebView2 ResizeObserver 还会有 N 次延迟触发（字体/表格/代码块 ScrollToBottom 内部 8 次定时器重试）
+            //   冻结 5 秒 SmartScrollToBottom，避免反复拽回底部
+            _streamFreezeUntil = DateTime.UtcNow.AddSeconds(5);
             _currentSession.LastActiveAtUtc = DateTime.UtcNow;
             _store.SaveSession(_currentSession);
 
@@ -1445,15 +1623,17 @@ _ = wv2.EnsureCoreWebView2Async();
             charsSinceLastRender = 0;
 
             Microsoft.Web.WebView2.WinForms.WebView2? wv2ForLambda = (isWv2 ? bubble as Microsoft.Web.WebView2.WinForms.WebView2 : null);
-            string htmlForLambda = isWv2 ? RenderMarkdownAsHtml(currentText) : "";
+            string htmlForLambda = isWv2 ? RenderMarkdownAsHtml(RemoveThinkTags(currentText)) : "";
             Label? lblForLambda = (!isWv2 ? bubble as Label : null);
             await pnlMessagesScroll.InvokeAsync(() =>
             {
                 aiMsg.Content = currentText;
                 if (wv2ForLambda != null && wv2ForLambda.CoreWebView2 != null)
                 {
+                    // ★ 2026-10-07 陛下反馈「AI 流式刷新后又重设 body.innerHTML 擦掉 tool 记录」
+                    //   改用 updateBubbleBody(html)：只重设 #bubble-body + 重渲染 tool 列表
                     string escaped = System.Text.Json.JsonSerializer.Serialize(htmlForLambda);
-                    string js = "document.body.innerHTML = " + escaped + ";";
+                    string js = "window.updateBubbleBody(" + escaped + ");";
                     _ = wv2ForLambda.CoreWebView2.ExecuteScriptAsync(js);
                 }
                 else if (lblForLambda != null)
@@ -1483,8 +1663,9 @@ _ = wv2.EnsureCoreWebView2Async();
                 await pnlMessagesScroll.InvokeAsync(() =>
                 {
                     string htmlEnd = RenderMarkdownAsHtml(fullText);
+                    // ★ 2026-10-07 同上 → 改用 updateBubbleBody 不擦 tool 列表
                     string escapedEnd = System.Text.Json.JsonSerializer.Serialize(htmlEnd);
-                    string jsEnd = "document.body.innerHTML = " + escapedEnd + ";";
+                    string jsEnd = "window.updateBubbleBody(" + escapedEnd + ");";
                     _ = wv2End.CoreWebView2.ExecuteScriptAsync(jsEnd);
                 });
             }
@@ -1796,31 +1977,32 @@ _ = wv2.EnsureCoreWebView2Async();
         // GitHub 风格 CSS（与 UpdateForm 一致，适配 AI 气泡场景字号略小）
         string html = @"<!DOCTYPE html><html><head><meta charset=""utf-8""><style>
 ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
-body { font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 14px; line-height: 22px; color: #24292f; background: transparent; padding: 8px 10px; margin: 0; }
+html { margin: 0; padding: 0; }  /* ★ 消除 html 默认 8px margin，避免 wv2.Height = scrollHeight 还不够 */
+body { font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 24px; line-height: 38px; color: #24292f; background: transparent; padding: 10px 14px 10px 7px; margin: 0; overflow: hidden; overflow-wrap: break-word; word-break: break-word; }  /* ★★★ 2026-10-08 RasterizationScale=1.0 后所有 CSS 尺寸 ×1.75 补回 168 DPI 下的视觉大小 */
 
-h1, h2, h3, h4, h5, h6 { margin: 14px 0 8px 0; font-weight: 600; line-height: 1.25; }
-h1 { font-size: 18px; padding-bottom: 4px; border-bottom: 1px solid #d0d7de; }
-h2 { font-size: 16px; padding-bottom: 4px; border-bottom: 1px solid #d0d7de; }
-h3 { font-size: 14px; }
-p { margin: 0 0 8px 0; }
-ul, ol { margin: 0 0 8px 0; padding-left: 22px; }
-li { margin: 2px 0; }
-blockquote { margin: 0 0 8px 0; padding: 0 10px; color: #57606a; border-left: 4px solid #d0d7de; background: #f6f8fa; }
-code { font-family: 'Consolas', monospace; font-size: 9pt; background: rgba(175, 184, 193, 0.2); padding: 1px 4px; border-radius: 4px; }
-pre { background: #f6f8fa; padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 0 0 8px 0; line-height: 1.45; }
-pre code { background: transparent; padding: 0; font-size: 9pt; }
+h1, h2, h3, h4, h5, h6 { margin: 24px 0 14px 0; font-weight: 600; line-height: 1.25; }
+h1 { font-size: 32px; padding-bottom: 7px; border-bottom: 1px solid #d0d7de; }
+h2 { font-size: 28px; padding-bottom: 7px; border-bottom: 1px solid #d0d7de; }
+h3 { font-size: 24px; }
+p { margin: 0 0 14px 0; }
+ul, ol { margin: 0 0 14px 0; padding-left: 38px; }
+li { margin: 4px 0; }
+blockquote { margin: 0 0 14px 0; padding: 0 18px; color: #57606a; border-left: 7px solid #d0d7de; background: #f6f8fa; }
+code { font-family: 'Consolas', monospace; font-size: 16pt; background: rgba(175, 184, 193, 0.2); padding: 2px 7px; border-radius: 7px; word-break: break-all; }
+pre { background: #f6f8fa; padding: 14px 18px; border-radius: 10px; overflow-x: auto; margin: 0 0 14px 0; line-height: 1.45; white-space: pre-wrap; word-break: break-all; }
+pre code { background: transparent; padding: 0; font-size: 16pt; }
 strong { font-weight: 600; }
 em { font-style: italic; }
 a { color: #0969da; text-decoration: none; }
-hr { border: none; border-top: 1px solid #d0d7de; margin: 14px 0; }
+hr { border: none; border-top: 1px solid #d0d7de; margin: 24px 0; }
 /* ★★★ 2026-09-02 陛下反馈表格显示差劲，升级为 GitHub 正式版表格样式 ★★★ */
 .bubble-table-wrap {
   display: block;
   max-width: 100%;
   overflow-x: auto;
-  margin: 0 0 10px 0;
+  margin: 0 0 18px 0;
   border: 1px solid #d0d7de;
-  border-radius: 6px;
+  border-radius: 10px;
   background: #ffffff;
 }
 table {
@@ -1828,17 +2010,17 @@ table {
   width: max-content;
   min-width: 100%;
   margin: 0;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 23px;
+  line-height: 35px;
 }
 table th, table td {
   border: 1px solid #d0d7de;
-  padding: 6px 14px;
+  padding: 10px 24px;
   text-align: left;
   vertical-align: top;
   white-space: nowrap;
-  min-width: 60px;
-  max-width: 420px;
+  min-width: 105px;
+  max-width: 735px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1863,11 +2045,11 @@ table tbody tr:nth-child(even) td:first-child { background: #f1f3f5; }
 table tbody tr:hover td { background: #eef3f8; }
 table tbody tr:hover td:first-child { background: #e0e7ee; }
 /* ★ 单元格内代码/链接舒展 */
-table code { background: rgba(175,184,193,0.2); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+table code { background: rgba(175,184,193,0.2); padding: 2px 9px; border-radius: 5px; font-size: 21px; }
 table a { color: #0969da; text-decoration: none; border-bottom: 1px solid transparent; }
 table a:hover { border-bottom-color: #0969da; }
 img { max-width: 100%; }
-</style></head><body>" + bodyHtml + @"<script>
+</style></head><body><div id=""bubble-body"">" + bodyHtml + @"</div><div id=""tools-stream""></div><script>
 (function() {
   // ★ 2026-08-31 方案 X：用 getBoundingClientRect().bottom - top 推真实高度
   //   WebView2 控件 Height  == 浏览器渲染区高度
@@ -1893,16 +2075,127 @@ img { max-width: 100%; }
       }
     } catch (e) {}
   }
-  setTimeout(notify, 0);
-  setTimeout(notify, 50);
+  // ★ 2026-10-07 陛下反馈「气泡截断 + 屏幕闪烁」：
+  //   原 JS 端防抖 150ms → 流式时 ResizeObserver 持续 fire，防抖定时器一直被重置→整个流式期间都不通知 C# → wv2.Height 不变 → 内容被裁
+  //   同时各次 resize 间歇性拉高造成屏幕闪烁
+  //   修法：去掉 JS 端防抖，每帧立即报高度（scrollHeight，准确反映 Markdown/表格/代码块需要的高度）
+  //   闪烁控制改在 C# 端：节流 wv2.Height 赋值，最少间隔 150ms，避免反复撑缩导致 WebView2 低 DPI 重新渲染
+  let _lastNotify = 0;
+  function _notifyNow() {
+    try {
+      // ★★★ 2026-10-07 彻底换测量方式：
+      //   之前用 getBoundingClientRect 测 #bubble-body / #tools-stream 的 bottom
+      //   → 测量值可能包含子元素 margin，导致偏大 → wv2 过大 → 空白
+      //   改用 document.body.scrollHeight：浏览器报告的 body 真实内容高度（不含 body padding）
+      //   这是最权威的内容高度指标，不依赖任何子元素测量
+      var h_scroll = Math.max(
+        document.body.scrollHeight || 0,
+        document.documentElement.scrollHeight || 0
+      );
+      var h_visible = 0;
+      var ids = ['bubble-body', 'tools-stream'];
+      for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el) {
+          var r = el.getBoundingClientRect();
+          if (r.bottom > h_visible) h_visible = r.bottom;
+        }
+      }
+      h_visible = Math.ceil(h_visible);
+      var h_body = Math.ceil(document.body.getBoundingClientRect().height);
+      var h_html = Math.ceil(document.documentElement.getBoundingClientRect().height);
+      // ★★★ 2026-10-07 陛下反馈「内容总高度有问题」：
+      //   优先用 h_visible（实际可见底部），如果 h_visible 异常再用 h_scroll 兜底
+      var h = h_visible > 0 ? h_visible : h_scroll;
+      var w = Math.max(
+        document.body.scrollWidth || 0,
+        document.documentElement.scrollWidth || 0
+      );
+      // 报 viewport 实际 CSS 高度，C# 端用它自校准换算比例
+      var vp = Math.ceil(window.innerHeight || document.documentElement.clientHeight || 0);
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(JSON.stringify({
+          h: h, w: w, vp: vp,
+          h_scroll: h_scroll, h_visible: h_visible, h_body: h_body, h_html: h_html
+        }));
+      }
+      _lastNotify = Date.now();
+    } catch (e) {}
+  }
+  // 首次立即报（拿到初始尺寸）
+  setTimeout(_notifyNow, 0);
+  setTimeout(_notifyNow, 50);
+  // ResizeObserver / 内置定时器 → 立即通知（C# 端节流）
   if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(notify).observe(document.body);
+    new ResizeObserver(_notifyNow).observe(document.body);
   } else {
-    setInterval(notify, 200);
+    setInterval(_notifyNow, 250);
   }
+  // 字体加载完：立即报一次（最终 settle 状态）
   if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(notify);
+    document.fonts.ready.then(_notifyNow);
   }
+  // ★★★ 2026-10-07 修陛下反馈「气泡底部差很多内容」：C# 端 150ms 节流会把 streaming 末尾最后一次 notify 挡掉
+  //   （流式接近结束时 notify 还在密集 fire，最后一个 100% 高度的 notify 距离前一个 < 150ms → 被节流丢弃
+  //   → wv2 永远停在 mid-stream 高度 → 底部差内容）
+  //   修法：加 4 个 setTimeout 强制在不同延迟后再报，间隔足够让节流窗口过去
+  setTimeout(_notifyNow, 200);
+  setTimeout(_notifyNow, 500);
+  setTimeout(_notifyNow, 1500);
+  setTimeout(_notifyNow, 3000);
+
+  // ★ 2026-10-07 陛下要求：AI 调过的工具要能看到总计列表
+  //   提供 openAppendToolBlock(name, summary)：在 #tools-stream 末尾插一个块（不是覆盖 innerHTML）
+  //   这样中途调多次工具不会被重置，滚动位置 / ResizeObserver 都保持原状
+  //   内部存 window.__appendedToolBlocks 数组 → 流式输出重写 #bubble-body 后还能重渲染
+  window.__appendedToolBlocks = [];
+  function renderToolCard(name, summary) {
+    var card = document.createElement('div');
+    card.className = 'tool-call-card';
+    card.style.cssText = 'margin:8px 0; padding:8px 12px; background:#f0f7ff; border:1px solid #b6dcfb; border-radius:6px; font-size:13px; line-height:20px; color:#0b3a66;';
+    var head = document.createElement('div');
+    head.style.cssText = 'font-weight:600; color:#0969da; margin-bottom:4px;';
+    head.textContent = '🔧 ' + name;
+    card.appendChild(head);
+    var body = document.createElement('div');
+    body.style.whiteSpace = 'pre-wrap';
+    body.textContent = summary || '';
+    card.appendChild(body);
+    return card;
+  }
+  function rerenderToolStream() {
+    try {
+      var stream = document.getElementById('tools-stream');
+      if (!stream) return;
+      stream.innerHTML = '';
+      for (var i = 0; i < window.__appendedToolBlocks.length; i++) {
+        var blk = window.__appendedToolBlocks[i];
+        stream.appendChild(renderToolCard(blk.name, blk.summary));
+      }
+    } catch (e) {}
+  }
+  window.openAppendToolBlock = function(name, summary) {
+    try {
+      window.__appendedToolBlocks.push({name: name, summary: summary || ''});
+      rerenderToolStream();
+      notify();  // 高度变化推回 C#
+    } catch (e) {}
+  };
+  // ★ 2026-10-07 陛下反馈：AI 流式完成后又重设 body.innerHTML，把 tools-stream 里的 tool cards 全擦了
+  //   改用 updateBubbleBody(html)：只重设 #bubble-body（内容区域），不动 #tools-stream，然后重渲染 tool 列表
+  window.updateBubbleBody = function(html) {
+    try {
+      var body = document.getElementById('bubble-body');
+      if (body) {
+        body.innerHTML = html;
+      } else {
+        // 老 HTML 结构（没 #bubble-body 包鞄）→ 退回原行为重设 body
+        document.body.innerHTML = html;
+      }
+      rerenderToolStream();
+      notify();
+    } catch (e) {}
+  };
 
   // ★★★ 2026-09-02 转发滚轮事件到 C#：WebView2 默认吞 wheel 进浏览器内部，
   //   WinForms 控件本身收不到事件。所以用 JS 监听 wheel，postMessage 给 C# 滚父容器
@@ -2039,6 +2332,19 @@ img { max-width: 100%; }
         sb.AppendLine("- ★ 危险操作（启动/停止账套、删账套、清理日志、打开资源管理器等）会弹窗让陛下二次确认");
         sb.AppendLine("- ★ 高危操作（删账套）需要陛下输入账套编码确认，无法骗过");
         sb.AppendLine();
+        // ★ 2026-10-06 陛下反馈：AI 调完工具/Skill 后经常戛然而止，问题没真处理完
+        sb.AppendLine("## ⚠️ 完成验证规则（重要，2026-10-06 陛下要求）");
+        sb.AppendLine("在输出最终回复前，必须自检陛下的所有问题点是否都答到了。如果还有未完成项，调更多工具/Skill 继续。");
+        sb.AppendLine("  1. **不自欺**：不要调一个工具（哪怕返回数据）就直接报『搞定了』。陛下问的是『完成 X』，不是『看了一眼 X 的数据』");
+        sb.AppendLine("  2. **多个问题点逐个核**：陛下说『帮我看看 A，顺便对比 B，再确认 C』，必须 3 件事都做完才算结束");
+        sb.AppendLine("  3. **Skill 步骤不偷工**：调用 load_skill 后，正文里写明的步骤必须全部执行（不能只读不写、不能跳过 dry_run、不能跳过陛下确认环节）");
+        sb.AppendLine("  4. **数据查询要给真结论**：execute_sql 拿到数据后不能只回『我查到了 N 条』，必须把关键字段、对比、异常值说清楚");
+        sb.AppendLine("  5. **不调工具就回答要谨慎**：如果陛下要求查账套、看表、读日志，必须先调工具拿真实数据，再回答；空口推测 = 没处理问题");
+        sb.AppendLine("  6. **卡住时可自查日志**：如果不确定自己做到哪一步了，调 read_ai_log（最近 N 行）看自己的执行历史");
+        sb.AppendLine("  7. **跑不完别装跑完**：如果循环上限（maxLoops=30）用尽仍未完成 Skill/任务，在最终回复里**明说『未完成』**让陛下决定是否继续。**绝对不要假装『已完成』**");
+        sb.AppendLine("  8. **写动作必须真调**：`add_knowledge_entry` / `execute_ddl` / `create_knowledge_base` / `update_knowledge_entry` / `move_knowledge_entry` / `add_account` / `delete_account` 这些工具调用后会真正产生持久化副作用（写入 KB / 改 DB / 改账套）。**绝对不要**在回复里\"描述你会怎么调\"代替真调——只要还没调用这些工具，Skill 工作流就没完成。");
+
+        sb.AppendLine();
         sb.AppendLine("## 可用工具概览");
         sb.AppendLine("- list_accounts: 列账套（只读）");
         sb.AppendLine("- get_account_detail: 查账套详情（只读）");
@@ -2073,6 +2379,37 @@ img { max-width: 100%; }
         // ★ 2026-09-18 陛下需求：跨库移动条目
         sb.AppendLine("- move_knowledge_entry: 跨库移动条目（免确认；语义=源库删+目标库新增，Id/CreatedAt/UpdatedAt 重置）");
         sb.AppendLine();
+        // ★ 2026-10-06 陛下要求：会话开头自动注入 Skill 列表（让 AI 一开始就知道有哪些 Skill 可用，不必靠触发词猜）
+        sb.AppendLine("## ⚡ 当前可用 Skill（系统自动注入，每次会话必读）");
+        sb.AppendLine();
+        try
+        {
+            var _injectedSkills = SkillRegistry.Instance.List();
+            if (_injectedSkills.Count == 0)
+            {
+                sb.AppendLine("（暂无 Skill 可用）");
+            }
+            else
+            {
+                sb.AppendLine("| Skill Name | 分类 | 标题 | 触发场景（description 摘要） |");
+                sb.AppendLine("|-----------|------|------|------------------------------|");
+                foreach (var _sk in _injectedSkills)
+                {
+                    string _desc = _sk.Description ?? "";
+                    // 截断 + 去掉换行 + 转义表格分隔符
+                    _desc = _desc.Replace("\r", " ").Replace("\n", " ").Replace("|", "/").Trim();
+                    if (_desc.Length > 100) _desc = _desc.Substring(0, 100) + "...";
+                    sb.AppendLine($"| `{_sk.Name}` | {_sk.Category} | {_sk.Title} | {_desc} |");
+                }
+                sb.AppendLine();
+                sb.AppendLine("**⚠️ 陛下消息命中上述任一 Skill 时，必须按下面「Skill 触发规则」走 list_skills → load_skill 流程，不允许直接调工具。**");
+            }
+        }
+        catch (Exception _skEx)
+        {
+            sb.AppendLine($"（Skill 列表自动注入失败：{_skEx.Message}）");
+        }
+        sb.AppendLine();
         sb.AppendLine("## 业务查询工作流（重要）");
         sb.AppendLine("1. 拿到陛下的查询问题，先用 list_tables 探索账套下有哪些表（如果不确定）");
         sb.AppendLine("2. 用 get_table_schema 看相关表的列名 / 类型（如果不确定列名）");
@@ -2092,22 +2429,38 @@ img { max-width: 100%; }
         sb.AppendLine("6. 每完成一个 Phase 向陛下汇报进度，最后汇总变更让陛下复核");
         sb.AppendLine("7. ★ 重要：Skill 是陛下的私人工作流，只在陛下明确要求或场景明显匹配时才调用，别主动引申无关 Skill");
         sb.AppendLine();
-        // ★ 2026-09-30 陛下要求：Skill 优先级规则（通用，与 Skill 数量无关）
-        sb.AppendLine("## ⚠️ Skill 优先级规则（重要，2026-09-30 陛下要求）");
-        sb.AppendLine("Skill 是陛下编写的多步骤工作流（存在 DATA/skills/*.md, 由 SkillRegistry.Instance.List() 读取）。");
-        sb.AppendLine("**当陛下本次请求可能命中任何 Skill 时, 必须先调 list_skills**：");
-        sb.AppendLine("1. 拿到所有 Skill 的 description（含触发关键词 + 匹配场景 + 参数）");
-        sb.AppendLine("2. 仔细对比陛下本次请求, 挑出最匹配的 Skill（不要只看第一个）");
-        sb.AppendLine("3. 调 load_skill(name) 读取 Markdown 正文, 严格按步骤顺序执行");
-        sb.AppendLine("4. **不命中任何 Skill** 时, 才退回到下面的工具调用流程");
+        // ★ 2026-10-06 陛下要求：Skill 触发规则（强约束 — 从软规则升级为硬规则）
+        sb.AppendLine("## 🚨 Skill 触发规则（强约束，2026-10-06 陛下要求，违反=任务失败）");
         sb.AppendLine();
-        sb.AppendLine("Skill vs 工具直调 判断准则：");
-        sb.AppendLine("- 涉及「多步骤」「流程」「按规则做」 → 几乎一定有 Skill, 先 list_skills");
-        sb.AppendLine("- 单一 SELECT 查询 / 列出账套 / 查表结构 → 不需要 Skill, 直接 execute_sql");
-        sb.AppendLine("- 单纯问答、不涉及写操作 → 不需要 Skill");
+        sb.AppendLine("**只要陛下消息里出现以下任意强触发关键词, 必须严格按下面顺序执行（不允许跳过任何步骤）**：");
         sb.AppendLine();
-        sb.AppendLine("陛下可能表达 Skill 意图的措辞：「按流程」「按上次那样做」「按 Skill」「按工作流」");
-        sb.AppendLine("「加到知识库」「提取表结构」「升级账套」「数据迁移」等动作词也要警惕是否对应 Skill");
+        sb.AppendLine("**强触发关键词**（任一命中即触发 list_skills → load_skill 流程）：");
+        sb.AppendLine("- 「加到知识库」/「加入 KB」/「同步到 KB」/「提取表结构到知识库」/「把表加到 KB」");
+        sb.AppendLine("- 「升级账套」/「数据迁移」/「同步数据」/「对账」");
+        sb.AppendLine("- 「表单 XXX 的表加到 KB」/「XXX 表单用到的表加到 KB」");
+        sb.AppendLine("- 「按流程」/「按 Skill」/「按工作流」/「按上次那样做」/「按既定流程」");
+        sb.AppendLine("- 「菜单在哪」/「菜单位置」/「表单在哪」/「表单归属」/「表单路径」");
+        sb.AppendLine("- 「查XX菜单」/「查XX表单」/「XX菜单在哪」/「XX菜单对应哪个表单」/「XX表单在哪里」");
+        sb.AppendLine("- 「检查表单」/「表单问题」/「诊断表单」/「检查XX表单」/「XX页面有问题」/「表单有 bug」/「XX表单报错」");
+        sb.AppendLine("- 「创建表单」/「新增表单」/「新建一个XX表单」/「帮我做一个XX界面」/「做一个XX录入」/「做一个XX列表」/「画一个XX表单」");
+        sb.AppendLine();
+        sb.AppendLine("**强制流程**（5 步，缺一不可）：");
+        sb.AppendLine("1. **第一步**：调 `list_skills` 拿到所有 Skill 列表（看 description 匹配）");
+        sb.AppendLine("2. **第二步**：拿陛下请求对比每个 Skill 的 description，挑最匹配的（不要只看第一个）");
+        sb.AppendLine("3. **第三步**：调 `load_skill(name)` 读取完整 Markdown 正文 + 参数说明");
+        sb.AppendLine("4. **第四步**：严格按 Skill 正文步骤顺序执行（不允许自作主张换工具 / 跳步骤 / 跳过 dry_run / 跳过陛下确认）");
+        sb.AppendLine("5. **第五步**：每完成一个 Phase 向陛下汇报进度，最后汇总变更让陛下复核");
+        sb.AppendLine();
+        sb.AppendLine("**反模式（违规会被陛下打断重来）**：");
+        sb.AppendLine("- ❌ 直接调 `add_knowledge_entry` / `execute_ddl` / `execute_sql` 等工具，不先 list_skills");
+        sb.AppendLine("- ❌ 看一眼 Skill 列表但跳过 load_skill，自己脑补步骤");
+        sb.AppendLine("- ❌ 命中 Skill 但跳步骤（不调 dry_run / 不让陛下确认 / 不调 write-tools）");
+        sb.AppendLine("- ❌ 假装『没找到匹配的 Skill』，实际上根本没用 list_skills 检查");
+        sb.AppendLine();
+        sb.AppendLine("**不命中 Skill 时的合法场景**（这些可以直接调工具，不需要 list_skills）：");
+        sb.AppendLine("- 单一 SELECT 查询 / 列出账套 / 查表结构 → 直接 execute_sql");
+        sb.AppendLine("- 单纯问答、不涉及写操作 → 直接回答");
+        sb.AppendLine("- 启动/停止账套 / 列日志 / 检更新 → 直接调对应工具");
         sb.AppendLine();
         // ★ 2026-09-08 知识库互动工作流（陛下要求：AI 能直接新增知识库内容）
         sb.AppendLine("## 知识库互动工作流（重要）");
@@ -2184,15 +2537,15 @@ img { max-width: 100%; }
                 System.Diagnostics.Debug.WriteLine($"[KB] BM25 检索到 {hits.Count} 条命中");
 
                 // ★ Fallback: BM25 未命中时,取最近更新的 3 条全部注入
-                if (hits.Count == 0)
-                {
-                    var recent = kbMgr.GetRecentEntries(3);
-                    if (recent.Count > 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[KB] BM25 0 命中,Fallback 注入最近 {recent.Count} 条");
-                        hits = recent;
-                    }
-                }
+                //if (hits.Count == 0)
+                //{
+                //    var recent = kbMgr.GetRecentEntries(3);
+                //    if (recent.Count > 0)
+                //    {
+                //        System.Diagnostics.Debug.WriteLine($"[KB] BM25 0 命中,Fallback 注入最近 {recent.Count} 条");
+                //        hits = recent;
+                //    }
+                //}
 
                 if (hits.Count > 0)
                 {
@@ -2210,7 +2563,7 @@ img { max-width: 100%; }
                             sb.AppendLine($"原始文件：{hit.Entry.SourceFile}");
                         // 限制单条内容长度（防 prompt 爆掉）
                         var content = hit.Entry.Content ?? "";
-                        if (content.Length > 1500) content = content.Substring(0, 1500) + "\n... (内容过长已截断)";
+                        if (content.Length > 15000) content = content.Substring(0, 15000) + "\n... (内容过长已截断)";
                         sb.AppendLine();
                         sb.AppendLine(content);
                         sb.AppendLine();
