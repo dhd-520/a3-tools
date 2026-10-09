@@ -3664,7 +3664,8 @@ public partial class MainForm : Form, IToolContext
         {
             if (_aiChatForm == null || _aiChatForm.IsDisposed)
             {
-                _aiChatForm = new AiChatForm
+                // ★ 2026-10-09 传 this 让 AI 助理能调 GetAllAccounts() 拉账套列表
+                _aiChatForm = new AiChatForm(this)
                 {
                     Owner = this
                 };

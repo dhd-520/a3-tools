@@ -55,6 +55,8 @@ partial class AiChatForm
         pnlHeader.Controls.Add(btnNewSession);
         pnlHeader.Controls.Add(btnSettings);
         pnlHeader.Controls.Add(cmbProvider);
+        pnlHeader.Controls.Add(cmbAccount);
+        pnlHeader.Controls.Add(lblAccount);
         pnlHeader.Controls.Add(lblTitle);
         pnlHeader.Dock = DockStyle.Top;
         pnlHeader.Location = new Point(0, 0);
@@ -115,9 +117,41 @@ partial class AiChatForm
         lblTitle.Size = new Size(121, 40);
         lblTitle.TabIndex = 0;
         lblTitle.Text = "AI 助理";
-        // 
+        //
+        // lblAccount
+        //  ★ 2026-10-09 陛下要求：选模型左侧增加账套选择，选中后该会话默认在该账套上处理
+        //
+        lblAccount.AutoSize = true;
+        lblAccount.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        lblAccount.ForeColor = Color.White;
+        lblAccount.Location = new Point(180, 22);
+        lblAccount.Margin = new Padding(6, 0, 6, 0);
+        lblAccount.Name = "lblAccount";
+        lblAccount.Size = new Size(70, 38);
+        lblAccount.TabIndex = 0;
+        lblAccount.Text = "账套：";
+        lblAccount.TextAlign = ContentAlignment.MiddleLeft;
+        //
+        // cmbAccount
+        //  ★ 2026-10-09 陛下要求：选模型左侧增加账套选择
+        //   Items:
+        //     [0] (未选 - AI 需询问陛下) code=""
+        //     [1..n] "{Code} - {Name}"  (按 Name 排序)
+        //   SelectedIndexChanged 同步 _currentAccountCode + AppSettings.LastSelectedAccount
+        //   BuildSystemPrompt 注入「当前账套 = XXX」AI 默认用
+        //   陛下消息里明确「在账套 999 上…」可覆盖
+        //
+        cmbAccount.BackColor = Color.White;
+        cmbAccount.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbAccount.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+        cmbAccount.Location = new Point(260, 22);
+        cmbAccount.Margin = new Padding(6);
+        cmbAccount.Name = "cmbAccount";
+        cmbAccount.Size = new Size(400, 38);
+        cmbAccount.TabIndex = 1;
+        //
         // pnlSidebar
-        // 
+        //
         pnlSidebar.BackColor = Color.FromArgb(250, 250, 252);
         pnlSidebar.Controls.Add(lblStatus);
         pnlSidebar.Controls.Add(btnClearAll);
@@ -390,6 +424,9 @@ partial class AiChatForm
     private ComboBox cmbProvider;
     private Button btnSettings;
     private Button btnNewSession;
+    // ★ 2026-10-09 账套选择 ComboBox + Label（陛下要求选模型左侧增加）
+    private Label lblAccount;
+    private ComboBox cmbAccount;
     private Panel pnlSidebar;
     private Label lblSidebarTitle;
     private ListBox lstSessions;

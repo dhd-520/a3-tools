@@ -121,6 +121,14 @@ public partial class AiChatForm : Form
     private CancellationTokenSource? _cts;
     private bool _isSending = false;
 
+    // ★ 2026-10-09 陛下需求：选模型左侧增加账套选择
+    //   _mainForm 从构造传入，调 GetAllAccounts() 拉账套列表 + GetSelectedAccountCode() 拉当前选中
+    //   _currentAccountCode / _currentAccountName 记录当前选中账套，BuildSystemPrompt 注入
+    //   "" 表示未选 → AI 需询问陛下
+    private MainForm? _mainForm;
+    private string _currentAccountCode = string.Empty;
+    private string _currentAccountName = string.Empty;
+
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOMOVE = 0x0002;
 
@@ -134,9 +142,13 @@ public partial class AiChatForm : Form
     private const int MaxWindowSize = 25;
     private List<ChatToolCallRecord>? _pendingToolCallLog;
 
-    public AiChatForm()
+    public AiChatForm(MainForm? mainForm = null)
     {
         InitializeComponent();
+        // ★ 2026-10-09 账套选择 ComboBox 事件 + 账套列表加载
+        _mainForm = mainForm;
+        cmbAccount.SelectedIndexChanged += CmbAccount_SelectedIndexChanged;
+        LoadAccounts();
         // 绑定事件
         cmbProvider.SelectedIndexChanged += (_, _) => SwitchProvider();
         btnSettings.Click += BtnSettings_Click;
@@ -252,6 +264,106 @@ public partial class AiChatForm : Form
             }
         }
         UpdateProviderLabel();
+    }
+
+    // ★ 2026-10-09 陛下需求：选模型左侧增加账套选择
+    //   拉账套列表填 cmbAccount，默认选 AppSettings.LastSelectedAccount
+    //   fallback：_mainForm 为 null 时直接读 DataService
+    private void LoadAccounts()
+    {
+        try
+        {
+            List<Account> accounts;
+            if (_mainForm != null)
+            {
+                accounts = _mainForm.GetAllAccounts();
+            }
+            else
+            {
+                var ds = new DataService();
+                accounts = ds.LoadAccounts();
+            }
+
+            // 暂存当前选择避免刷新丢失
+            string prevCode = _currentAccountCode;
+
+            cmbAccount.Items.Clear();
+            cmbAccount.Items.Add(new AccountComboItem("（未选 - AI 需询问陛下）", "", ""));
+
+            // 按 Code 排序
+            foreach (var acc in accounts.OrderBy(a => a.Code, StringComparer.OrdinalIgnoreCase))
+            {
+                cmbAccount.Items.Add(new AccountComboItem($"{acc.Name} ({acc.Code})", acc.Code, acc.Name ?? ""));
+            }
+
+            // 优先用 AppSettings.LastSelectedAccount 恢复
+            string targetCode = prevCode;
+            try
+            {
+                var ds = new DataService();
+                var settings = ds.LoadSettings();
+                if (!string.IsNullOrEmpty(settings.LastSelectedAccount))
+                    targetCode = settings.LastSelectedAccount;
+            }
+            catch { /* 读不到就用 prevCode */ }
+
+            int idx = 0; // 默认未选
+            for (int i = 0; i < cmbAccount.Items.Count; i++)
+            {
+                if (cmbAccount.Items[i] is AccountComboItem item && item.Code == targetCode)
+                {
+                    idx = i;
+                    break;
+                }
+            }
+            cmbAccount.SelectedIndex = idx;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AI Chat] 加载账套列表失败: {ex.Message}");
+            cmbAccount.Items.Clear();
+            cmbAccount.Items.Add(new AccountComboItem("（加载账套失败）", "", ""));
+            cmbAccount.SelectedIndex = 0;
+            cmbAccount.Enabled = false;
+        }
+    }
+
+    private void CmbAccount_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        if (cmbAccount.SelectedItem is not AccountComboItem item) return;
+
+        _currentAccountCode = item.Code;
+        _currentAccountName = item.Name;
+
+        // 持久化到 AppSettings.LastSelectedAccount
+        try
+        {
+            var ds = new DataService();
+            var settings = ds.LoadSettings();
+            settings.LastSelectedAccount = item.Code;
+            ds.SaveSettings(settings);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AI Chat] 保存账套选择失败: {ex.Message}");
+        }
+
+        DebugLog($"账套切换: code='{item.Code}', name='{item.Name}'");
+    }
+
+    // ★ 2026-10-09 内部类：cmbAccount 项
+    private class AccountComboItem
+    {
+        public string Display { get; }
+        public string Code { get; }
+        public string Name { get; }
+        public AccountComboItem(string display, string code, string name = "")
+        {
+            Display = display;
+            Code = code;
+            Name = name;
+        }
+        public override string ToString() => Display;
     }
 
     private void InitStore()
@@ -2609,6 +2721,25 @@ img { max-width: 100%; }
         sb.AppendLine("- ★ 你可以调用工具主动帮陛下操作（启动账套、查日志、检更新、清理日志等）");
         sb.AppendLine("- ★ 危险操作（启动/停止账套、删账套、清理日志、打开资源管理器等）会弹窗让陛下二次确认");
         sb.AppendLine("- ★ 高危操作（删账套）需要陛下输入账套编码确认，无法骗过");
+        sb.AppendLine();
+        // ★ 2026-10-09 陛下需求：选模型左侧增加账套选择
+        //   当前选中账套注入到系统提示顶部（行为准则后、完成验证规则前）
+        //   AI 默认走这个账套，除非陛下消息里明确指定其他账套
+        sb.AppendLine("## 当前会话账套（陛下在 UI 顶部下拉框选择）");
+        if (string.IsNullOrEmpty(_currentAccountCode))
+        {
+            sb.AppendLine("（未选账套）");
+            sb.AppendLine("- 陛下未在顶部「账套」下拉框选择账套");
+            sb.AppendLine("- 涉及账套的工具（list_tables / execute_sql / execute_ddl / get_table_schema / compare_table_schemas / get_view_definition / start_account / stop_account）必须先问陛下使用哪个账套");
+            sb.AppendLine("- 调 list_accounts 拿到列表 → 问陛下 → 陛下确认后再继续");
+        }
+        else
+        {
+            sb.AppendLine($"**当前账套**: `{_currentAccountCode}` ({_currentAccountName})");
+            sb.AppendLine("- 涉及账套的工具调用默认使用上面这个账套（code 参数自动填这个）");
+            sb.AppendLine("- 除非陛下消息里明确指定其他账套（如「在账套 999 上查」），否则一律走当前账套");
+            sb.AppendLine("- 陛下切换 UI 顶部下拉框后，下一条消息立即按新账套处理（不修改历史消息）");
+        }
         sb.AppendLine();
         // ★ 2026-10-06 陛下反馈：AI 调完工具/Skill 后经常戛然而止，问题没真处理完
         sb.AppendLine("## ⚠️ 完成验证规则（重要，2026-10-06 陛下要求）");
