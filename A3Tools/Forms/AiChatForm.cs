@@ -1665,7 +1665,8 @@ _ = wv2.EnsureCoreWebView2Async();
         //   60ms 约 16fps, 加上 WebView2 跨进程 ExecuteScriptAsync + Label 整行 LayoutBubbleRow
         //   频繁重排, 肉眼明显闪烁. 改为 200ms (5fps) + 最少 3 字符间隔
         //   仍能看出逐字/逐行渲染, 但不会闪.
-        const int renderThrottleMs = 200;
+        //   ★ 2026-10-09 陛下反馈 200ms 仍高：AI 流式过程中气泡跟手太快，眼累。改为 500ms
+        const int renderThrottleMs = 500;
         const int minCharsBetweenRenders = 3;
         int charsSinceLastRender = 0;
         foreach (char c in fullText)
@@ -1811,7 +1812,7 @@ _ = wv2.EnsureCoreWebView2Async();
     }
 
     /// <summary>
-    /// ★ 2026-09-01 陛下要求：DeepSeek/Qwen 等推理模型输出的 <think>...</think> 标签
+    /// ★ 2026-09-01 陛下要求：DeepSeek/Qwen 等推理模型输出的 &lt;think&gt;...&lt;/think&gt; 标签
     ///   是 AI 思考过程(Chain of Thought),对陛下无价值 → 直接删除整个块
     ///   多行、非贪婪匹配,处理嵌套和连续多个 think 块
     /// </summary>
@@ -2044,7 +2045,9 @@ _ = wv2.EnsureCoreWebView2Async();
         var pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
             .Build();
-        string bodyHtml = Markdown.ToHtml(markdown ?? string.Empty, pipeline);
+        // ★ 2026-10-09 陛下要求：AI 思考内容（&lt;think&gt;...&lt;/think&gt;）默认折叠、点击展开
+        //   拆 markdown 为 [text, thinking, text, ...] 段，text 段走 Markdig，thinking 段渲染为 <details>
+        string bodyHtml = RenderBodyWithThinkingBlocks(markdown ?? string.Empty, pipeline);
         // ★★★ 2026-09-02 陛下反馈表格差劲：手工包装 table → div.bubble-table-wrap 才能 overflow-x:auto 滚
         bodyHtml = WrapTablesForScroll(bodyHtml);
 
@@ -2123,6 +2126,44 @@ table code { background: rgba(175,184,193,0.2); padding: 2px 9px; border-radius:
 table a { color: #0969da; text-decoration: none; border-bottom: 1px solid transparent; }
 table a:hover { border-bottom-color: #0969da; }
 img { max-width: 100%; }
+/* ★ 2026-10-09 思考过程折叠块：默认 collapsed，点击 summary 展开 */
+.thinking-block {
+  margin: 0 0 14px 0;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: #f6f8fa;
+  font-size: 20px;
+  line-height: 30px;
+  overflow: hidden;
+}
+.thinking-block > summary {
+  padding: 8px 14px;
+  cursor: pointer;
+  color: #57606a;
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+  border-bottom: 1px solid transparent;
+}
+.thinking-block > summary::-webkit-details-marker { display: none; }
+.thinking-block > summary::before {
+  content: ""▶"";
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 14px;
+  transition: transform 0.15s;
+}
+.thinking-block[open] > summary::before { transform: rotate(90deg); }
+.thinking-block > summary:hover { background: #eaeef2; }
+.thinking-block[open] > summary { border-bottom-color: #d0d7de; }
+.thinking-content {
+  padding: 10px 14px;
+  color: #57606a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
 </style></head><body><div id=""bubble-body"">" + bodyHtml + @"</div><div id=""tools-stream"">" + toolCardsHtml + @"</div><script>
 (function() {
   // ★ 2026-08-31 方案 X：用 getBoundingClientRect().bottom - top 推真实高度
@@ -2334,6 +2375,63 @@ img { max-width: 100%; }
 })();
 </script></body></html>";
         return html;
+    }
+
+    /// <summary>
+    /// ★ 2026-10-09 陛下要求：AI 思考内容（&lt;think&gt;...&lt;/think&gt;）默认折叠、点击展开
+    /// <para>把 markdown 拆成 [text, thinking, text, ...] 段：text 段走 Markdig 解析，
+    /// thinking 段渲染为 &lt;details class="thinking-block"&gt; 折叠块（默认 collapsed）</para>
+    /// <para>替换后效果：对话中 / 完成后 / 关掉重开 三种状态看到的思考内容长度一致（都折叠），
+    /// 只有用户主动点 summary 才展开看到思考过程</para>
+    /// </summary>
+    private string RenderBodyWithThinkingBlocks(string markdown, MarkdownPipeline pipeline)
+    {
+        if (string.IsNullOrEmpty(markdown)) return string.Empty;
+
+        // ★ 用全限定名 System.Text.RegularExpressions.Regex（using 段没引，保持 diff 小）
+        var thinkingRegex = new System.Text.RegularExpressions.Regex(
+            @"<think>([\s\S]*?)</think>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var matches = thinkingRegex.Matches(markdown);
+
+        // 没有思考块 → 走原 Markdig 路径
+        if (matches.Count == 0)
+            return Markdown.ToHtml(markdown, pipeline);
+
+        var sb = new StringBuilder();
+        int lastEnd = 0;
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            // 思考块之前的正常 markdown → Markdig 解析
+            string textPart = markdown.Substring(lastEnd, m.Index - lastEnd);
+            if (!string.IsNullOrWhiteSpace(textPart))
+                sb.Append(Markdown.ToHtml(textPart, pipeline));
+
+            // 思考块本身 → 渲染为折叠 details（默认 collapsed）
+            string thinkContent = m.Groups[1].Value.Trim();
+            sb.Append(RenderThinkingBlock(thinkContent));
+
+            lastEnd = m.Index + m.Length;
+        }
+        // 最后一个思考块之后的尾段
+        string trailingText = markdown.Substring(lastEnd);
+        if (!string.IsNullOrWhiteSpace(trailingText))
+            sb.Append(Markdown.ToHtml(trailingText, pipeline));
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 把单个思考内容渲染为 &lt;details class="thinking-block"&gt; 折叠 HTML
+    /// <para>内容走 HTML encode + 保留换行（不解析 markdown，保持纯文本可读，避免递归嵌思考）</para>
+    /// </summary>
+    private string RenderThinkingBlock(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return string.Empty;
+        // ★ WebUtility.HtmlEncode 转义（避免思考里带 <>& 被当 HTML 解析）
+        string encoded = System.Net.WebUtility.HtmlEncode(content)
+            .Replace("\r\n", "\n").Replace("\n", "<br>");
+        return $"<details class=\"thinking-block\"><summary>💭 思考过程（点击展开）</summary><div class=\"thinking-content\">{encoded}</div></details>";
     }
 
     /// <summary>
