@@ -9,6 +9,8 @@ using System.Text.RegularExpressions;
 using A3Tools.Models;
 using A3Tools.Services.AiActions;
 
+using A3Tools.Services.AiActions.AiAssistantLogging;
+
 namespace A3Tools.Services;
 
 /// <summary>
@@ -139,6 +141,12 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         var url = provider.ApiUrl.TrimEnd('/') + "/chat/completions";
         var toolsSchema = _actions.ToOpenAiToolsSchema();
 
+        // ★ 2026-10-06 AI 助理日志：会话开始（用最近一条用户消息前 30 字作 sessionId，便于陛下在日志里搜）
+        string lastUserPreview = messages.LastOrDefault(m => m.Role == ChatRole.User)?.Content ?? "";
+        if (lastUserPreview.Length > 30) lastUserPreview = lastUserPreview.Substring(0, 30) + "...";
+        string sessionId = $"{DateTime.Now:HHmmss}-{lastUserPreview.Replace(" ", "_")}";
+        AiAssistantLogger.BeginSession(sessionId);
+
         // 复制消息列表（Function Calling 循环会追加 tool 消息）
         // 用 List<object> 避免 anonymous type shape 不一致
         var msgs = new List<object>();
@@ -147,12 +155,24 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             msgs.Add(new { role = RoleToString(m.Role), content = m.Content });
         }
 
-        const int maxLoops = 5; // 防止 AI 无限循环
+        const int maxLoops = 30; // 防止 AI 无限循环（2026-10-06 5→15→30：多步骤 Skill + 续命器注入需要更多轮次）
         var sb = new StringBuilder();
+        int totalToolCallsInSession = 0;  // 本会话累计工具调用次数（早退检测用）
 
+        // ★ 2026-10-06 Skill 工作流强制续命器追踪
+        bool skillMode = false;             // load_skill 是否调过
+        var calledWriteTools = new HashSet<string>();  // 调过的 write-tools
+        bool brokeEarly = false;             // 是否 break（修双重日志 bug）
+        // ★ 2026-10-06 增：当前加载的 Skill 是否需要写工具（read-only Skill 跳过续命检查，避免死循环到 maxLoops）
+        bool currentSkillWriteRequired = true;  // 默认 true（安全起见，未明确标记的 Skill 仍走严格检查）
+
+        try
+        {
         for (int loop = 0; loop < maxLoops; loop++)
         {
             ct.ThrowIfCancellationRequested();
+
+            AiAssistantLogger.LogLoopStart(loop, maxLoops, msgs.Count);
 
             var requestBody = new
             {
@@ -200,6 +220,9 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             if (!string.IsNullOrEmpty(message.Content))
                 sb.Append(message.Content);
 
+            // ★ 2026-10-06 日志：记录 AI 响应
+            AiAssistantLogger.LogAiResponse(loop, message.Content ?? string.Empty, message.ToolCalls?.Count ?? 0);
+
             // ★ 2026-09-20 修复：某些 AI 模型不支持标准 function calling，
             //   会以纯文本形式输出工具调用（如 <function_calls>...</function_calls>）
             //   需要解析文本格式的工具调用并执行
@@ -228,6 +251,43 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                 }
                 else
                 {
+                    // ★ 2026-10-06 早退检测：最后一轮没工具调用 + 内容异常短 → 打警告
+                    string earlyContent = sb.ToString();
+                    var (isPremature, warnReason) = AiAssistantLogger.DetectPrematureEnd(
+                        loop, earlyContent, totalToolCallsInSession);
+                    // ★ 2026-10-06 Skill 工作流强制续命器：
+                    //   条件：在 Skill 模式 + write-tools 未调 + 还有循环余量
+                    //   动作：注入续命消息，continue 而不是 break
+                    var missingWriteTools = SkillWorkflowEnforcer.GetMissingWriteTools(skillMode, calledWriteTools, currentSkillWriteRequired);
+                    if (missingWriteTools.Count > 0 && loop + 1 < maxLoops)
+                    {
+                        string prompt = SkillWorkflowEnforcer.BuildContinuationPrompt(missingWriteTools);
+                        msgs.Add(new { role = "user", content = prompt });
+                        AiAssistantLogger.LogLoopEnd(loop, "skill_continuation_injected", sb.ToString(), true,
+                            $"Skill 工作流未完成，还需调用 write-tools。已注入续命 prompt，强制下一轮。");
+                        continue;
+                    }
+
+                    // ★ 2026-10-09 修「AI 嘴上说调了但 tool_calls 实际空」双重幻觉
+                    //   现象：AI 文本说"我调了 14 次 add_knowledge_entry 全部失败"，
+                    //         但 message.ToolCalls 实际空 + totalToolCallsInSession == 0
+                    //   根因：模型在 final 轮既不发 tool_calls 又假装"我已调完"
+                    //   修法：检测文本含工具名/entryId + 已调类措辞 → 强制重发
+                    string? claimed = DetectClaimedButNotCalled(message.Content ?? string.Empty, totalToolCallsInSession);
+                    if (claimed != null && loop + 1 < maxLoops)
+                    {
+                        string prompt = $"⚠️ 系统检测：你刚才的回复里描述了「{claimed}」，但本次循环你实际没有发出任何 tool_calls。\n" +
+                                        "请重新审视：如果你真的需要执行该操作，请在 tool_calls 里真正调用；如果不需要，请直接告诉陛下「我不会调用 X，因为 Y」。\n" +
+                                        "禁止用文字描述「我调用了 X」但实际不发的行为——这是幻觉。";
+                        msgs.Add(new { role = "user", content = prompt });
+                        AiAssistantLogger.LogLoopEnd(loop, "claimed_call_but_empty_toolcalls", sb.ToString(), true,
+                            $"AI 文本描述了工具调用（{claimed}）但 tool_calls 为空，已注入强制重发 prompt");
+                        continue;
+                    }
+
+                    AiAssistantLogger.LogLoopEnd(loop, "no_tool_calls_response", earlyContent, isPremature,
+                        isPremature ? warnReason : null);
+                    brokeEarly = true;  // 修双重日志 bug：必须在 break 之前（之前写在 break 后是死代码）
                     break; // 真正没有工具调用，结束循环
                 }
             }
@@ -288,6 +348,29 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                     Result = result
                 });
 
+                // ★ 2026-10-06 日志：记录工具调用结果
+                AiAssistantLogger.LogToolCall(loop, toolName, argsJson, result);
+                totalToolCallsInSession++;
+
+                // ★ 2026-10-06 Skill 工作流追踪：load_skill 进入 Skill 模式 + 记录 write-tools
+                if (toolName == "load_skill")
+                {
+                    skillMode = true;
+                    // ★ 2026-10-06 增：读取该 Skill 的 write_required 标记，read-only Skill 不强制调写工具
+                    try
+                    {
+                        string? skillName = null;
+                        if (argsDict.TryGetValue("name", out var n) && n != null) skillName = n.ToString();
+                        if (!string.IsNullOrWhiteSpace(skillName))
+                        {
+                            var sk = SkillRegistry.Instance.Get(skillName);
+                            if (sk != null) currentSkillWriteRequired = sk.WriteRequired;
+                        }
+                    }
+                    catch { /* 解析失败保持默认 true */ }
+                }
+                if (SkillWorkflowEnforcer.IsWriteTool(toolName)) calledWriteTools.Add(toolName);
+
                 if (onToolExecuted != null)
                     await onToolExecuted(result);
 
@@ -300,11 +383,26 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             }
         }
 
+        // ★ 2026-10-06 正常退出循环（跑到这里说明循环跑完了，没自然结束）
+        // ★ 2026-10-06 修误导性日志：max_loops_natural_exit 听起来像正常完成，实际是被循环上限强制打断
+        // 注：skill 步骤进度日志在 AiAssistantLogger.MarkSkillStepCompleted 单独追
+        if (!brokeEarly)
+            {
+                AiAssistantLogger.LogLoopEnd(maxLoops, "max_loops_ceiling_reached", sb.ToString(), true,
+                    $"达到 maxLoops={maxLoops} 上限，AI 工具调用已耗尽额度（可能还在 Skill 流程中途）。如未完成，请陛下手动或下条消息继续追问。");
+            }
+
         return new AiChatTurnResult
         {
             FinalContent = sb.ToString(),
             TokensUsed = 0 // 多轮不好统计，简化
         };
+        }
+        finally
+        {
+            // ★ 2026-10-06 会话结束日志（不管正常返回还是抛异常）
+            AiAssistantLogger.EndSession("completed");
+        }
     }
 
     private static string? ParseStreamChunk(string payload)
@@ -418,6 +516,55 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
         return result.Trim();
+    }
+
+    /// <summary>
+    /// ★ 2026-10-09 修「AI 嘴上说调了但 tool_calls 实际空」双重幻觉
+    /// <para>陛下反馈：AI 文本说"我调了 14 次 add_knowledge_entry 全部失败"，
+    /// 但本次循环 totalToolCallsInSession == 0、AI 实际一个 tool_call 都没发。
+    /// 表现：AI 既骗陛下（说调了）又骗自己（说失败/返回成功）。</para>
+    /// <para>检测策略（任一命中即返回非空）：</para>
+    /// <list type="number">
+    ///   <item>含 32 位 hex（entryId 格式）</item>
+    ///   <item>含 KB Action 名 + 已调/调用了/调用成功/调用失败/添加成功/添加失败 等"过去式/结果"措辞</item>
+    /// </list>
+    /// <para>前置：仅当本会话累计真实 tool_calls == 0 时才检查（已真调过的不算幻觉）</para>
+    /// </summary>
+    /// <returns>命中则返回"幻觉描述"（会写日志 + 注入重发 prompt）；未命中返回 null</returns>
+    private static string? DetectClaimedButNotCalled(string content, int totalToolCallsInSession)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return null;
+        // 关键：已真调过 → AI 后续描述可视为对前序调用的汇报，不是幻觉
+        if (totalToolCallsInSession > 0) return null;
+
+        // 强信号 1：含 32 位 hex（entryId / baseId 格式），一定在描述具体某次调用结果
+        if (Regex.IsMatch(content, @"[a-f0-9]{32}"))
+            return "文本含 32 位 entryId/baseId 但实际未调用任何工具";
+
+        // 强信号 2：含 KB Action 名 + 过去式/结果类措辞
+        var knowledgeTools = new[]
+        {
+            "add_knowledge_entry", "update_knowledge_entry", "delete_knowledge_entry",
+            "list_knowledge_bases", "search_knowledge", "get_knowledge_entry"
+        };
+        var claimPatterns = new[]
+        {
+            "已调", "我调", "调用了", "刚刚调", "刚才调", "成功调",
+            "调用成功", "调用失败", "调失败", "调用未成功", "调用返回", "调用结果",
+            "添加成功", "添加失败", "写入成功", "写入失败",
+            "删除成功", "删除失败", "搜索成功", "搜索失败",
+            "查询成功", "查询失败", "获取成功", "获取失败"
+        };
+        foreach (var tool in knowledgeTools)
+        {
+            if (!content.Contains(tool)) continue;
+            foreach (var p in claimPatterns)
+            {
+                if (content.Contains(p))
+                    return $"文本含「{p} {tool}」但实际未调用任何工具";
+            }
+        }
+        return null;
     }
 
 // ========== OpenAI 响应 DTO ==========
