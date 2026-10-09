@@ -220,6 +220,9 @@ public partial class AiChatForm : Form
         //   之前只在 AiSettingsForm 打开时 / 保存时同步，AiChatForm 启动不会同步
         //   导致：配置 EnableAiLog=false 但 Enabled 仍为 true，日志照写
         AiAssistantLogger.Enabled = _config.EnableAiLog;
+        // ★ 2026-10-09 失败重试配置同步到 backend
+        _backend.MaxRetries = _config.MaxRetryCount;
+        _backend.RetryIntervalSeconds = _config.RetryIntervalSeconds;
         cmbProvider.Items.Clear();
         foreach (var p in _config.Providers.Where(x => x.Enabled))
         {

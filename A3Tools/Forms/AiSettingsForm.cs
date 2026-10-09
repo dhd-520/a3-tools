@@ -3,6 +3,7 @@ using System.Linq;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Services;
+using A3Tools.Services.AiActions.AiAssistantLogging;  // ★ 2026-10-06 AiAssistantLogger
 
 namespace A3Tools.Forms;
 
@@ -75,6 +76,10 @@ public partial class AiSettingsForm : Form
         nudTemperature.Value = (decimal)_config.Temperature;
         txtSystemPromptAppend.Text = _config.SystemPromptAppend;
         chkAutoResume.Checked = _config.AutoResumeLastSession;
+        chkEnableAiLog.Checked = _config.EnableAiLog;
+        nudRetryCount.Value = _config.MaxRetryCount;
+        nudRetryInterval.Value = _config.RetryIntervalSeconds;
+        AiAssistantLogger.Enabled = _config.EnableAiLog;  // 同步到静态开关
     }
 
     private void RefreshProviderList()
@@ -256,8 +261,13 @@ public partial class AiSettingsForm : Form
         _config.Temperature = (double)nudTemperature.Value;
         _config.SystemPromptAppend = txtSystemPromptAppend.Text.Trim();
         _config.AutoResumeLastSession = chkAutoResume.Checked;
+        _config.EnableAiLog = chkEnableAiLog.Checked;
+        _config.MaxRetryCount = (int)nudRetryCount.Value;
+        _config.RetryIntervalSeconds = (int)nudRetryInterval.Value;
 
         _configService.SaveConfig(_config);
+        // ★ 2026-10-06 同步静态开关（保存后立即生效，不需重启）
+        AiAssistantLogger.Enabled = _config.EnableAiLog;
         DialogResult = DialogResult.OK;
         Close();
     }

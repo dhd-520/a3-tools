@@ -49,6 +49,7 @@ partial class AiSettingsForm
         this.grpGlobal = new System.Windows.Forms.GroupBox();
         this.lblHint = new System.Windows.Forms.Label();
         this.chkAutoResume = new System.Windows.Forms.CheckBox();
+        this.chkEnableAiLog = new System.Windows.Forms.CheckBox();
         this.txtSystemPromptAppend = new System.Windows.Forms.TextBox();
         this.lblSysPrompt = new System.Windows.Forms.Label();
         this.nudTemperature = new System.Windows.Forms.NumericUpDown();
@@ -58,6 +59,10 @@ partial class AiSettingsForm
         this.lblRetentionUnit = new System.Windows.Forms.Label();
         this.nudRetentionDays = new System.Windows.Forms.NumericUpDown();
         this.lblRetention = new System.Windows.Forms.Label();
+        this.lblRetryCount = new System.Windows.Forms.Label();
+        this.nudRetryCount = new System.Windows.Forms.NumericUpDown();
+        this.lblRetryInterval = new System.Windows.Forms.Label();
+        this.nudRetryInterval = new System.Windows.Forms.NumericUpDown();
         this.cmbStoreStrategy = new System.Windows.Forms.ComboBox();
         this.lblStoreStrategy = new System.Windows.Forms.Label();
         this.pnlHeader.SuspendLayout();
@@ -406,6 +411,7 @@ partial class AiSettingsForm
         this.grpGlobal.BackColor = System.Drawing.Color.White;
         this.grpGlobal.Controls.Add(this.lblHint);
         this.grpGlobal.Controls.Add(this.chkAutoResume);
+        this.grpGlobal.Controls.Add(this.chkEnableAiLog);
         this.grpGlobal.Controls.Add(this.txtSystemPromptAppend);
         this.grpGlobal.Controls.Add(this.lblSysPrompt);
         this.grpGlobal.Controls.Add(this.nudTemperature);
@@ -415,12 +421,16 @@ partial class AiSettingsForm
         this.grpGlobal.Controls.Add(this.lblRetentionUnit);
         this.grpGlobal.Controls.Add(this.nudRetentionDays);
         this.grpGlobal.Controls.Add(this.lblRetention);
+        this.grpGlobal.Controls.Add(this.lblRetryCount);
+        this.grpGlobal.Controls.Add(this.nudRetryCount);
+        this.grpGlobal.Controls.Add(this.lblRetryInterval);
+        this.grpGlobal.Controls.Add(this.nudRetryInterval);
         this.grpGlobal.Controls.Add(this.cmbStoreStrategy);
         this.grpGlobal.Controls.Add(this.lblStoreStrategy);
         this.grpGlobal.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold);
         this.grpGlobal.Location = new System.Drawing.Point(344, 284);
         this.grpGlobal.Name = "grpGlobal";
-        this.grpGlobal.Size = new System.Drawing.Size(500, 208);
+        this.grpGlobal.Size = new System.Drawing.Size(500, 248);
         this.grpGlobal.TabIndex = 2;
         this.grpGlobal.TabStop = false;
         this.grpGlobal.Text = "  全局设置  ";
@@ -447,6 +457,58 @@ partial class AiSettingsForm
         this.chkAutoResume.TabIndex = 11;
         this.chkAutoResume.Text = "启动时自动打开上次会话";
         this.chkAutoResume.UseVisualStyleBackColor = true;
+        //
+        // chkEnableAiLog
+        //
+        this.chkEnableAiLog.AutoSize = true;
+        this.chkEnableAiLog.Checked = true;
+        this.chkEnableAiLog.CheckState = System.Windows.Forms.CheckState.Checked;
+        this.chkEnableAiLog.Location = new System.Drawing.Point(200, 138);
+        this.chkEnableAiLog.Name = "chkEnableAiLog";
+        this.chkEnableAiLog.Size = new System.Drawing.Size(280, 22);
+        this.chkEnableAiLog.TabIndex = 13;
+        this.chkEnableAiLog.Text = "记录 AI 助理日志（写到 DATA/logs/）";
+        this.chkEnableAiLog.UseVisualStyleBackColor = true;
+        //
+        // lblRetryCount
+        //
+        this.lblRetryCount.AutoSize = true;
+        this.lblRetryCount.Location = new System.Drawing.Point(16, 194);
+        this.lblRetryCount.Name = "lblRetryCount";
+        this.lblRetryCount.Size = new System.Drawing.Size(70, 20);
+        this.lblRetryCount.TabIndex = 14;
+        this.lblRetryCount.Text = "失败重试：";
+        //
+        // nudRetryCount
+        //
+        this.nudRetryCount.Location = new System.Drawing.Point(92, 192);
+        this.nudRetryCount.Maximum = new decimal(new int[] { 10, 0, 0, 0 });
+        this.nudRetryCount.Minimum = new decimal(new int[] { 0, 0, 0, 0 });
+        this.nudRetryCount.Name = "nudRetryCount";
+        this.nudRetryCount.Size = new System.Drawing.Size(60, 27);
+        this.nudRetryCount.TabIndex = 15;
+        this.nudRetryCount.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+        this.nudRetryCount.Value = new decimal(new int[] { 3, 0, 0, 0 });
+        //
+        // lblRetryInterval
+        //
+        this.lblRetryInterval.AutoSize = true;
+        this.lblRetryInterval.Location = new System.Drawing.Point(170, 194);
+        this.lblRetryInterval.Name = "lblRetryInterval";
+        this.lblRetryInterval.Size = new System.Drawing.Size(84, 20);
+        this.lblRetryInterval.TabIndex = 16;
+        this.lblRetryInterval.Text = "间隔（秒）：";
+        //
+        // nudRetryInterval
+        //
+        this.nudRetryInterval.Location = new System.Drawing.Point(260, 192);
+        this.nudRetryInterval.Maximum = new decimal(new int[] { 60, 0, 0, 0 });
+        this.nudRetryInterval.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+        this.nudRetryInterval.Name = "nudRetryInterval";
+        this.nudRetryInterval.Size = new System.Drawing.Size(60, 27);
+        this.nudRetryInterval.TabIndex = 17;
+        this.nudRetryInterval.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+        this.nudRetryInterval.Value = new decimal(new int[] { 5, 0, 0, 0 });
         //
         // txtSystemPromptAppend
         //
@@ -622,6 +684,7 @@ partial class AiSettingsForm
     private System.Windows.Forms.GroupBox grpGlobal;
     private System.Windows.Forms.Label lblHint;
     private System.Windows.Forms.CheckBox chkAutoResume;
+    private System.Windows.Forms.CheckBox chkEnableAiLog;
     private System.Windows.Forms.TextBox txtSystemPromptAppend;
     private System.Windows.Forms.Label lblSysPrompt;
     private System.Windows.Forms.NumericUpDown nudTemperature;
@@ -630,6 +693,10 @@ partial class AiSettingsForm
     private System.Windows.Forms.Label lblMaxCtx;
     private System.Windows.Forms.Label lblRetentionUnit;
     private System.Windows.Forms.NumericUpDown nudRetentionDays;
+    private System.Windows.Forms.Label lblRetryCount;
+    private System.Windows.Forms.NumericUpDown nudRetryCount;
+    private System.Windows.Forms.Label lblRetryInterval;
+    private System.Windows.Forms.NumericUpDown nudRetryInterval;
     private System.Windows.Forms.Label lblRetention;
     private System.Windows.Forms.ComboBox cmbStoreStrategy;
     private System.Windows.Forms.Label lblStoreStrategy;

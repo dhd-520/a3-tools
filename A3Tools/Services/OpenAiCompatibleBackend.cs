@@ -22,6 +22,16 @@ public class OpenAiCompatibleBackend : IAiChatBackend
     private readonly HttpClient _http;
     private readonly ActionRegistry _actions = ActionRegistry.Instance;
 
+    /// <summary>
+    /// ★ 2026-10-09 陛下要求：失败重试配置
+    /// <para>由 AiChatForm.LoadConfig 从 AiChatConfig.MaxRetryCount / RetryIntervalSeconds 同步过来</para>
+    /// <para>MaxRetries=0 表示不重试，默认 3</para>
+    /// </summary>
+    public int MaxRetries { get; set; } = 3;
+
+    /// <summary>每次重试前等待秒数，默认 5</summary>
+    public int RetryIntervalSeconds { get; set; } = 5;
+
     public OpenAiCompatibleBackend()
     {
         _http = new HttpClient
@@ -184,19 +194,10 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             };
 
             string json = JsonSerializer.Serialize(requestBody);
-            using var req = new HttpRequestMessage(HttpMethod.Post, url);
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
-            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            using var resp = await _http.SendAsync(req, ct);
-            string body = await resp.Content.ReadAsStringAsync(ct);
-
-            if (!resp.IsSuccessStatusCode)
-                throw new InvalidOperationException(ExtractErrorMessage(body) ?? $"HTTP {(int)resp.StatusCode}");
-
-            var parsed = JsonSerializer.Deserialize<OpenAiChatResponse>(body);
-            if (parsed?.Choices == null || parsed.Choices.Count == 0)
-                throw new InvalidOperationException("响应中没有 choices");
+            // ★ 2026-10-09 失败重试：HTTP 错误含"请稍后再试" / 网络异常 / 超时会自动重试
+            var (ok, error, parsed) = await SendChatRequestWithRetryAsync(
+                url, json, provider.ApiKey, MaxRetries, RetryIntervalSeconds, loop, ct);
+            if (!ok) throw new InvalidOperationException(error);
 
             var choice = parsed.Choices[0];
             var message = choice.Message ?? new OpenAiMessage();
@@ -565,6 +566,68 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// ★ 2026-10-09 陛下要求：失败重试机制
+    /// <para>触发：HTTP 错误信息含"请稍后再试" / 网络异常（HttpRequestException）/ 请求超时（排除用户主动取消）</para>
+    /// <para>每次重试前等待 RetryIntervalSeconds 秒，初始 1 次 + 重试 MaxRetries 次（总计 = MaxRetries + 1）</para>
+    /// <para>不重试：其他错误信息（非"请稍后再试"、非网络异常、非超时）→ 立即返回错误</para>
+    /// <para>用户主动取消（ct.IsCancellationRequested=true）→ 任何 catch 都不重试，向上抛 TaskCanceledException</para>
+    /// </summary>
+    /// <returns>(ok, error, response) — ok=true 时 response 非空；ok=false 时 error 非空</returns>
+    private async Task<(bool ok, string? error, OpenAiChatResponse? response)> SendChatRequestWithRetryAsync(
+        string url, string json, string apiKey,
+        int maxRetries, int intervalSeconds,
+        int loopNum, CancellationToken ct)
+    {
+        int totalAttempts = maxRetries + 1;  // 初始 1 次 + 重试 maxRetries 次
+        for (int attempt = 1; attempt <= totalAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // HttpRequestMessage 只能 send 一次，每次重试都重新 new
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            try
+            {
+                using var resp = await _http.SendAsync(req, ct);
+                string body = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    string errMsg = ExtractErrorMessage(body) ?? $"HTTP {(int)resp.StatusCode}";
+                    if (attempt < totalAttempts && errMsg.Contains("请稍后再试"))
+                    {
+                        AiAssistantLogger.LogRetry(loopNum, attempt, totalAttempts, intervalSeconds, errMsg);
+                        await Task.Delay(intervalSeconds * 1000, ct);
+                        continue;
+                    }
+                    return (false, errMsg, null);
+                }
+
+                var parsed = JsonSerializer.Deserialize<OpenAiChatResponse>(body);
+                if (parsed?.Choices == null || parsed.Choices.Count == 0)
+                    return (false, "响应中没有 choices", null);
+
+                return (true, null, parsed);
+            }
+            catch (HttpRequestException ex) when (attempt < totalAttempts)
+            {
+                // 网络异常（DNS / 连接拒绝 / TLS 等）→ 可重试
+                AiAssistantLogger.LogRetry(loopNum, attempt, totalAttempts, intervalSeconds, $"网络错误: {ex.Message}");
+                await Task.Delay(intervalSeconds * 1000, ct);
+            }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested && attempt < totalAttempts)
+            {
+                // 请求超时（非用户主动取消）→ 可重试
+                AiAssistantLogger.LogRetry(loopNum, attempt, totalAttempts, intervalSeconds, "请求超时");
+                await Task.Delay(intervalSeconds * 1000, ct);
+            }
+        }
+        return (false, "重试耗尽", null);
     }
 
 // ========== OpenAI 响应 DTO ==========

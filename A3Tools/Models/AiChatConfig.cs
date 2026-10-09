@@ -44,4 +44,23 @@ public class AiChatConfig
 
     /// <summary>是否在启动时自动打开上次未关闭的会话</summary>
     public bool AutoResumeLastSession { get; set; } = true;
+
+    /// <summary>
+    /// ★ 2026-10-06 陛下要求：AI 助理日志开关（控制是否记录每轮循环/工具调用/退出原因到 DATA/logs/）
+    /// <para>true=记录（默认），false=静默运行不落盘</para>
+    /// </summary>
+    public bool EnableAiLog { get; set; } = true;
+
+    /// <summary>
+    /// ★ 2026-10-09 陛下要求：模型调用失败重试次数
+    /// <para>触发条件：HTTP 错误信息含"请稍后再试" / 网络异常 / 请求超时（不含用户主动取消）</para>
+    /// <para>0 = 不重试（失败立即抛出），默认 3 次</para>
+    /// </summary>
+    public int MaxRetryCount { get; set; } = 3;
+
+    /// <summary>
+    /// ★ 2026-10-09 陛下要求：重试间隔秒数
+    /// <para>每次重试前等待的秒数，默认 5 秒</para>
+    /// </summary>
+    public int RetryIntervalSeconds { get; set; } = 5;
 }
