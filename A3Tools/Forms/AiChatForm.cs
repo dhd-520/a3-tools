@@ -145,10 +145,13 @@ public partial class AiChatForm : Form
     public AiChatForm(MainForm? mainForm = null)
     {
         InitializeComponent();
-        // ★ 2026-10-09 账套选择 ComboBox 事件 + 账套列表加载
+        // ★ 2026-10-09 账套选择：仿工具箱样式（按钮 + 显示标签 + 清空按钮）
         _mainForm = mainForm;
-        cmbAccount.SelectedIndexChanged += CmbAccount_SelectedIndexChanged;
-        LoadAccounts();
+        btnSelectAccount.Click += BtnSelectAccount_Click;
+        btnClearAccount.Click += BtnClearAccount_Click;
+        // 加载上次选择 + 刷新显示
+        LoadSelectedAccountFromSettings();
+        RefreshAccountDisplay();
         // 绑定事件
         cmbProvider.SelectedIndexChanged += (_, _) => SwitchProvider();
         btnSettings.Click += BtnSettings_Click;
@@ -267,9 +270,44 @@ public partial class AiChatForm : Form
     }
 
     // ★ 2026-10-09 陛下需求：选模型左侧增加账套选择
-    //   拉账套列表填 cmbAccount，默认选 AppSettings.LastSelectedAccount
-    //   fallback：_mainForm 为 null 时直接读 DataService
-    private void LoadAccounts()
+    // ★ 2026-10-09 仿工具箱上方样式：账套选择 = 「选择账套…」按钮 + 显示标签 + 「清空」按钮
+    //   选账套弹 AccountSelectForm（DataGridView 多列显示 编码/名称/服务器/备注 + 搜索框）
+    //   选中后存 _currentAccountCode / _currentAccountName + 持久化 AppSettings.LastSelectedAccount
+    //   BuildSystemPrompt 注入「当前账套 = XXX」AI 默认用
+    //   陛下消息里明确「在账套 999 上…」可覆盖
+
+    /// <summary>
+    /// 从 AppSettings.LastSelectedAccount 恢复上次选择（找不到对应账套就清空）
+    /// </summary>
+    private void LoadSelectedAccountFromSettings()
+    {
+        try
+        {
+            var ds = new DataService();
+            var settings = ds.LoadSettings();
+            string code = settings.LastSelectedAccount ?? "";
+            if (string.IsNullOrEmpty(code)) return;
+
+            List<Account> accounts = _mainForm != null
+                ? _mainForm.GetAllAccounts()
+                : ds.LoadAccounts();
+            var acc = accounts.FirstOrDefault(a => a.Code == code);
+            if (acc != null)
+            {
+                _currentAccountCode = acc.Code;
+                _currentAccountName = acc.Name ?? "";
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AI Chat] 加载账套选择失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 「选择账套…」按钮 → 弹 AccountSelectForm 让陛下选
+    /// </summary>
+    private void BtnSelectAccount_Click(object? sender, EventArgs e)
     {
         try
         {
@@ -283,87 +321,99 @@ public partial class AiChatForm : Form
                 var ds = new DataService();
                 accounts = ds.LoadAccounts();
             }
-
-            // 暂存当前选择避免刷新丢失
-            string prevCode = _currentAccountCode;
-
-            cmbAccount.Items.Clear();
-            cmbAccount.Items.Add(new AccountComboItem("（未选 - AI 需询问陛下）", "", ""));
-
-            // 按 Code 排序
-            foreach (var acc in accounts.OrderBy(a => a.Code, StringComparer.OrdinalIgnoreCase))
+            if (accounts.Count == 0)
             {
-                cmbAccount.Items.Add(new AccountComboItem($"{acc.Name} ({acc.Code})", acc.Code, acc.Name ?? ""));
+                MessageBox.Show(this, "尚未配置任何账套，请到 A3Tools 主界面新增账套。", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
 
-            // 优先用 AppSettings.LastSelectedAccount 恢复
-            string targetCode = prevCode;
-            try
+            using var dlg = new AccountSelectForm(accounts);
+            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
             {
-                var ds = new DataService();
-                var settings = ds.LoadSettings();
-                if (!string.IsNullOrEmpty(settings.LastSelectedAccount))
-                    targetCode = settings.LastSelectedAccount;
-            }
-            catch { /* 读不到就用 prevCode */ }
+                var acc = dlg.SelectedAccount;
+                _currentAccountCode = acc.Code;
+                _currentAccountName = acc.Name ?? "";
 
-            int idx = 0; // 默认未选
-            for (int i = 0; i < cmbAccount.Items.Count; i++)
-            {
-                if (cmbAccount.Items[i] is AccountComboItem item && item.Code == targetCode)
+                // 持久化到 AppSettings.LastSelectedAccount
+                try
                 {
-                    idx = i;
-                    break;
+                    var ds = new DataService();
+                    var settings = ds.LoadSettings();
+                    settings.LastSelectedAccount = acc.Code;
+                    ds.SaveSettings(settings);
                 }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[AI Chat] 保存账套选择失败: {ex.Message}");
+                }
+
+                RefreshAccountDisplay();
+                DebugLog($"账套切换: code='{acc.Code}', name='{acc.Name}'");
             }
-            cmbAccount.SelectedIndex = idx;
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[AI Chat] 加载账套列表失败: {ex.Message}");
-            cmbAccount.Items.Clear();
-            cmbAccount.Items.Add(new AccountComboItem("（加载账套失败）", "", ""));
-            cmbAccount.SelectedIndex = 0;
-            cmbAccount.Enabled = false;
+            MessageBox.Show(this, $"选择账套出错：{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    private void CmbAccount_SelectedIndexChanged(object? sender, EventArgs e)
+    /// <summary>
+    /// 「清空」按钮 → 把 _currentAccountCode / _currentAccountName 置空
+    /// </summary>
+    private void BtnClearAccount_Click(object? sender, EventArgs e)
     {
-        if (cmbAccount.SelectedItem is not AccountComboItem item) return;
+        _currentAccountCode = "";
+        _currentAccountName = "";
 
-        _currentAccountCode = item.Code;
-        _currentAccountName = item.Name;
-
-        // 持久化到 AppSettings.LastSelectedAccount
+        // 持久化清空
         try
         {
             var ds = new DataService();
             var settings = ds.LoadSettings();
-            settings.LastSelectedAccount = item.Code;
+            settings.LastSelectedAccount = "";
             ds.SaveSettings(settings);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[AI Chat] 保存账套选择失败: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[AI Chat] 清空账套选择失败: {ex.Message}");
         }
 
-        DebugLog($"账套切换: code='{item.Code}', name='{item.Name}'");
+        RefreshAccountDisplay();
+        DebugLog("账套已清空");
     }
 
-    // ★ 2026-10-09 内部类：cmbAccount 项
-    private class AccountComboItem
+    /// <summary>
+    /// 刷新 lblSelectedAccountName 显示
+    ///   未选: 「（未选择）」 浅色
+    ///   选中: 「{Code} - {Name} ({Server})」 白
+    /// </summary>
+    private void RefreshAccountDisplay()
     {
-        public string Display { get; }
-        public string Code { get; }
-        public string Name { get; }
-        public AccountComboItem(string display, string code, string name = "")
+        if (string.IsNullOrEmpty(_currentAccountCode))
         {
-            Display = display;
-            Code = code;
-            Name = name;
+            lblSelectedAccountName.Text = "（未选择）";
+            lblSelectedAccountName.ForeColor = Color.FromArgb(220, 230, 245);
+            btnClearAccount.Enabled = false;
         }
-        public override string ToString() => Display;
+        else
+        {
+            string display = $"{_currentAccountCode} - {_currentAccountName}";
+            try
+            {
+                List<Account> accounts = _mainForm != null
+                    ? _mainForm.GetAllAccounts()
+                    : new DataService().LoadAccounts();
+                var acc = accounts.FirstOrDefault(a => a.Code == _currentAccountCode);
+                if (acc != null && !string.IsNullOrEmpty(acc.Server))
+                    display = $"{_currentAccountCode} - {acc.Name} ({acc.Server})";
+            }
+            catch { /* 显示简化版 */ }
+            lblSelectedAccountName.Text = display;
+            lblSelectedAccountName.ForeColor = Color.White;
+            btnClearAccount.Enabled = true;
+        }
     }
 
     private void InitStore()

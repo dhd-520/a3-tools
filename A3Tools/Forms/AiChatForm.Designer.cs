@@ -22,11 +22,11 @@ partial class AiChatForm
         btnSettings = new Button();
         cmbProvider = new ComboBox();
         lblTitle = new Label();
-        // ★ 2026-10-09 账套选择：补上实例化
-        //   之前漏写 → 字段是 null → AutoSize = true 抛 NRE
-        //   Build 的 CS0649 warning 提示过但当时没注意
+        // ★ 2026-10-09 账套选择：仿工具箱样式（按钮 + 显示标签 + 清空按钮）
         lblAccount = new Label();
-        cmbAccount = new ComboBox();
+        btnSelectAccount = new Button();
+        lblSelectedAccountName = new Label();
+        btnClearAccount = new Button();
         pnlSidebar = new Panel();
         btnClearAll = new Button();
         btnDeleteSession = new Button();
@@ -60,7 +60,10 @@ partial class AiChatForm
         pnlHeader.Controls.Add(btnNewSession);
         pnlHeader.Controls.Add(btnSettings);
         pnlHeader.Controls.Add(cmbProvider);
-        pnlHeader.Controls.Add(cmbAccount);
+        // ★ 2026-10-09 账套选择（仿工具箱上方样式：按钮 + 显示标签 + 清空按钮）
+        pnlHeader.Controls.Add(btnClearAccount);
+        pnlHeader.Controls.Add(lblSelectedAccountName);
+        pnlHeader.Controls.Add(btnSelectAccount);
         pnlHeader.Controls.Add(lblAccount);
         pnlHeader.Controls.Add(lblTitle);
         pnlHeader.Dock = DockStyle.Top;
@@ -124,9 +127,9 @@ partial class AiChatForm
         lblTitle.Text = "AI 助理";
         //
         // lblAccount
-        //  ★ 2026-10-09 陛下要求：选模型左侧增加账套选择，选中后该会话默认在该账套上处理
+        //  ★ 2026-10-09 仿工具箱上方样式：账套选择 = 按钮 + 显示标签 + 清空按钮
         //
-        lblAccount.AutoSize = true;
+        lblAccount.AutoSize = false;
         lblAccount.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         lblAccount.ForeColor = Color.White;
         lblAccount.Location = new Point(180, 22);
@@ -137,23 +140,57 @@ partial class AiChatForm
         lblAccount.Text = "账套：";
         lblAccount.TextAlign = ContentAlignment.MiddleLeft;
         //
-        // cmbAccount
-        //  ★ 2026-10-09 陛下要求：选模型左侧增加账套选择
-        //   Items:
-        //     [0] (未选 - AI 需询问陛下) code=""
-        //     [1..n] "{Code} - {Name}"  (按 Name 排序)
-        //   SelectedIndexChanged 同步 _currentAccountCode + AppSettings.LastSelectedAccount
-        //   BuildSystemPrompt 注入「当前账套 = XXX」AI 默认用
-        //   陛下消息里明确「在账套 999 上…」可覆盖
+        // btnSelectAccount
+        //  ★ 2026-10-09 账套选择按钮（点击后弹 AccountSelectForm）
+        //   样式仿工具箱 btnToolsSelectSourceDb（白底蓝字）
         //
-        cmbAccount.BackColor = Color.White;
-        cmbAccount.DropDownStyle = ComboBoxStyle.DropDownList;
-        cmbAccount.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
-        cmbAccount.Location = new Point(260, 22);
-        cmbAccount.Margin = new Padding(6);
-        cmbAccount.Name = "cmbAccount";
-        cmbAccount.Size = new Size(400, 38);
-        cmbAccount.TabIndex = 1;
+        btnSelectAccount.BackColor = Color.White;
+        btnSelectAccount.FlatAppearance.BorderSize = 0;
+        btnSelectAccount.FlatStyle = FlatStyle.Flat;
+        btnSelectAccount.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        btnSelectAccount.ForeColor = Color.FromArgb(24, 144, 255);
+        btnSelectAccount.Location = new Point(255, 22);
+        btnSelectAccount.Margin = new Padding(6);
+        btnSelectAccount.Name = "btnSelectAccount";
+        btnSelectAccount.Size = new Size(110, 38);
+        btnSelectAccount.TabIndex = 1;
+        btnSelectAccount.Text = "选择账套…";
+        btnSelectAccount.UseVisualStyleBackColor = false;
+        btnSelectAccount.Cursor = Cursors.Hand;
+        //
+        // lblSelectedAccountName
+        //  ★ 2026-10-09 账套显示标签
+        //   未选时显示「（未选择）」 120,120,120 灰
+        //   选中后显示「8088 - 测试账套 (192.168.1.100)」 白字
+        //
+        lblSelectedAccountName.AutoEllipsis = true;
+        lblSelectedAccountName.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSelectedAccountName.ForeColor = Color.FromArgb(220, 230, 245);
+        lblSelectedAccountName.Location = new Point(375, 22);
+        lblSelectedAccountName.Margin = new Padding(6, 0, 6, 0);
+        lblSelectedAccountName.Name = "lblSelectedAccountName";
+        lblSelectedAccountName.Size = new Size(500, 38);
+        lblSelectedAccountName.TabIndex = 2;
+        lblSelectedAccountName.Text = "（未选择）";
+        lblSelectedAccountName.TextAlign = ContentAlignment.MiddleLeft;
+        //
+        // btnClearAccount
+        //  ★ 2026-10-09 账套清空按钮（仿工具箱 btnToolsClearSourceDb）
+        //   点清空把 _currentAccountCode / _currentAccountName 置空 + lblSelectedAccountName 改「（未选择）」
+        //
+        btnClearAccount.BackColor = Color.FromArgb(245, 247, 250);
+        btnClearAccount.FlatAppearance.BorderSize = 0;
+        btnClearAccount.FlatStyle = FlatStyle.Flat;
+        btnClearAccount.Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point);
+        btnClearAccount.ForeColor = Color.FromArgb(80, 80, 80);
+        btnClearAccount.Location = new Point(885, 22);
+        btnClearAccount.Margin = new Padding(6);
+        btnClearAccount.Name = "btnClearAccount";
+        btnClearAccount.Size = new Size(60, 38);
+        btnClearAccount.TabIndex = 3;
+        btnClearAccount.Text = "清空";
+        btnClearAccount.UseVisualStyleBackColor = false;
+        btnClearAccount.Cursor = Cursors.Hand;
         //
         // pnlSidebar
         //
@@ -429,9 +466,11 @@ partial class AiChatForm
     private ComboBox cmbProvider;
     private Button btnSettings;
     private Button btnNewSession;
-    // ★ 2026-10-09 账套选择 ComboBox + Label（陛下要求选模型左侧增加）
+    // ★ 2026-10-09 账套选择（仿工具箱上方样式：按钮 + 显示标签 + 清空按钮）
     private Label lblAccount;
-    private ComboBox cmbAccount;
+    private Button btnSelectAccount;
+    private Label lblSelectedAccountName;
+    private Button btnClearAccount;
     private Panel pnlSidebar;
     private Label lblSidebarTitle;
     private ListBox lstSessions;
