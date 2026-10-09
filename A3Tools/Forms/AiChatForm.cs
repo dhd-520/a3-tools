@@ -602,9 +602,12 @@ public partial class AiChatForm : Form
             //     ## 标题 / ### 标题 / **粗体** / `代码` / 表格 / 列表 / 引用 / 链接
             //   之前走 Unicode 符号改造（标题变 ━━，表格变 │─┼─）是给 Label 准备的，
             //   错误地作用到了 WebView2 路径 → 导致标题/表格内容被破坏
-            // ★ 2026-10-08 陛下要求：think 块不需显示给陛下看（21 行长的 <think>...</think> 占大量空白）
-            //   重新加回：AI 响应走 RemoveThinkTags 去掉内部思考过程，只保留给陛下的内容
-            displayContent = RemoveThinkTags(displayContent ?? string.Empty).Trim();
+            // ★ 2026-10-09 陛下要求：AI 思考内容（<think>...</think>）默认折叠、点击展开
+            //   之前走 RemoveThinkTags 剥掉 → 历史会话永远看不到思考块
+            //   修法：让 RenderBodyWithThinkingBlocks（在 RenderMarkdownAsHtml 里）处理
+            //   跟流式定型 HTML 走同一条路径，history 和 streaming 看到一致折叠 UI
+            //   （三处用同一段 RenderMarkdownAsHtml → 同样折叠块）
+            displayContent = (displayContent ?? string.Empty).Trim();
         }
         else
         {
@@ -1724,7 +1727,12 @@ _ = wv2.EnsureCoreWebView2Async();
                         LayoutBubbleRow(row, lblForLambda, avatar, avatar?.Text == "B");
                     }
                 }
-                ScrollToBottom();
+                // ★ 2026-10-09 修陛下反馈「流式输出上下晃动」
+                //   原 ScrollToBottom() 每 500ms 锁底一次 → 陛下中途滚上去读历史被拽回 → 上下晃
+                //   修法：SmartScrollToBottom() —— 用户距底 < 100px 才锁底，滚上去就让陛下读
+                //   跟聊天 app (Slack/微信/Discord) 的 smart 跟滚一致
+                //   副作用：流式期滚上去后，AI 输出继续但视图不动 → 陛下读完再滚回底看新内容
+                SmartScrollToBottom();
             });
         }
 
