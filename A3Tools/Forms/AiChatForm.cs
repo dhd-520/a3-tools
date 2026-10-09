@@ -1538,7 +1538,9 @@ _ = wv2.EnsureCoreWebView2Async();
             placeholderAi.ErrorMessage = "用户取消";
             _currentSession.Messages.Add(placeholderAi);
             _store.SaveSession(_currentSession);
-            RenderMessages();
+            // ★ 2026-10-09 修：原 RenderMessages() 会 Controls.Clear() + 重建所有 WebView2 → 整屏闪
+            //   改为就地更新占位气泡的内容和背景色，不动其他气泡（跟工具调用的修法同款）
+            UpdatePlaceholderBubbleToError(placeholderAi, "（已取消）", System.Drawing.Color.FromArgb(255, 245, 245));
             lblStatus.Text = "已取消";
             lblStatus.ForeColor = System.Drawing.Color.Gray;
         }
@@ -1550,7 +1552,9 @@ _ = wv2.EnsureCoreWebView2Async();
             placeholderAi.ErrorMessage = ex.Message;
             _currentSession.Messages.Add(placeholderAi);
             _store.SaveSession(_currentSession);
-            RenderMessages();
+            // ★ 2026-10-09 修：原 RenderMessages() 会 Controls.Clear() + 重建所有 WebView2 → 整屏闪
+            //   改为就地更新占位气泡的内容和背景色，不动其他气泡（跟工具调用的修法同款）
+            UpdatePlaceholderBubbleToError(placeholderAi, $"调用失败：{ex.Message}", System.Drawing.Color.FromArgb(255, 245, 245));
             lblStatus.Text = "出错";
             lblStatus.ForeColor = System.Drawing.Color.FromArgb(251, 67, 42);
         }
@@ -1572,6 +1576,46 @@ _ = wv2.EnsureCoreWebView2Async();
     ///   Label.AutoSize=true + MaximumSize 限制最大宽 → 自动换行、自动撑高
     ///   不用手算高度、不用 TextBox PreferredSize
     /// </summary>
+    /// <summary>
+    /// ★ 2026-10-09 修：模型调用失败/用户取消时，原 RenderMessages() 会 Controls.Clear() + 重建所有 WebView2 → 整屏闪
+    ///   改为就地更新占位气泡的内容和背景色，不动其他气泡（跟工具调用的修法同款）
+    ///   不重建 WebView2、不重设 innerHTML，只调 setBubbleBodyOnly 渲染错误文本 + 改背景色
+    /// </summary>
+    private void UpdatePlaceholderBubbleToError(ChatMessage msg, string errorText, System.Drawing.Color errorBg)
+    {
+        var (bubble, isWv2) = FindBubbleForStream(msg);
+        if (bubble == null) return;
+        if (isWv2 && bubble is Microsoft.Web.WebView2.WinForms.WebView2 wv2)
+        {
+            // 1. 改背景色（红了）—— 不用重新 NavigateToString，不重建 WebView2
+            try { wv2.DefaultBackgroundColor = errorBg; } catch { }
+            try { wv2.BackColor = errorBg; } catch { }
+            // 2. 把错误信息渲染到 #bubble-body（复用流式结束的 setBubbleBodyOnly，不动 tools-stream）
+            if (wv2.CoreWebView2 != null)
+            {
+                string html = RenderMarkdownAsHtml(errorText);
+                string escaped = System.Text.Json.JsonSerializer.Serialize(html);
+                string js = "window.setBubbleBodyOnly(" + escaped + ");";
+                _ = wv2.CoreWebView2.ExecuteScriptAsync(js);
+            }
+        }
+        else if (bubble is Label lbl)
+        {
+            lbl.Text = errorText;
+            var row = lbl.Parent as Panel;
+            if (row != null)
+            {
+                Label? avatar = null;
+                foreach (Control c2 in row.Controls)
+                {
+                    if (c2 is Label al && c2 != lbl) { avatar = al; break; }
+                }
+                LayoutBubbleRow(row, lbl, avatar, avatar?.Text == "B");
+            }
+        }
+        ScrollToBottom();
+    }
+
     /// <summary>
     /// ★ 2026-10-09 陛下反馈「流式输出疯狂闪烁」+「关掉重开内容不一致」修复
     ///   _streamedTextLength: 当前 bubble-body 已经渲染过的字符数，下次发增量只发 currentText.Substring(_streamedTextLength)
