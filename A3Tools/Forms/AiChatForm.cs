@@ -1726,9 +1726,15 @@ _ = wv2.EnsureCoreWebView2Async();
             if (wv2End.CoreWebView2 != null)
             {
                 await System.Threading.Tasks.Task.Delay(150);
+                // ★ 2026-10-09 修陛下反馈「AI 完成后不能向上滚动，时间随内容变长」
+                //   根因：RenderMarkdownAsHtml(fullText) Markdig 解析是 O(n) 同步操作
+                //         + JsonSerializer.Serialize 又是 O(n) → 全堵在 UI 线程
+                //         → pnlMessagesScroll 滚动条拖不动，外层 Panel 也不能滚
+                //   修法：Markdig 解析放后台线程（Task.Run），UI 线程只做轻量 IPC
+                string htmlEnd = await System.Threading.Tasks.Task.Run(
+                    () => RenderMarkdownAsHtml(fullText));
                 await pnlMessagesScroll.InvokeAsync(() =>
                 {
-                    string htmlEnd = RenderMarkdownAsHtml(fullText);
                     // ★ 2026-10-09 用 setBubbleBodyOnly 替代 updateBubbleBody —— 不调 rerenderToolStream
                     //   避免重建 tools-stream 引发的闪烁；保持工具卡片原样
                     string escapedEnd = System.Text.Json.JsonSerializer.Serialize(htmlEnd);
