@@ -1357,6 +1357,13 @@ _ = wv2.EnsureCoreWebView2Async();
 
         void DoScroll()
         {
+            // ★ 2026-10-09 修陛下反馈「对话刚完成还是无法向上滑动」
+            //   根因：ScrollToBottom 内部挂 8 次 50ms 重试 Timer 覆盖 WebView2 撑开延迟
+            //        流式期 500ms 节流下，每 chunk 启 1 个 Timer，N 个 Timer 互相叠加
+            //        流式结束 L1527 设的 _streamFreezeUntil=+5s 只保护 SmartScrollToBottom()
+            //        旧 Timer 仍在 5s 内反复 Value=max → 拽回底部
+            //   修法：DoScroll() 也走冻结，5s 冻结期内所有重试 no-op
+            if (DateTime.UtcNow < _streamFreezeUntil) return;
             try
             {
                 pnlMessagesScroll.SuspendLayout();
