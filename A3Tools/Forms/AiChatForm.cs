@@ -824,6 +824,11 @@ public partial class AiChatForm : Form
                             }
                             return;
                         }
+                        // ★ 2026-10-09 修陛下反馈「流式输出气泡左右上下晃动」
+                        //   流式期锁 wv2.Height → C# 不动 wv2 高度 → FlowLayoutPanel 不重排 → 气泡不晃
+                        //   wheel 事件不走这条路径（上面已 return），不影响
+                        //   只跳过 height 同步；其他 wv2 的 height 同步仍正常
+                        if (ReferenceEquals(wv2, _streamingWebView2)) return;
                         if (!doc.RootElement.TryGetProperty("h", out var hProp)) return;
                         int realH = hProp.GetInt32();
                         if (realH <= 0) return;
@@ -1322,6 +1327,12 @@ _ = wv2.EnsureCoreWebView2Async();
     // ★ 2026-10-07 wv2.Height 赋值节流：JS 端每帧都报高度，C# 端最快 150ms 应用一次
     //  防止流式输出时 wv2 反复撑缩让 WebView2 反复进入低 DPI 重渲染（陛下反馈「屏幕闪烁一会模糊一会清晰」的根因）
     private DateTime _lastHeightApply = DateTime.MinValue;
+    // ★ 2026-10-09 修陛下反馈「流式输出气泡左右上下晃动」
+    //   根因：每 500ms JS notify → C# ResizeObserver 设 wv2.Height → FlowLayoutPanel 重排 → 后续气泡位置变 → 上下晃
+    //   修法：流式期锁定 wv2.Height，HTML 内容超出 wv2 时 wv2 内部 overflow:auto 滚动
+    //   流式结束 setBubbleBodyOnly 后才做 final height sync
+    //   仿 ChatGPT/Claude 网页 chat 行为：气泡不晃，只是不停吐字
+    private Microsoft.Web.WebView2.WinForms.WebView2? _streamingWebView2 = null;
     private void SmartScrollToBottom()
     {
         if (!pnlMessagesScroll.IsHandleCreated) return;
@@ -1666,6 +1677,14 @@ _ = wv2.EnsureCoreWebView2Async();
             // 保留 tools-stream 里的卡片，只清 bubble-body
             await wv2Clear.CoreWebView2.ExecuteScriptAsync(
                 "(function(){var b=document.getElementById('bubble-body');if(b)b.innerHTML='';})();");
+            // ★ 2026-10-09 修陛下反馈「流式输出气泡左右上下晃动」
+            //   设流式期标志 → C# ResizeObserver 收到 notify 不再动 wv2.Height → FlowLayoutPanel 不重排 → 气泡不晃
+            //   加 streaming-mode class → body overflow-y:auto → 内容超出 wv2 时 wv2 内部出滚动条
+            //   给个最小 200px 避免 wv2 太矮看不到字（只发生一次 reflow，远好于每 500ms reflow）
+            _streamingWebView2 = wv2Clear;
+            if (wv2Clear.Height < 200) wv2Clear.Height = 200;
+            await wv2Clear.CoreWebView2.ExecuteScriptAsync(
+                "(function(){try{document.body.classList.add('streaming-mode');}catch(e){}})();");
         }
 
         // 閫愬瓧绗︽祦寮忔樉绀?
@@ -1751,6 +1770,13 @@ _ = wv2.EnsureCoreWebView2Async();
                     () => RenderMarkdownAsHtml(fullText));
                 await pnlMessagesScroll.InvokeAsync(() =>
                 {
+                    // ★ 2026-10-09 修陛下反馈「流式输出气泡晃动」
+                    //   先清流式期标志 → 下面 setBubbleBodyOnly 触发的 notify
+                    //   会让 C# ResizeObserver 走正常 height sync（_streamingWebView2 已是 null）
+                    //   wv2 一次性跳到真实高度 → FlowLayoutPanel 重排（这一次，不晃）
+                    //   JS 端 setBubbleBodyOnly 内部同时移除 streaming-mode class
+                    //   body 恢复 overflow:hidden → 不再出内部滚动条
+                    _streamingWebView2 = null;
                     // ★ 2026-10-09 用 setBubbleBodyOnly 替代 updateBubbleBody —— 不调 rerenderToolStream
                     //   避免重建 tools-stream 引发的闪烁；保持工具卡片原样
                     string escapedEnd = System.Text.Json.JsonSerializer.Serialize(htmlEnd);
@@ -2072,6 +2098,13 @@ _ = wv2.EnsureCoreWebView2Async();
 html { margin: 0; padding: 0; }  /* ★ 消除 html 默认 8px margin，避免 wv2.Height = scrollHeight 还不够 */
 body { font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 24px; line-height: 38px; color: #24292f; background: transparent; padding: 10px 14px 10px 7px; margin: 0; overflow: hidden; overflow-wrap: break-word; word-break: break-word; }  /* ★★★ 2026-10-08 RasterizationScale=1.0 后所有 CSS 尺寸 ×1.75 补回 168 DPI 下的视觉大小 */
 
+/* ★ 2026-10-09 修陛下反馈「流式输出气泡左右上下晃动」
+   流式期 wv2 高度锁死（_streamingWebView2 机制）→ 内容超出 wv2 时裁掉
+   body.streaming-mode 临时改 overflow-y:auto → wv2 内部出滚动条
+   appendStreamingText 末尾 body.scrollTop = scrollHeight → 始终看最新字
+   流式结束 setBubbleBodyOnly 移除 class → body 恢复 overflow:hidden */
+body.streaming-mode { overflow-y: auto; }
+
 h1, h2, h3, h4, h5, h6 { margin: 24px 0 14px 0; font-weight: 600; line-height: 1.25; }
 h1 { font-size: 32px; padding-bottom: 7px; border-bottom: 1px solid #d0d7de; }
 h2 { font-size: 28px; padding-bottom: 7px; border-bottom: 1px solid #d0d7de; }
@@ -2339,6 +2372,11 @@ img { max-width: 100%; }
       if (body) {
         // 用 textNode 追加，避免 HTML 解析问题（纯文本不需转义）
         body.appendChild(document.createTextNode(text));
+        // ★ 2026-10-09 流式期 wv2 高度被 C# 锁住
+        //   内容超出 wv2 后被 wv2 内部 body 滚动条裁（body.streaming-mode overflow-y:auto）
+        //   这里滚到底 → 始终看最新字（仿 ChatGPT/Claude）
+        //   陛下想读历史可以手动滚 wv2 内部，但下一字来会拽回底
+        document.body.scrollTop = document.body.scrollHeight;
       }
       notify();
     } catch (e) {}
@@ -2349,6 +2387,10 @@ img { max-width: 100%; }
       if (body) {
         body.innerHTML = html;
       }
+      // ★ 2026-10-09 移除 streaming-mode：body 恢复 overflow:hidden
+      //   下一帧 C# ResizeObserver 收到 notify 走正常 height sync
+      //   wv2 一次性跳到真实高度 → FlowLayoutPanel 重排（这一次，不晃）
+      try { document.body.classList.remove('streaming-mode'); } catch (e) {}
       notify();
     } catch (e) {}
   };
