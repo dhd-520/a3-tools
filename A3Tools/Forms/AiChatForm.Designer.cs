@@ -22,6 +22,11 @@ partial class AiChatForm
         btnSettings = new Button();
         cmbProvider = new ComboBox();
         lblTitle = new Label();
+        // ★ 2026-10-09 账套选择：补上实例化
+        //   之前漏写 → 字段是 null → AutoSize = true 抛 NRE
+        //   Build 的 CS0649 warning 提示过但当时没注意
+        lblAccount = new Label();
+        cmbAccount = new ComboBox();
         pnlSidebar = new Panel();
         btnClearAll = new Button();
         btnDeleteSession = new Button();
