@@ -195,6 +195,12 @@ public class SkillRegistry
         if (properties.TryGetValue("requires_confirmation", out var rc) &&
             bool.TryParse(rc, out var b))
             skill.RequiresConfirmation = b;
+        // ★ 2026-10-06 增：read-only Skill 标记（find_form_location 等）
+        if (properties.TryGetValue("write_required", out var wr) &&
+            bool.TryParse(wr, out var wrb))
+            skill.WriteRequired = wrb;
+        else
+            skill.WriteRequired = true;  // 默认 true（保持原有严格检查）
         if (properties.TryGetValue("parameters", out var parms))
         {
             // 格式：key1=描述1; key2=描述2

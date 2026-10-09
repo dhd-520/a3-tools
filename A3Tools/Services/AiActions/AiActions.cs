@@ -541,13 +541,11 @@ public class DeleteAccountAction : IAiAction
     };
 
     public bool RequiresConfirmation => true;
-    private string? _confirmCode;
-    public string? ConfirmationPrompt => _confirmCode;
+    public string? ConfirmationPrompt => null;  // ★ 2026-10-06 陛下要求：高危操作改成只点确认，不要输入
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
         var code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
-        _confirmCode = code;
         return $"永久删除账套 [{code}]（含密码），删除后无法恢复！";
     }
 

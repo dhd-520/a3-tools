@@ -2,7 +2,8 @@ using System.Collections.Generic;
 using System.Linq;
 using A3Tools.Models;
 
-namespace A3Tools.Services.AiActions;
+using A3Tools.Services.AiActions.AiAssistantLogging;
+namespace  A3Tools.Services.AiActions;
 
 /// <summary>
 /// AI Action 注册表（单例）
@@ -60,6 +61,10 @@ public class ActionRegistry
         // 之前漏注册导致 AI 在 system prompt 里看到工具但实际调用时找不到
         Register(new ListSkillsAction());
         Register(new LoadSkillAction());
+        // ★ 2026-10-06 陛下反馈：AI 助理调完工具/Skill 后经常戛然而止
+        //   加 read_ai_log / list_ai_logs 让 AI 能自查执行轨迹（调试 + 自审闭环）
+        Register(new ReadAiLogAction());
+        Register(new ListAiLogsAction());
     }
 
     private void Register(IAiAction action)

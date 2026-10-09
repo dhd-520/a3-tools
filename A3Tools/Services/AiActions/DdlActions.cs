@@ -103,16 +103,15 @@ public class ExecuteDdlAction : IAiAction
     };
 
     public bool RequiresConfirmation => true;
-    private string? _confirmSnippet;
-    public string? ConfirmationPrompt => _confirmSnippet;
+    public string? ConfirmationPrompt => null;  // ★ 2026-10-06 陛下要求：高危操作改成只点确认，不要输入
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
         var code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
         var sql = arguments.TryGetValue("sql", out var s) ? s?.ToString() ?? "" : "";
         // 提取前 80 字作为陛下二次确认时看到的提示
-        _confirmSnippet = sql.Length > 80 ? sql.Substring(0, 80) + "..." : sql;
-        return $"在账套 [{code}] 上执行 DDL：{_confirmSnippet}";
+        string snippet = sql.Length > 80 ? sql.Substring(0, 80) + "..." : sql;
+        return $"在账套 [{code}] 上执行 DDL：{snippet}";
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)

@@ -28,6 +28,14 @@ public class SkillDefinition
     /// <summary>是否需要陛下二次确认（提示用，AI 在执行高危操作前会再次弹窗）</summary>
     public bool RequiresConfirmation { get; set; } = true;
 
+    /// <summary>
+    /// ★ 2026-10-06 陛下反馈：read-only Skill（如 find_form_location、check_form_health）
+    ///   不调任何写工具，会被 SkillWorkflowEnforcer 误判"未完成"→ 死循环到 maxLoops=30 卡好久。
+    ///   <para>read-only Skill 在 frontmatter 设 <c>write_required: false</c>，续命器跳过检查。</para>
+    ///   <para>默认 true（保持原有"必须调写工具"的严格检查，兼容知识库类/DDL 类 Skill）。</para>
+    /// </summary>
+    public bool WriteRequired { get; set; } = true;
+
     /// <summary>参数说明（key → 描述），多个用 ; 分隔 key=value</summary>
     public Dictionary<string, string> Parameters { get; set; } = new();
 

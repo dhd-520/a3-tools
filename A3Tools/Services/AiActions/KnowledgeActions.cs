@@ -18,7 +18,7 @@ namespace A3Tools.Services.AiActions;
 /// <list type="bullet">
 ///   <item>只读操作（list/search/get/recommend）无需确认，AI 可自由探索</item>
 ///   <item>写入操作（create/add/update）走 ConfirmActionForm 普通确认，陛下能看到预览再点确认</item>
-///   <item>删除操作（delete）走高危确认：陛下必须输入条目标题前 4 字才能放行</item>
+///   <item>删除操作（delete）走高危确认（陛下点 [允许] 即可，2026-10-06 起取消输入要求）</item>
 ///   <item>所有写操作 SourceType=ChatExtract，让知识库 UI 能清晰显示「💬 对话」来源</item>
 /// </list>
 /// </summary>
@@ -609,12 +609,12 @@ public class MoveKnowledgeEntryAction : IAiAction
 }
 
 /// <summary>
-/// 删除知识条目（高危：陛下必须输入条目标题前 4 字确认）
+/// 删除知识条目（高危：陛下点 [允许] 即可，2026-10-06 起取消输入要求）
 /// </summary>
 public class DeleteKnowledgeEntryAction : IAiAction
 {
     public string Name => "delete_knowledge_entry";
-    public string Description => "删除指定知识条目（高危）。陛下必须输入条目标题前 4 字确认才能执行。AI 极少调用，仅在陛下明确要求删除时使用。";
+    public string Description => "删除指定知识条目（高危）。陛下需点 [允许] 确认才能执行（2026-10-06 起取消输入要求）。AI 极少调用，仅在陛下明确要求删除时使用。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -628,8 +628,7 @@ public class DeleteKnowledgeEntryAction : IAiAction
     };
 
     public bool RequiresConfirmation => true;
-    private string? _confirmText;
-    public string? ConfirmationPrompt => _confirmText;
+    public string? ConfirmationPrompt => null;  // ★ 2026-10-06 陛下要求：高危操作改成只点确认，不要输入
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
@@ -645,8 +644,7 @@ public class DeleteKnowledgeEntryAction : IAiAction
             var entry = fullKb?.Entries.FirstOrDefault(e => e.Id == entryId);
             if (entry != null) title = entry.Title;
         }
-        _confirmText = title.Length >= 4 ? title.Substring(0, 4) : title;
-        return $"删除条目「{title}」从「{baseName}」\n陛下必须输入「{_confirmText}」才能放行";
+        return $"删除条目「{title}」从「{baseName}」\n陛下点 [允许] 确认即可（2026-10-06 起取消输入要求）";
     }
 
     public Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
