@@ -901,7 +901,7 @@ public partial class AiChatForm : Form
                         // ★ 2026-09-02 删除 ResizeObserver 调试日志
                     }
                 };
-                wv2.CoreWebView2.NavigateToString(RenderMarkdownAsHtml(displayContent));
+                wv2.CoreWebView2.NavigateToString(RenderMarkdownAsHtml(displayContent, BuildToolCardsHtml(msg.ToolCalls)));
             };
 _ = wv2.EnsureCoreWebView2Async();
             bubble = wv2;
@@ -1572,6 +1572,14 @@ _ = wv2.EnsureCoreWebView2Async();
     ///   Label.AutoSize=true + MaximumSize 限制最大宽 → 自动换行、自动撑高
     ///   不用手算高度、不用 TextBox PreferredSize
     /// </summary>
+    /// <summary>
+    /// ★ 2026-10-09 陛下反馈「流式输出疯狂闪烁」+「关掉重开内容不一致」修复
+    ///   _streamedTextLength: 当前 bubble-body 已经渲染过的字符数，下次发增量只发 currentText.Substring(_streamedTextLength)
+    ///   之前用 updateBubbleBody 每 200ms 整段 innerHTML 替换 + rerenderToolStream 重建 + notify → 三连击闪烁
+    ///   现在流式期 appendStreamingText(纯文本) 只追加不替换；结束后 setBubbleBodyOnly 一次性渲染最终 markdown
+    /// </summary>
+    private int _streamedTextLength = 0;
+
     private async Task StreamDisplayAsync(ChatMessage aiMsg, string fullText)
     {
         if (string.IsNullOrEmpty(fullText))
@@ -1580,7 +1588,8 @@ _ = wv2.EnsureCoreWebView2Async();
         }
 
         _currentSession.Messages.Remove(aiMsg);
-        aiMsg.Content = string.Empty;
+        // ★ 2026-10-09 不再清空 Content —— 之前这里把 onToolExecuted 累积的工具摘要全擦了
+        //   现在 onToolExecuted 改写 placeholderAi.ToolCalls，Content 留作流式期间 aiMsg.Content = currentText 自然覆盖
         _currentSession.Messages.Add(aiMsg);
 
 // ★ 2026-08-31锛氭祦寮忚緭鍑哄悓鏃舵敮鎸?Label (鐢ㄦ埛) 鍜?WebView2 (AI)
@@ -1593,8 +1602,17 @@ _ = wv2.EnsureCoreWebView2Async();
             return;
         }
 
-        // 閫愬瓧绗︽祦寮忔樉绀?       
-         var buffer = new StringBuilder();
+        // ★ 2026-10-09 修闪烁：先清空 bubble-body 一次，后续只 append 增量
+        if (isWv2 && bubble is Microsoft.Web.WebView2.WinForms.WebView2 wv2Clear && wv2Clear.CoreWebView2 != null)
+        {
+            _streamedTextLength = 0;
+            // 保留 tools-stream 里的卡片，只清 bubble-body
+            await wv2Clear.CoreWebView2.ExecuteScriptAsync(
+                "(function(){var b=document.getElementById('bubble-body');if(b)b.innerHTML='';})();");
+        }
+
+        // 閫愬瓧绗︽祦寮忔樉绀?
+        var buffer = new StringBuilder();
         DateTime lastRenderTime = DateTime.MinValue;
         // ★ 2026-09-30 陛下反馈 AI 助理流式刷新太快一直闪
         //   60ms 约 16fps, 加上 WebView2 跨进程 ExecuteScriptAsync + Label 整行 LayoutBubbleRow
@@ -1623,17 +1641,18 @@ _ = wv2.EnsureCoreWebView2Async();
             charsSinceLastRender = 0;
 
             Microsoft.Web.WebView2.WinForms.WebView2? wv2ForLambda = (isWv2 ? bubble as Microsoft.Web.WebView2.WinForms.WebView2 : null);
-            string htmlForLambda = isWv2 ? RenderMarkdownAsHtml(RemoveThinkTags(currentText)) : "";
             Label? lblForLambda = (!isWv2 ? bubble as Label : null);
             await pnlMessagesScroll.InvokeAsync(() =>
             {
                 aiMsg.Content = currentText;
                 if (wv2ForLambda != null && wv2ForLambda.CoreWebView2 != null)
                 {
-                    // ★ 2026-10-07 陛下反馈「AI 流式刷新后又重设 body.innerHTML 擦掉 tool 记录」
-                    //   改用 updateBubbleBody(html)：只重设 #bubble-body + 重渲染 tool 列表
-                    string escaped = System.Text.Json.JsonSerializer.Serialize(htmlForLambda);
-                    string js = "window.updateBubbleBody(" + escaped + ");";
+                    // ★ 2026-10-09 修闪烁：只 append 增量纯文本到 bubble-body（不替换 innerHTML、不动 tools-stream）
+                    string deltaText = currentText.Substring(_streamedTextLength);
+                    _streamedTextLength = currentText.Length;
+                    if (deltaText.Length == 0) return;
+                    string escaped = System.Text.Json.JsonSerializer.Serialize(deltaText);
+                    string js = "window.appendStreamingText(" + escaped + ");";
                     _ = wv2ForLambda.CoreWebView2.ExecuteScriptAsync(js);
                 }
                 else if (lblForLambda != null)
@@ -1654,7 +1673,7 @@ _ = wv2.EnsureCoreWebView2Async();
             });
         }
 
-        // ★ 流式结束后：WebView2 触发一次最终更新
+        // ★ 流式结束后：WebView2 触发一次最终更新（用 setBubbleBodyOnly 替换为完整 markdown HTML，不动 tools-stream）
         if (isWv2 && bubble is Microsoft.Web.WebView2.WinForms.WebView2 wv2End)
         {
             if (wv2End.CoreWebView2 != null)
@@ -1663,9 +1682,10 @@ _ = wv2.EnsureCoreWebView2Async();
                 await pnlMessagesScroll.InvokeAsync(() =>
                 {
                     string htmlEnd = RenderMarkdownAsHtml(fullText);
-                    // ★ 2026-10-07 同上 → 改用 updateBubbleBody 不擦 tool 列表
+                    // ★ 2026-10-09 用 setBubbleBodyOnly 替代 updateBubbleBody —— 不调 rerenderToolStream
+                    //   避免重建 tools-stream 引发的闪烁；保持工具卡片原样
                     string escapedEnd = System.Text.Json.JsonSerializer.Serialize(htmlEnd);
-                    string jsEnd = "window.updateBubbleBody(" + escapedEnd + ");";
+                    string jsEnd = "window.setBubbleBodyOnly(" + escapedEnd + ");";
                     _ = wv2End.CoreWebView2.ExecuteScriptAsync(jsEnd);
                 });
             }
@@ -1673,6 +1693,7 @@ _ = wv2.EnsureCoreWebView2Async();
 
         // 最终内容存进 message（带 markdown）
         aiMsg.Content = fullText;
+        _streamedTextLength = 0;  // 重置，下次流式从头算
         _store.SaveSession(_currentSession);
     }
 
@@ -1965,7 +1986,7 @@ _ = wv2.EnsureCoreWebView2Async();
     ///   复用 UpdateForm.RenderMarkdownAsHtml 的 GitHub CSS 风格
     ///   返回完整 HTML，可直接赋给 WebBrowser.DocumentText
     /// </summary>
-    private string RenderMarkdownAsHtml(string markdown)
+    private string RenderMarkdownAsHtml(string markdown, string toolCardsHtml = "")
     {
         var pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
@@ -2049,7 +2070,7 @@ table code { background: rgba(175,184,193,0.2); padding: 2px 9px; border-radius:
 table a { color: #0969da; text-decoration: none; border-bottom: 1px solid transparent; }
 table a:hover { border-bottom-color: #0969da; }
 img { max-width: 100%; }
-</style></head><body><div id=""bubble-body"">" + bodyHtml + @"</div><div id=""tools-stream""></div><script>
+</style></head><body><div id=""bubble-body"">" + bodyHtml + @"</div><div id=""tools-stream"">" + toolCardsHtml + @"</div><script>
 (function() {
   // ★ 2026-08-31 方案 X：用 getBoundingClientRect().bottom - top 推真实高度
   //   WebView2 控件 Height  == 浏览器渲染区高度
@@ -2197,6 +2218,32 @@ img { max-width: 100%; }
     } catch (e) {}
   };
 
+  // ★ 2026-10-09 修陛下反馈「流式输出疯狂闪烁」+「关掉重开内容不一致」：
+  //   闪烁根因：updateBubbleBody 每次 innerHTML 替换 + rerenderToolStream 重建 + notify 触发 C# 高度重算 → 三连击
+  //   修法：
+  //     appendStreamingText(text)  流式时调，只把纯文本 appendChild 到 #bubble-body（不重建 DOM、不动 tools-stream）
+  //     setBubbleBodyOnly(html)    流式结束调，一次性把 #bubble-body 替换为完整 markdown HTML（不动 tools-stream）
+  //   工具卡片从 #bubble-body 里抽离 → #tools-stream 专门负责，渲染时只管一边
+  window.appendStreamingText = function(text) {
+    try {
+      var body = document.getElementById('bubble-body');
+      if (body) {
+        // 用 textNode 追加，避免 HTML 解析问题（纯文本不需转义）
+        body.appendChild(document.createTextNode(text));
+      }
+      notify();
+    } catch (e) {}
+  };
+  window.setBubbleBodyOnly = function(html) {
+    try {
+      var body = document.getElementById('bubble-body');
+      if (body) {
+        body.innerHTML = html;
+      }
+      notify();
+    } catch (e) {}
+  };
+
   // ★★★ 2026-09-02 转发滚轮事件到 C#：WebView2 默认吞 wheel 进浏览器内部，
   //   WinForms 控件本身收不到事件。所以用 JS 监听 wheel，postMessage 给 C# 滚父容器
   //   ★ passive:false 才能 preventDefault 阻止浏览器内部滚动
@@ -2234,6 +2281,29 @@ img { max-width: 100%; }
 })();
 </script></body></html>";
         return html;
+    }
+
+    /// <summary>
+    /// ★ 2026-10-09 把 List<ChatToolCallRecord> 渲染成 HTML 卡片字符串（跟 JS renderToolCard 同款样式）
+    ///   加载历史消息时由 CreateBubbleRow 调，把 msg.ToolCalls 注入到 #tools-stream 容器里
+    ///   跟 openAppendToolBlock 实时追加的卡片样式完全一致 → 关掉重开看起来一样
+    ///   name/summary 走 System.Net.WebUtility.HtmlEncode 防 XSS
+    /// </summary>
+    private string BuildToolCardsHtml(List<ChatToolCallRecord>? toolCalls)
+    {
+        if (toolCalls == null || toolCalls.Count == 0) return string.Empty;
+        var sb = new StringBuilder();
+        foreach (var tc in toolCalls)
+        {
+            string name = System.Net.WebUtility.HtmlEncode(tc.ToolName ?? string.Empty);
+            string summary = System.Net.WebUtility.HtmlEncode(tc.Result?.Summary ?? string.Empty);
+            // 跟 JS renderToolCard 完全同款 inline style → 实时 / 历史视觉一致
+            sb.Append("<div class=\"tool-call-card\" style=\"margin:8px 0; padding:8px 12px; background:#f0f7ff; border:1px solid #b6dcfb; border-radius:6px; font-size:13px; line-height:20px; color:#0b3a66;\">");
+            sb.Append("<div style=\"font-weight:600; color:#0969da; margin-bottom:4px;\">🔧 ").Append(name).Append("</div>");
+            sb.Append("<div style=\"white-space:pre-wrap;\">").Append(summary).Append("</div>");
+            sb.Append("</div>");
+        }
+        return sb.ToString();
     }
 
     /// <summary>

@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using A3Tools.Services;
+
 namespace A3Tools.Models;
 
 /// <summary>
@@ -47,6 +50,13 @@ public class ChatMessage
 
     /// <summary>错误信息（仅 IsError=true 时）</summary>
     public string ErrorMessage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 工具调用记录列表（仅 Assistant 消息，调过工具才有）
+    /// ★ 2026-10-09 加：之前只存 Content 不存 tool 列表，关掉重开后工具卡片丢失
+    ///   持久化到 LocalChatStore，加载时由 CreateBubbleRow 渲染成 cards 进 #tools-stream
+    /// </summary>
+    public List<ChatToolCallRecord>? ToolCalls { get; set; }
 }
 
 /// <summary>

@@ -103,7 +103,9 @@ public class LocalChatStore : IChatStore
                     Model = m.Model,
                     TokensUsed = m.TokensUsed,
                     IsError = m.IsError,
-                    ErrorMessage = m.ErrorMessage
+                    ErrorMessage = m.ErrorMessage,
+                    // ★ 2026-10-09 持久化 ToolCalls，让关掉重开后工具卡片还在
+                    ToolCalls = m.ToolCalls
                 }).ToList()
             }).ToList();
 
