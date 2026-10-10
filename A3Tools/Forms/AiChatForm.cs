@@ -305,58 +305,77 @@ public partial class AiChatForm : Form
     }
 
     /// <summary>
-    /// 「选择账套…」按钮 → 弹 AccountSelectForm 让陛下选
+    /// 「选择账套…」按钮 → 复用工具箱上方的账套选择机制
+    /// 陛下 2026-10-10 反馈：「A3Tools 是让你直接调用工具箱那个账套选择」——
+    ///   不能再自己 new AccountSelectForm(...) 并行调用，
+    ///   必须走 MainForm.PromptForAccount() 这个统一入口，跟工具箱同一路
     /// </summary>
     private void BtnSelectAccount_Click(object? sender, EventArgs e)
     {
+        if (_mainForm == null)
+        {
+            // 独立调用场景（MainForm 传 null）的 fallback：自己读账套 + new 选择器
+            try
+            {
+                var accounts = new DataService().LoadAccounts();
+                if (accounts.Count == 0)
+                {
+                    MessageBox.Show(this, "尚未配置任何账套，请到 A3Tools 主界面新增账套。", "提示",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                using var dlg = new AccountSelectForm(accounts, _currentAccountCode);
+                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
+                {
+                    ApplySelectedAccount(dlg.SelectedAccount);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"选择账套出错：{ex.Message}", "错误",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            return;
+        }
+
+        // 正常场景：调 MainForm.PromptForAccount() 统一入口（与工具箱同路）
+        Account? current = null;
+        if (!string.IsNullOrEmpty(_currentAccountCode))
+        {
+            try
+            {
+                current = _mainForm.GetAllAccounts()
+                    .FirstOrDefault(a => a.Code == _currentAccountCode);
+            }
+            catch { /* 拿不到 current 不影响选 */ }
+        }
+        var picked = _mainForm.PromptForAccount(current);
+        if (picked != null) ApplySelectedAccount(picked);
+    }
+
+    /// <summary>
+    /// 应用陛下选中的账套：更新字段 + 持久化 + 刷新显示 + 写日志
+    /// </summary>
+    private void ApplySelectedAccount(Account acc)
+    {
+        _currentAccountCode = acc.Code;
+        _currentAccountName = acc.Name ?? "";
+
+        // 持久化到 AppSettings.LastSelectedAccount
         try
         {
-            List<Account> accounts;
-            if (_mainForm != null)
-            {
-                accounts = _mainForm.GetAllAccounts();
-            }
-            else
-            {
-                var ds = new DataService();
-                accounts = ds.LoadAccounts();
-            }
-            if (accounts.Count == 0)
-            {
-                MessageBox.Show(this, "尚未配置任何账套，请到 A3Tools 主界面新增账套。", "提示",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            using var dlg = new AccountSelectForm(accounts);
-            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
-            {
-                var acc = dlg.SelectedAccount;
-                _currentAccountCode = acc.Code;
-                _currentAccountName = acc.Name ?? "";
-
-                // 持久化到 AppSettings.LastSelectedAccount
-                try
-                {
-                    var ds = new DataService();
-                    var settings = ds.LoadSettings();
-                    settings.LastSelectedAccount = acc.Code;
-                    ds.SaveSettings(settings);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[AI Chat] 保存账套选择失败: {ex.Message}");
-                }
-
-                RefreshAccountDisplay();
-                DebugLog($"账套切换: code='{acc.Code}', name='{acc.Name}'");
-            }
+            var ds = new DataService();
+            var settings = ds.LoadSettings();
+            settings.LastSelectedAccount = acc.Code;
+            ds.SaveSettings(settings);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"选择账套出错：{ex.Message}", "错误",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            System.Diagnostics.Debug.WriteLine($"[AI Chat] 保存账套选择失败: {ex.Message}");
         }
+
+        RefreshAccountDisplay();
+        DebugLog($"账套切换: code='{acc.Code}', name='{acc.Name}'");
     }
 
     /// <summary>

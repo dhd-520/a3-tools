@@ -160,15 +160,55 @@ public partial class MainForm : Form, IToolContext
 
     private void SelectToolAccount(bool isSource)
     {
-        // 取密文账套：工具内 BuildConnString/TestConnectionAsync 等会调 EncryptionService.Decrypt(password) 解密，
-        // 这里如果预先解密成明文就会导致"明文当密文解"返回空串，连不上。保持密文状态代入即可，工具无需任何改动。
-        var accounts = _dataService.LoadAccounts();
-        using var dlg = new AccountSelectForm(accounts);
-        if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
+        // ★ 2026-10-10 重构：复用 PromptForAccount() 统一入口
+        //   工具箱 + AI 助理 都走这一个方法
+        //   返回 null = 取消 / 失败
+        var picked = PromptForAccount(isSource ? _toolSourceAccount : _toolTargetAccount);
+        if (picked == null) return;
+        if (isSource) _toolSourceAccount = picked;
+        else _toolTargetAccount = picked;
+        RefreshToolDbLabels();
+    }
+
+    /// <summary>
+    /// ★ 2026-10-10 账套选择统一入口（工具箱 + AI 助理共享）
+    /// 陛下 2026-10-10 反馈：「A3Tools 是让你直接调用工具箱那个账套选择」——
+    ///   不应该自己 new AccountSelectForm(...) 并行调用，跟工具箱用同一路。
+    ///
+    /// 调用方式：
+    ///   1. AI 助理 BtnSelectAccount_Click：PromptForAccount(_currentAccountCode ?? null) → 拿到返回的 Account
+    ///   2. 工具箱 BtnToolsSelectSourceDb_Click / BtnToolsSelectTargetDb_Click：内部用 RefreshToolDbLabels
+    ///
+    /// 参数：
+    ///   current：当前选中的账套（可选，仅供选择器预选/排序提示）
+    /// 返回：
+    ///   Account 选中账套 / null 取消或失败
+    /// </summary>
+    public Account? PromptForAccount(Account? current = null)
+    {
+        try
         {
-            if (isSource) _toolSourceAccount = dlg.SelectedAccount;
-            else _toolTargetAccount = dlg.SelectedAccount;
-            RefreshToolDbLabels();
+            var accounts = _dataService.LoadAccounts();
+            if (accounts.Count == 0)
+            {
+                MessageBox.Show(this, "尚未配置任何账套，请到主界面新增账套。", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return null;
+            }
+            // 取密文账套：工具内 BuildConnString/TestConnectionAsync 等会调 EncryptionService.Decrypt(password) 解密，
+            // 这里如果预先解密成明文就会导致"明文当密文解"返回空串，连不上。保持密文状态代入即可，工具无需任何改动。
+            using var dlg = new AccountSelectForm(accounts, current?.Code);
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                return dlg.SelectedAccount;
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"选择账套出错：{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return null;
         }
     }
 

@@ -26,11 +26,11 @@ public class AccountSelectForm : Form
     /// <summary>陛下选中的账套（DialogResult.OK 时有效）</summary>
     public Account? SelectedAccount { get; private set; }
 
-    public AccountSelectForm(List<Account> accounts)
+    public AccountSelectForm(List<Account> accounts, string? preSelectCode = null)
     {
         _allAccounts = accounts ?? new List<Account>();
         InitializeComponent();
-        LoadAccounts();
+        LoadAccounts(preSelectCode);
     }
 
     private void InitializeComponent()
@@ -172,7 +172,7 @@ public class AccountSelectForm : Form
         CancelButton = _btnCancel;
     }
 
-    private void LoadAccounts()
+    private void LoadAccounts(string? preSelectCode = null)
     {
         string kw = _txtSearch.Text.Trim();
         var filtered = string.IsNullOrEmpty(kw)
@@ -189,11 +189,23 @@ public class AccountSelectForm : Form
         {
             _grid.Rows.Add(a.Code, a.Name, a.Server, a.Remark);
         }
-        // 默认选中第一行
+        // 优先选中 preSelectCode 对应行，缺则选第一行
+        int selectIdx = 0;
+        if (!string.IsNullOrEmpty(preSelectCode))
+        {
+            for (int i = 0; i < _grid.Rows.Count; i++)
+            {
+                if (_grid.Rows[i].Cells["Code"].Value?.ToString() == preSelectCode)
+                {
+                    selectIdx = i;
+                    break;
+                }
+            }
+        }
         if (_grid.Rows.Count > 0)
         {
-            _grid.CurrentCell = _grid.Rows[0].Cells[0];
-            _grid.Rows[0].Selected = true;
+            _grid.CurrentCell = _grid.Rows[selectIdx].Cells[0];
+            _grid.Rows[selectIdx].Selected = true;
         }
     }
 
