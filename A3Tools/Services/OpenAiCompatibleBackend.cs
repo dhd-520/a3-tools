@@ -286,28 +286,6 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                         continue;
                     }
 
-                    // ★ 2026-10-10 修「AI 嘴上说要干但没真干」通用版（DetectIntentButNoAction 续命器）
-                    //   现象：AI 文本说"让我先 X 然后 Y" / "我意识到自己漏了"，但 tool_calls 空
-                    //   根因：现有 DetectClaimedButNotCalled 只救强声明（"我已调 X"），不救意图声明 + 元意识
-                    //   修法：检测意图关键词 + 行动动词，或元意识承认 → 注入续命 prompt
-                    //   案例：Session 105813（全文分析） + 105919（自我意识到但没续）
-                    string? intentReason = DetectIntentButNoAction(message.Content ?? string.Empty, totalToolCallsInSession);
-                    if (intentReason != null && loop + 1 < maxLoops)
-                    {
-                        string intentSnippet = ExtractSnippet(message.Content ?? string.Empty, "", 150);
-                        string prompt = $"⚠️ 系统检测：你刚才的回复含「行动意图」或「元意识承认未真做」但本次循环你没有发出任何 tool_calls。\n" +
-                                        $"检测理由：{intentReason}\n" +
-                                        $"原文片段：{intentSnippet}\n\n" +
-                                        "现在请真正执行：\n" +
-                                        "  A. 如果你需要做某事，请在 tool_calls 里真调（如 search_knowledge_entries / update_knowledge_entry 等）\n" +
-                                        "  B. 如果你不需要做某事，请直接告诉陛下「我不会调 X，因为 Y」（理由要说清）\n\n" +
-                                        "禁止用文字描述「我调用了 X / 我将更新 Y / 我打算 search」但实际不发——这是幻觉。";
-                        msgs.Add(new { role = "user", content = prompt });
-                        AiAssistantLogger.LogLoopEnd(loop, "intent_but_no_action", sb.ToString(), true,
-                            $"AI 文本含行动意图但未真发 tool_calls（{intentReason}），已注入强制重发 prompt");
-                        continue;
-                    }
-
                     AiAssistantLogger.LogLoopEnd(loop, "no_tool_calls_response", earlyContent, isPremature,
                         isPremature ? warnReason : null);
                     brokeEarly = true;  // 修双重日志 bug：必须在 break 之前（之前写在 break 后是死代码）
@@ -423,8 +401,17 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         }
         finally
         {
-            // ★ 2026-10-06 会话结束日志（不管正常返回还是抛异常）
-            AiAssistantLogger.EndSession("completed");
+            // ★ 2026-10-10 修误导性 exitReason
+            //   之前无条件打"completed"——即使 AI 0 tool_calls + 全文分析也显示 completed
+            //   陛下反馈：「还没做为什么就显示完成啊」—— AI 0 工具调用时打 completed 误导
+            //   修正：3 状态分流
+            //     totalToolCallsInSession > 0     → "completed"        （AI 实际干活了）
+            //     brokeEarly  && == 0             → "no_action_taken"   （AI 说要做但 0 调用，说了不做）
+            //     !brokeEarly && == 0             → "aborted_ceiling"   （30 轮耗光 0 调用）
+            string exitReason = totalToolCallsInSession > 0
+                ? "completed"
+                : (brokeEarly ? "no_action_taken" : "aborted_ceiling");
+            AiAssistantLogger.EndSession(exitReason);
         }
     }
 
@@ -590,113 +577,16 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         return null;
     }
 
-    /// <summary>
-    /// ★ 2026-10-10 修「AI 嘴上说要干但没真干」通用版（DetectClaimedButNotCalled 的姊妹函数）
-    /// <para>现象：AI 文本说"让我先 search 拿 4 条 entry_id，然后并发更新" /
-    ///             "我意识到自己刚才犯了'空口说要干但没真...'"，
-    ///         但 message.ToolCalls 实际空 + totalToolCallsInSession == 0</para>
-    /// <para>根因：现有 DetectClaimedButNotCalled 只救「强声明」（说"我调了 X"），
-    ///         漏掉了「意图声明」（说"我打算做 X / 让我 X"）和「元意识」（"我意识到我漏了"）</para>
-    /// <para>修法：检测意图关键词 + 行动动词，或元意识承认 → 强制重发 tool_calls</para>
-    /// <para>案例：
-    ///   - Session 105813: 陛下纠正记录错误 → AI 全文分析 + 描述意图 + 0 tool_calls
-    ///   - Session 105919: 陛下问"更新完成了么" → AI 自我意识到"空口说"但 0 tool_calls</para>
-    /// <para>返回：null = 不触发；非 null = 触发 + 原因描述（含原文片段）</para>
-    /// </summary>
-    private static string? DetectIntentButNoAction(string content, int totalToolCallsInSession)
-    {
-        if (string.IsNullOrWhiteSpace(content)) return null;
-        // 关键：已真调过 → AI 后续描述可视为对前序调用的汇报，不是意图
-        if (totalToolCallsInSession > 0) return null;
-
-        // 1) 元意识强信号（单条即触发）：AI 自己承认没真做
-        var metaAwarePatterns = new[]
-        {
-            "我意识到", "我刚才犯了", "我刚才漏了", "我前面漏了", "我上轮漏了", "我刚才忘了",
-            "我没真正", "我并没有真正", "我并未真正", "我实际没有",
-            "说了但没", "空口说", "嘴上说", "说但没真", "但没真调", "但没真做",
-            "上轮回复", "上轮我", "上一轮我", "我前面说的", "我刚才没"
-        };
-        foreach (var p in metaAwarePatterns)
-        {
-            if (content.Contains(p))
-            {
-                string snippet = ExtractSnippet(content, p, 80);
-                return $"AI 元意识承认未真调（{p}）：{snippet}";
-            }
-        }
-
-        // 2) 意图关键词 + 行动动词（双条才触发）：AI 计划做某事但没发
-        //   目的：避免误杀"我需要理解一下"这种纯描述
-        //   ★ 2026-10-10 补三层：计划类 / 承诺紧急类 / 引用规则类
-        //     a55d8b3 只加了计划类，遗漏 Session 110853 的「必须/立即/按系统约束」
-        //     陛下日志原文：
-        //     「我现在必须立即执行 update」 + 「按系统约束：写动作必须真调」+ 编号步骤
-        //     → intentHit=0 (计划类没命中) + actionHit=3 (调/search/update) → 不触发 → break
-        //     补后：intentHit=3 (必须/立即/按系统约束) + actionHit=3 → 触发
-        var intentKeywords = new[]
-        {
-            // a) 计划类（弱信号）："我打算 X" / "让我 X" / "我准备 X"
-            "让我先", "让我", "打算", "准备", "我需要", "我应该", "我将", "我会", "我得", "我要",
-
-            // b) 承诺 / 紧急类（强信号）："我必须 X" / "立即 X" / "立刻 X"
-            "必须", "立即", "立刻", "马上", "赶紧", "right now", "asap",
-
-            // c) 引用规则类（强信号）：AI 在引自己的系统约束
-            //   现象：AI 「按系统约束：写动作必须真调」+ 0 tool_calls
-            //   本质：AI 知道规则但只是在复述，不是执行
-            "按系统约束", "按规则", "按要求", "系统约束", "规则要求", "约束是",
-
-            // d) 顺序连接词（辅助）："然后" / "接下来"
-            "然后", "接下来", "接着"
-        };
-        var actionVerbs = new[]
-        {
-            "调", "调用", "查", "查一下", "查一查", "搜索", "搜", "看",
-            "改", "更新", "修正", "替换", "写", "写入", "添加", "删", "删除",
-            "search", "update", "query", "find", "list", "delete", "remove"
-        };
-        int intentHit = 0, actionHit = 0;
-        string? firstSnippet = null;
-        foreach (var k in intentKeywords)
-        {
-            if (content.Contains(k))
-            {
-                intentHit++;
-                if (firstSnippet == null) firstSnippet = ExtractSnippet(content, k, 80);
-            }
-        }
-        foreach (var v in actionVerbs)
-        {
-            if (content.Contains(v)) actionHit++;
-        }
-        if (intentHit > 0 && actionHit > 0)
-        {
-            return $"AI 文本含意图（{intentHit} 词）+ 行动动词（{actionHit} 词）但未真发 tool_calls：{firstSnippet}";
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// 提取包含指定关键词的文本片段（用于续命 prompt 中回显意图）
-    /// <para>keyword 为空时返回 content 头 maxLen 字</para>
-    /// </summary>
-    private static string ExtractSnippet(string content, string keyword, int maxLen)
-    {
-        if (string.IsNullOrEmpty(content)) return "";
-        if (string.IsNullOrEmpty(keyword))
-        {
-            return content.Length > maxLen ? content.Substring(0, maxLen) + "..." : content;
-        }
-        int idx = content.IndexOf(keyword);
-        if (idx < 0) return content.Length > maxLen ? content.Substring(0, maxLen) + "..." : content;
-        int start = Math.Max(0, idx - 15);
-        int end = Math.Min(content.Length, idx + maxLen);
-        string snippet = content.Substring(start, end - start).Replace("\n", " ").Replace("\r", " ");
-        if (start > 0) snippet = "..." + snippet;
-        if (end < content.Length) snippet = snippet + "...";
-        return snippet;
-    }
+    // ★ 2026-10-10 删除 DetectIntentButNoAction + ExtractSnippet
+    //   陛下反馈：「正常AI可不用这样一直追问，并且还不做」——
+    //     a55d8b3 + 4abe607 续命机制是打地鼠（AI 永远比关键词列表聪明）
+    //     而且实际不起作用（Session 110853 已验证：AI 收到 prompt 后还是只写计划不真调）
+    //   修法：
+    //     1) 删 DetectIntentButNoAction + ExtractSnippet + 主循环调用（已分两步删）
+    //     2) BuildSystemPrompt 顶部加 CRITICAL 硬规则让 AI 一次就真调（步骤 4）
+    //     3) EndSession 区分 completed / no_action_taken / aborted_ceiling（已做）
+    //   保留 DetectClaimedButNotCalled：它是「撒谎」检测（AI 说「我调了 X」但 0 tool_calls），
+    //     这是 hallucination，不是一般 UX 问题，不属于"打地鼠"
 
     /// <summary>
     /// ★ 2026-10-09 陛下要求：失败重试机制

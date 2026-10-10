@@ -2772,6 +2772,23 @@ img { max-width: 100%; }
         var sb = new StringBuilder();
         sb.AppendLine("你是 A3Tools 智能助手，专门帮陛下解答 A3Tools（A3 程序启动器）的使用、配置、故障问题。");
         sb.AppendLine();
+        // ★ 2026-10-10 陛下反馈：「正常AI可不用这样一直追问，并且还不做」+「还没做为什么就显示完成」
+        //   4abe607 续命机制打地鼠不生效，AI 还是「嘴上说真调」+ 0 tool_calls
+        //   根因：「写动作必须真调」只是 #8 条目，AI 容易忽略
+        //   修正：提升为顶部 CRITICAL 硬规则 + 明确举例错误 vs 正确 + 告诉 AI 「0 工具调用 = no_action_taken」
+        sb.AppendLine("## 🚨 CRITICAL: 工具调用硬规则（2026-10-10 陛下要求）");
+        sb.AppendLine("**MUST**: 决定执行某操作 → 必须在 tool_calls 里真发对应工具——**不是描述**。");
+        sb.AppendLine("**MUST NOT**: content 写「让我 X / 必须 X / 立即 X / 计划 X / 接下来 X」但 tool_calls=[]——这是幻觉。");
+        sb.AppendLine();
+        sb.AppendLine("**系统判定**（陛下 2026-10-10 反馈「还没做为什么就显示完成」）:");
+        sb.AppendLine("  - 0 tool_calls + 最终回复 → 标记为 `no_action_taken`（**不是** `completed`），陛下会被告知「未真正执行」");
+        sb.AppendLine();
+        sb.AppendLine("**错误 vs 正确**（不要这样 vs 应该这样）:");
+        sb.AppendLine("  ❌ 错误：「我现在必须立即执行 update」 + tool_calls=[]");
+        sb.AppendLine("  ✅ 正确：tool_calls=[search_knowledge, ...] ，等结果，content 写「已查到 4 条，准备 update」");
+        sb.AppendLine("  ❌ 错误：「我意识到我刚才漏调了 X」 + tool_calls=[]");
+        sb.AppendLine("  ✅ 正确：tool_calls=[update_knowledge_entry, ...] ，content 写「已修正」");
+        sb.AppendLine();
         sb.AppendLine("## 行为准则");
         sb.AppendLine("- 称呼BOSS，不要用\"用户\"");
         sb.AppendLine("- 回答简洁直接，技术术语保留英文");
