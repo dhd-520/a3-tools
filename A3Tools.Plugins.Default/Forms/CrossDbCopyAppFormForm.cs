@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using A3Tools.Models;
 using A3Tools.Plugins;
+using A3Tools.Common.Services;
 using A3Tools.Services;
 using Microsoft.Data.SqlClient;
 using A3Tools.Common.DataAccess;
@@ -18,6 +19,39 @@ public partial class CrossDbCopyAppFormForm : Form
     private readonly Account? _currentAccount;
     private Account? _srcAccount;
     private Account? _tgtAccount;
+
+    // ===== ★ 2026-10-10 方案 4 陛下要求：AI 静默执行模式 =====
+    //   _isHeadlessMode=true 时 ShowMessage 写审计日志而非弹 MessageBox
+    //   手动流程（BtnConfirm_Click）100% 不变（_isHeadlessMode 默认 false → ShowMessage 行为等价 MessageBox.Show）
+    private bool _isHeadlessMode = false;
+
+    // ★ 2026-10-10 方案 4：_isHeadlessMode 时写审计日志，否则弹 MessageBox
+    //   手动模式 _isHeadlessMode=false → MessageBox.Show（100% 等价原行为）
+    //   AI 模式 _isHeadlessMode=true → 写 DATA/logs/ai_cross_db_copy_audit.log
+    private void ShowMessage(string text, string title, MessageBoxIcon icon)
+    {
+        if (_isHeadlessMode)
+        {
+            CrossDbCopyAuditLogger.Log(
+                sourceAccount: "(internal)",
+                targetAccount: "(internal)",
+                objectType: "(internal)",
+                objectNames: $"[{title}] {text}",
+                success: icon != MessageBoxIcon.Error,
+                error: icon == MessageBoxIcon.Error ? text : null,
+                warning: icon == MessageBoxIcon.Warning ? text : null);
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            Invoke(new Action(() => MessageBox.Show(this, text, title, MessageBoxButtons.OK, icon)));
+        }
+        else
+        {
+            MessageBox.Show(this, text, title, MessageBoxButtons.OK, icon);
+        }
+    }
     private System.Data.DataTable? _searchResults;
 
     public CrossDbCopyAppFormForm(IToolContext context, Account? currentAccount)
@@ -648,5 +682,44 @@ ORDER BY NAME";
         lblSearchProgress.Text = "已清空选项";
         lblSearchProgress.ForeColor = Color.Gray;
     }
+    // ★ 2026-10-10 方案 4：AI 静默执行入口（不 Show Form）
+    //   复用现有 CopyAppFormsAsync 业务逻辑（与手动流程 100% 等价）
+    public async Task<bool> ExecuteHeadlessAsync(
+        Account source, Account target,
+        string objectGuids, bool deleteFirst)
+    {
+        bool success = false;
+        string? outerError = null;
+        _isHeadlessMode = true;
+        try
+        {
+            ApplyAccountToDatabaseFields(source, isSource: true);
+            ApplyAccountToDatabaseFields(target, isSource: false);
+
+            success = await CopyAppFormsAsync(
+                txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
+                txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
+                objectGuids, deleteFirst);
+            return success;
+        }
+        catch (Exception ex)
+        {
+            outerError = ex.Message;
+            throw;
+        }
+        finally
+        {
+            _isHeadlessMode = false;
+            // 写整体结果审计日志（含完整账套上下文）
+            CrossDbCopyAuditLogger.Log(
+                sourceAccount: source.Code,
+                targetAccount: target.Code,
+                objectType: "CrossDbCopyAppFormForm",
+                objectNames: string.Join(";", objectGuids.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).ToList()),
+                success: success,
+                error: outerError);
+        }
+    }
+
 }
 

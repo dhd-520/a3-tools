@@ -3,6 +3,7 @@ using System.Windows.Forms;
 using A3Tools.Common.DataAccess;
 using A3Tools.Models;
 using A3Tools.Plugins;
+using A3Tools.Common.Services;
 using A3Tools.Services;
 using Microsoft.Data.SqlClient;
 
@@ -93,6 +94,39 @@ public partial class CrossDbCopyFormForm : Form
     private IDataAccess? GetTargetDA() => ProxyHelper.CreateDataAccess(_tgtAccount);
     private bool IsSourceHttp => ProxyHelper.IsHttp(_srcAccount);
     private bool IsTargetHttp => ProxyHelper.IsHttp(_tgtAccount);
+
+    // ===== ★ 2026-10-10 方案 4 陛下要求：AI 静默执行模式 =====
+    //   _isHeadlessMode=true 时 ShowMessage 写审计日志而非弹 MessageBox
+    //   手动流程（BtnConfirm_Click）100% 不变（_isHeadlessMode 默认 false → ShowMessage 行为等价 MessageBox.Show）
+    private bool _isHeadlessMode = false;
+
+    // ★ 2026-10-10 方案 4：_isHeadlessMode 时写审计日志，否则弹 MessageBox
+    //   手动模式 _isHeadlessMode=false → MessageBox.Show（100% 等价原行为）
+    //   AI 模式 _isHeadlessMode=true → 写 DATA/logs/ai_cross_db_copy_audit.log
+    private void ShowMessage(string text, string title, MessageBoxIcon icon)
+    {
+        if (_isHeadlessMode)
+        {
+            CrossDbCopyAuditLogger.Log(
+                sourceAccount: "(internal)",
+                targetAccount: "(internal)",
+                objectType: "(internal)",
+                objectNames: $"[{title}] {text}",
+                success: icon != MessageBoxIcon.Error,
+                error: icon == MessageBoxIcon.Error ? text : null,
+                warning: icon == MessageBoxIcon.Warning ? text : null);
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            Invoke(new Action(() => MessageBox.Show(this, text, title, MessageBoxButtons.OK, icon)));
+        }
+        else
+        {
+            MessageBox.Show(this, text, title, MessageBoxButtons.OK, icon);
+        }
+    }
     private bool IsHttpMode => IsSourceHttp || IsTargetHttp;
 
     private void BtnSelectSource_Click(object? sender, EventArgs e)
@@ -1884,5 +1918,44 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         var result = await ProxyHelper.ExecuteScalarAsync(tgtDA, sql);
         return Convert.ToInt32(result ?? 0) > 0;
     }
+    // ★ 2026-10-10 方案 4：AI 静默执行入口（不 Show Form）
+    //   复用现有 CopyFormsAsync 业务逻辑（与手动流程 100% 等价）
+    public async Task<bool> ExecuteHeadlessAsync(
+        Account source, Account target,
+        string objectGuids, bool deleteFirst, bool copyStoredProcs, bool copyTableStructures)
+    {
+        bool success = false;
+        string? outerError = null;
+        _isHeadlessMode = true;
+        try
+        {
+            ApplyAccountToDatabaseFields(source, isSource: true);
+            ApplyAccountToDatabaseFields(target, isSource: false);
+
+            success = await CopyFormsAsync(
+                txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
+                txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
+                objectGuids, deleteFirst, copyStoredProcs, copyTableStructures);
+            return success;
+        }
+        catch (Exception ex)
+        {
+            outerError = ex.Message;
+            throw;
+        }
+        finally
+        {
+            _isHeadlessMode = false;
+            // 写整体结果审计日志（含完整账套上下文）
+            CrossDbCopyAuditLogger.Log(
+                sourceAccount: source.Code,
+                targetAccount: target.Code,
+                objectType: "CrossDbCopyFormForm",
+                objectNames: string.Join(";", objectGuids.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).ToList()),
+                success: success,
+                error: outerError);
+        }
+    }
+
 
 }
