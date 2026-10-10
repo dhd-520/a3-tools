@@ -12,6 +12,7 @@ using A3Tools.Models;
 using A3Tools.Services;
 using A3Tools.Services.AiActions.AiAssistantLogging;
 using A3Tools.Services.ChatStore;
+using A3Tools.Common.Forms; // 2026-10-10 共享账套选择器 A3Tools.Common 项目
 using Markdig;
 
 namespace A3Tools.Forms;
@@ -305,52 +306,41 @@ public partial class AiChatForm : Form
     }
 
     /// <summary>
-    /// 「选择账套…」按钮 → 复用工具箱上方的账套选择机制
-    /// 陛下 2026-10-10 反馈：「A3Tools 是让你直接调用工具箱那个账套选择」——
-    ///   不能再自己 new AccountSelectForm(...) 并行调用，
-    ///   必须走 MainForm.PromptForAccount() 这个统一入口，跟工具箱同一路
+    /// 「选择账套…」按钮 → 跟工具箱上方账套选择逐字同款
+    /// 陛下 2026-10-10 反馈：
+    ///   1. 「A3Tools 是让你直接调用工具箱那个账套选择」—— 不再造并行选择器
+    ///   2. 「本来用的就是统一抽出来的」—— A3Tools.Common.Form.Forms.AccountSelectForm 是共享类
+    ///   3. 「把工具箱的账套选择都改了」—— MainForm.SelectToolAccount 保持原状，不动
+    ///   本方法仅调 _mainForm.GetAllAccounts() 拿账套 + new 共享选择器，逻辑跟 MainForm.SelectToolAccount 一样
     /// </summary>
     private void BtnSelectAccount_Click(object? sender, EventArgs e)
     {
-        if (_mainForm == null)
+        try
         {
-            // 独立调用场景（MainForm 传 null）的 fallback：自己读账套 + new 选择器
-            try
+            // 拉账套列表：主路径走 _mainForm（跟工具箱 SelectToolAccount 同款）
+            // 独立调用场景（_mainForm 为 null）走 DataService fallback
+            List<Account> accounts = _mainForm != null
+                ? _mainForm.GetAllAccounts()
+                : new DataService().LoadAccounts();
+            if (accounts.Count == 0)
             {
-                var accounts = new DataService().LoadAccounts();
-                if (accounts.Count == 0)
-                {
-                    MessageBox.Show(this, "尚未配置任何账套，请到 A3Tools 主界面新增账套。", "提示",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                using var dlg = new AccountSelectForm(accounts, _currentAccountCode);
-                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
-                {
-                    ApplySelectedAccount(dlg.SelectedAccount);
-                }
+                MessageBox.Show(this, "尚未配置任何账套，请到 A3Tools 主界面新增账套。", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
-            catch (Exception ex)
+            // ★ 2026-10-10 关键：直接调共享选择器 A3Tools.Common.Forms.AccountSelectForm
+            //   这是工具箱 SelectToolAccount 用的同一个类，不再造并行
+            using var dlg = new AccountSelectForm(accounts);
+            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedAccount != null)
             {
-                MessageBox.Show(this, $"选择账套出错：{ex.Message}", "错误",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ApplySelectedAccount(dlg.SelectedAccount);
             }
-            return;
         }
-
-        // 正常场景：调 MainForm.PromptForAccount() 统一入口（与工具箱同路）
-        Account? current = null;
-        if (!string.IsNullOrEmpty(_currentAccountCode))
+        catch (Exception ex)
         {
-            try
-            {
-                current = _mainForm.GetAllAccounts()
-                    .FirstOrDefault(a => a.Code == _currentAccountCode);
-            }
-            catch { /* 拿不到 current 不影响选 */ }
+            MessageBox.Show(this, $"选择账套出错：{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
-        var picked = _mainForm.PromptForAccount(current);
-        if (picked != null) ApplySelectedAccount(picked);
     }
 
     /// <summary>
