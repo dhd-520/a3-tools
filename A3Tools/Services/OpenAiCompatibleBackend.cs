@@ -176,6 +176,14 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         // ★ 2026-10-06 增：当前加载的 Skill 是否需要写工具（read-only Skill 跳过续命检查，避免死循环到 maxLoops）
         bool currentSkillWriteRequired = true;  // 默认 true（安全起见，未明确标记的 Skill 仍走严格检查）
 
+        // ★ 2026-10-10 陛下反馈：「我感觉是没提取」—— V1（a55d8b3/4abe607）只关键词匹配不提工具名
+        //   V2：预拉所有可用工具名 + 提取 AI 文本里提的具体工具 + Skill 风格步骤 prompt
+        //   关键洞察（陛下）：Skill 模式 = 模型「按步骤执行」= 真发 tool_calls
+        //                  追问模式 = 模型「按承诺执行」= 0 tool_calls
+        //   修法：让追问 prompt 长得像 Skill 步骤，模型才能照着做
+        var availableToolNames = _actions.All().Select(a => a.Name).ToList();
+        int intentContinuationCount = 0;     // 注入过几次结构化续命 prompt（限 2 次防环）
+
         try
         {
         for (int loop = 0; loop < maxLoops; loop++)
@@ -283,6 +291,33 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                         msgs.Add(new { role = "user", content = prompt });
                         AiAssistantLogger.LogLoopEnd(loop, "claimed_call_but_empty_toolcalls", sb.ToString(), true,
                             $"AI 文本描述了工具调用（{claimed}）但 tool_calls 为空，已注入强制重发 prompt");
+                        continue;
+                    }
+
+                    // ★ 2026-10-10 修「AI 嘴上说要干但没真干」V2 版（提取工具名 + Skill 风格 prompt）
+                    //   V1（a55d8b3/4abe607）只词匹配不提具体工具 → 陛下反馈「没提取」→ 没用
+                    //   V2: 预拉所有可用工具名 + 提取 AI 文本里的具体工具 + Skill 风格步骤 prompt
+                    //   关键：Skill 模式 = 模型「按步骤走」= 真发 tool_calls
+                    //        追问模式 = 模型「按承诺走」= 0 tool_calls
+                    //   修法：追问 prompt 长得像 Skill 步骤，模型才会照着做
+                    //   限 2 次：超过则不再注入（防止无限环），跳进 break 路径 → no_action_taken
+                    var intentResult = DetectIntentAndExtractTools(
+                        message.Content ?? string.Empty,
+                        totalToolCallsInSession,
+                        availableToolNames);
+                    if (intentResult.Detected
+                        && intentContinuationCount < 2
+                        && loop + 1 < maxLoops)
+                    {
+                        string prompt = BuildStructuredContinuationPrompt(
+                            message.Content ?? string.Empty,
+                            intentResult.Reason,
+                            intentResult.ExtractedTools,
+                            availableToolNames);
+                        msgs.Add(new { role = "user", content = prompt });
+                        AiAssistantLogger.LogLoopEnd(loop, "intent_but_no_action_v2", sb.ToString(), true,
+                            $"AI 文本含行动意图但未真发 tool_calls（{intentResult.Reason}），已提取工具 [{string.Join(",", intentResult.ExtractedTools)}]，注入 Skill 风格续命 prompt（第 {intentContinuationCount + 1}/2 次）");
+                        intentContinuationCount++;
                         continue;
                     }
 
@@ -577,16 +612,152 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         return null;
     }
 
-    // ★ 2026-10-10 删除 DetectIntentButNoAction + ExtractSnippet
-    //   陛下反馈：「正常AI可不用这样一直追问，并且还不做」——
-    //     a55d8b3 + 4abe607 续命机制是打地鼠（AI 永远比关键词列表聪明）
-    //     而且实际不起作用（Session 110853 已验证：AI 收到 prompt 后还是只写计划不真调）
-    //   修法：
-    //     1) 删 DetectIntentButNoAction + ExtractSnippet + 主循环调用（已分两步删）
-    //     2) BuildSystemPrompt 顶部加 CRITICAL 硬规则让 AI 一次就真调（步骤 4）
-    //     3) EndSession 区分 completed / no_action_taken / aborted_ceiling（已做）
-    //   保留 DetectClaimedButNotCalled：它是「撒谎」检测（AI 说「我调了 X」但 0 tool_calls），
-    //     这是 hallucination，不是一般 UX 问题，不属于"打地鼠"
+    // ★ 2026-10-10 V2 续命器（陛下 11:26 反馈「我感觉是没提取」）
+    //   2f9a14d 删了 V1（a55d8b3/4abe607），2f9a14d 加 BuildSystemPrompt 顶部 CRITICAL 规则 + EndSession 3 状态分流
+    //   但 AI 还是 0 tool_calls（Session 110853/111718 验证），顶部 prompt 规则不起作用
+    //   陛下 11:26 进一步反馈：「为什么命中 Skill 就能有条不紊调工具，但继续追问就不行」
+    //   原因：
+    //     Skill 模式 = 模型「按步骤走」= 真发 tool_calls
+    //     追问模式 = 模型「按承诺走」= 0 tool_calls（LLM 普遍特性，不看模型）
+    //   V2 修法：追问 prompt 长得像 Skill 样 —— 给具体步骤 + 提取的工具名
+    //   关键代码路径：DetectIntentAndExtractTools() → ExtractToolNamesFromContent() → BuildStructuredContinuationPrompt()
+    //   限 2 次（intentContinuationCount 计数）：超过进 break 路径 → no_action_taken
+    //   保留 DetectClaimedButNotCalled（撒谎检测，不是追问）
+
+    /// <summary>
+    /// ★ 2026-10-10 V2 续命器：检测意图 + 提取 AI 实际提到的工具名
+    /// <para>现象：AI 文本说"我打算 search_knowledge + update_knowledge_entry" + 0 tool_calls</para>
+    /// <para>根因（V1）：只检测关键词（必须/立即/按系统约束），不提取 AI 说的具体工具 → 追问 prompt 太抽象</para>
+    /// <para>修法：正则 \b 词边界匹配 availableToolNames（_actions.All()） → 拿到 AI 说的具体工具</para>
+    /// <para>返回：detected=true/false + reason（触发原因） + extractedTools（AI 提到的工具名列表）</para>
+    /// </summary>
+    private static (bool Detected, string Reason, List<string> ExtractedTools) DetectIntentAndExtractTools(
+        string content, int totalToolCallsInSession, List<string> availableToolNames)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return (false, "", new List<string>());
+        // 关键：已真调过 → AI 后续描述是对前序调用的汇报，不是意图
+        if (totalToolCallsInSession > 0) return (false, "", new List<string>());
+
+        // 1) 元意识强信号（单条即触发）：AI 自己承认没真做
+        var metaAwarePatterns = new[]
+        {
+            "我意识到", "我刚才犯了", "我刚才漏了", "我前面漏了", "我上轮漏了", "我刚才忘了",
+            "我没真正", "我并没有真正", "我并未真正", "我实际没有",
+            "说了但没", "空口说", "嘴上说", "说但没真", "但没真调", "但没真做",
+            "上轮回复", "上轮我", "上一轮我", "我前面说的", "我刚才没"
+        };
+        foreach (var p in metaAwarePatterns)
+        {
+            if (content.Contains(p))
+            {
+                var tools = ExtractToolNamesFromContent(content, availableToolNames);
+                return (true, $"AI 元意识承认未真调（{p}）", tools);
+            }
+        }
+
+        // 2) 意图关键词 + 行动动词（双条才触发）
+        //   3 层关键词（计划 / 承诺紧急 / 引用规则 / 顺序连接）
+        var intentKeywords = new[]
+        {
+            "让我先", "让我", "打算", "准备", "我需要", "我应该", "我将", "我会", "我得", "我要",
+            "必须", "立即", "立刻", "马上", "赶紧", "right now", "asap",
+            "按系统约束", "按规则", "按要求", "系统约束", "规则要求", "约束是",
+            "然后", "接下来", "接着"
+        };
+        var actionVerbs = new[]
+        {
+            "调", "调用", "查", "查一下", "查一查", "搜索", "搜", "看",
+            "改", "更新", "修正", "替换", "写", "写入", "添加", "删", "删除",
+            "search", "update", "query", "find", "list", "delete", "remove"
+        };
+        int intentHit = 0, actionHit = 0;
+        foreach (var k in intentKeywords) if (content.Contains(k)) intentHit++;
+        foreach (var v in actionVerbs) if (content.Contains(v)) actionHit++;
+
+        if (intentHit > 0 && actionHit > 0)
+        {
+            var tools = ExtractToolNamesFromContent(content, availableToolNames);
+            return (true, $"AI 文本含意图（{intentHit} 词）+ 行动动词（{actionHit} 词）", tools);
+        }
+        return (false, "", new List<string>());
+    }
+
+    /// <summary>
+    /// 从 AI 文本中提取实际提到的工具名（正则 \b 词边界匹配）
+    /// <para>例：「我打算调 search_knowledge 拿 4 条」 → ["search_knowledge"]</para>
+    /// <para>例：「先 list_tables 然后 get_table_schema」 → ["list_tables", "get_table_schema"]</para>
+    /// <para>空例：「我必须立即执行 update」 → []（"update" 不是工具名，"update_knowledge_entry" 才是）</para>
+    /// </summary>
+    private static List<string> ExtractToolNamesFromContent(string content, List<string> availableToolNames)
+    {
+        var found = new List<string>();
+        if (string.IsNullOrWhiteSpace(content) || availableToolNames == null) return found;
+        foreach (var tool in availableToolNames)
+        {
+            if (string.IsNullOrEmpty(tool)) continue;
+            // \b 词边界匹配（工具名是英文 snake_case，中文文本不干扰）
+            if (Regex.IsMatch(content, $@"\b{Regex.Escape(tool)}\b", RegexOptions.IgnoreCase))
+            {
+                found.Add(tool);
+            }
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// ★ 2026-10-10 V2 prompt 构造器：Skill 风格步骤模板
+    /// <para>陛下 11:24 反馈：「为什么命中 Skill 就能有条不紊调工具，但继续追问就不行」</para>
+    /// <para>原因：Skill 给结构（Step 1 / Step 2），追问给承诺（"请继续"）</para>
+    /// <para>修法：让追问 prompt 长成 Skill 样 —— 给具体步骤 + 提取的工具名</para>
+    /// <para>输出：中文 Skill 风格 prompt（Step 1/N + 具体 tool 名）</para>
+    /// </summary>
+    private static string BuildStructuredContinuationPrompt(
+        string originalContent, string reason, List<string> extractedTools, List<string> availableToolNames)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("你刚才说要执行以下操作，但 tool_calls=[]（没真发工具调用）。");
+        sb.AppendLine($"检测理由：{reason}");
+        sb.AppendLine();
+
+        if (extractedTools.Count > 0)
+        {
+            sb.AppendLine($"**已从你文本里提取的工具**（用 \\\\b 词边界正则匹配）：{string.Join(", ", extractedTools)}");
+            sb.AppendLine();
+            sb.AppendLine("**请按以下 Skill 风格步骤直接发 tool_calls（不要在 content 里描述）**：");
+            sb.AppendLine();
+            for (int i = 0; i < extractedTools.Count; i++)
+            {
+                var tool = extractedTools[i];
+                sb.AppendLine($"  Step {i+1}: tool_calls = [{{name:\"{tool}\", arguments:{{... 填必要参数}}}}]");
+                sb.AppendLine($"  Step {i+1}.5: 等待结果");
+            }
+            sb.AppendLine($"  Step {extractedTools.Count+1}: content 写「已完成 X / 已更新 N 条」给陛下");
+            sb.AppendLine();
+            sb.AppendLine("**如果不知道参数怎么填**：");
+            sb.AppendLine("  - 先调 list_xxx / get_xxx 查（例：list_accounts / list_tables / get_table_schema）");
+            sb.AppendLine("  - 等查到了再调真正的 write tool");
+        }
+        else
+        {
+            // 未提到具体工具名 —— 列出所有 list/get/search 类读工具让 AI 自己选
+            sb.AppendLine("**未从你文本里提取到具体工具名**（你只说了「我打算 / 必须」等空话，没说调啥）。");
+            sb.AppendLine();
+            sb.AppendLine("**当前可用「读」工具清单**（先调这些查数据）：");
+            var readTools = availableToolNames
+                .Where(n => n.StartsWith("list_") || n.StartsWith("get_") || n.StartsWith("search_") || n.StartsWith("read_"))
+                .ToList();
+            foreach (var t in readTools) sb.AppendLine($"  - {t}");
+            sb.AppendLine();
+            sb.AppendLine("**通用 Skill 步骤**：");
+            sb.AppendLine("  Step 1: 调上面 list_xxx / get_xxx 之一查数据");
+            sb.AppendLine("  Step 2: 调真正的 write tool（update/add/delete/execute）");
+            sb.AppendLine("  Step 3: content 写结果给陛下");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("**关键**：从现在起不要在 content 里写「我打算 / 让我 / 必须 / 立即」等承诺。直接发 tool_calls。");
+        return sb.ToString();
+    }
 
     /// <summary>
     /// ★ 2026-10-09 陛下要求：失败重试机制
