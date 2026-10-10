@@ -65,6 +65,18 @@ public class ActionRegistry
         //   加 read_ai_log / list_ai_logs 让 AI 能自查执行轨迹（调试 + 自审闭环）
         Register(new ReadAiLogAction());
         Register(new ListAiLogsAction());
+        // ★ 2026-10-10 陛下要求：把工具箱 8 个跨库复制工具全部开放给 AI
+        //   设计原则：AI 只负责「打开对应窗口 + 预填源账套」
+        //   目标账套 / 对象由陛下在窗口内选择（AI 不擅自决定）
+        //   窗口内还需点 [开始复制] → 二次保护
+        Register(new CopyDataObjectAction());
+        Register(new CopyConfigDataAction());
+        Register(new CopyWinFormAction());
+        Register(new CopyAppFormAction());
+        Register(new CopyObjectLinkAction());
+        Register(new CopyReportAction());
+        Register(new CopyWebDashboardAction());
+        Register(new CopyAppChartAction());
     }
 
     private void Register(IAiAction action)
