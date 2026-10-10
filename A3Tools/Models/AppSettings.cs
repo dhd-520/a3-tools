@@ -170,4 +170,13 @@ public class AppSettings
     // ===== A3ToolsHub 一键配置（Root 模式专用）=====
     /// <summary>A3ToolsHub 配置文件生成目录（Root 模式专用）</summary>
     public string A3ToolsHubConfigDir { get; set; } = string.Empty;
+
+    // ===== ★ 2026-10-10 方案 4 陛下要求：AI 跨库复制白名单账套编码列表 =====
+    //   AI 调用跨库复制工具（copy_data_object / copy_config_data / copy_win_form 等 8 个）
+    //   时，目标账套必须在此白名单内才能静默执行。
+    //   默认空（陛下手动配置后才生效，未配置时 AI 调复制工具一律拒绝）。
+    //   配置示例：["8088", "8089", "9090"]（AI 可静默复制到这些账套）。
+    //   配在 DATA/settings.json：陛下可用文本编辑器改，或后续加 AI 助理设置面板 UI。
+    //   配合 CopyXxxAction 的二次确认（陛下必须输入目标账套编码）→ 双重保护。
+    public List<string> CrossDbCopyWhitelist { get; set; } = new();
 }

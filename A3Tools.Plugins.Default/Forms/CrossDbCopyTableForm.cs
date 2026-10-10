@@ -2,6 +2,7 @@ using System.Data;
 using System.Diagnostics;
 using System.Windows.Forms;
 using A3Tools.Common.DataAccess;
+using A3Tools.Common.Services;  // ★ 2026-10-10 方案 4: CrossDbCopyAuditLogger
 using A3Tools.Models;
 using A3Tools.Plugins;
 using A3Tools.Services;
@@ -1118,10 +1119,8 @@ WHERE o.type = @objType
 
                 if (string.IsNullOrEmpty(script))
                 {
-                    this.Invoke(new Action(() =>
-                    {
-                        MessageBox.Show("无法获取 " + objectName + " 的定义（对象不存在或无权访问）。", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }));
+                    // ★ 2026-10-10 方案 4：手动模式弹 MessageBox，静默模式写审计日志
+                    ShowMessage("无法获取 " + objectName + " 的定义（对象不存在或无权访问）。", "警告", MessageBoxIcon.Warning);
                     continue;
                 }
 
@@ -1218,16 +1217,95 @@ WHERE o.type = @objType
         }
         catch (Exception ex)
         {
-            this.Invoke(new Action(() =>
-            {
-                MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }));
+            // ★ 2026-10-10 方案 4：手动模式弹 MessageBox，静默模式写审计日志
+            ShowMessage("复制失败：" + ex.Message, "错误", MessageBoxIcon.Error);
             return false;
         }
         finally
         {
             srcConn?.Dispose();
             tgtConn?.Dispose();
+        }
+    }
+
+    // ===== ★ 2026-10-10 方案 4 陛下要求：AI 静默执行模式 =====
+    //   _isHeadlessMode=true 时 ShowMessage 写审计日志而非弹 MessageBox
+    //   手动流程（BtnConfirm_Click）100% 不变（_isHeadlessMode 默认 false → ShowMessage 行为等价 MessageBox.Show）
+    private bool _isHeadlessMode = false;
+
+    // ★ 2026-10-10 方案 4：AI 静默执行入口（不 Show Form）
+    //   复用现有 CopyObjectsAsync 业务逻辑（与手动流程 100% 等价）
+    //   手动流程：BtnConfirm_Click → CopyObjectsAsync（_isHeadlessMode=false → ShowMessage=MessageBox.Show）
+    //   AI 流程：ExecuteHeadlessAsync → CopyObjectsAsync（_isHeadlessMode=true → ShowMessage=审计日志）
+    //   陛下约束：不影响工具那部分代码（DefaultTools.cs 100% 不动），不影响手动使用工具（行为 100% 等价）
+    public async Task<bool> ExecuteHeadlessAsync(
+        Account source, Account target,
+        List<string> objectNames, string objectType,
+        bool deleteIfExists = false)
+    {
+        bool success = false;
+        string? outerError = null;
+        _isHeadlessMode = true;
+        try
+        {
+            // 用现有 ApplyAccountToDatabaseFields 把 Account 加载到 UI 字段
+            // 这样 GetSourceDA / IsSourceHttp / 等内部方法才能正确工作
+            ApplyAccountToDatabaseFields(source, isSource: true);
+            ApplyAccountToDatabaseFields(target, isSource: false);
+
+            // 调现有 CopyObjectsAsync（业务逻辑 100% 复用）
+            success = await CopyObjectsAsync(
+                txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text,
+                txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text,
+                objectNames, objectType, deleteIfExists);
+            return success;
+        }
+        catch (Exception ex)
+        {
+            outerError = ex.Message;
+            throw;
+        }
+        finally
+        {
+            _isHeadlessMode = false;
+            // 写整体结果审计日志（含完整账套上下文）
+            CrossDbCopyAuditLogger.Log(
+                sourceAccount: source.Code,
+                targetAccount: target.Code,
+                objectType: objectType,
+                objectNames: string.Join(";", objectNames),
+                success: success,
+                error: outerError);
+        }
+    }
+
+    // ★ 2026-10-10 方案 4：_isHeadlessMode 时写审计日志，否则弹 MessageBox
+    //   手动模式 _isHeadlessMode=false → MessageBox.Show（100% 等价原行为）
+    //   AI 模式 _isHeadlessMode=true → 写 DATA/logs/ai_cross_db_copy_audit.log
+    private void ShowMessage(string text, string title, MessageBoxIcon icon)
+    {
+        if (_isHeadlessMode)
+        {
+            // 静默模式：内部警告/错误也写审计日志（账套上下文由 ExecuteHeadlessAsync finally 写）
+            CrossDbCopyAuditLogger.Log(
+                sourceAccount: "(internal)",
+                targetAccount: "(internal)",
+                objectType: "(internal)",
+                objectNames: $"[{title}] {text}",
+                success: icon != MessageBoxIcon.Error,
+                error: icon == MessageBoxIcon.Error ? text : null,
+                warning: icon == MessageBoxIcon.Warning ? text : null);
+            return;
+        }
+
+        // 手动模式：弹 MessageBox（保持原行为，自动处理 InvokeRequired）
+        if (InvokeRequired)
+        {
+            Invoke(new Action(() => MessageBox.Show(this, text, title, MessageBoxButtons.OK, icon)));
+        }
+        else
+        {
+            MessageBox.Show(this, text, title, MessageBoxButtons.OK, icon);
         }
     }
 
