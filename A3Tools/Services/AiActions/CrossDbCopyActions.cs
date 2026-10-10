@@ -20,7 +20,7 @@ public class CopyDataObjectAction : IAiAction
     private static string? _pendingTargetCode;
 
     public string Name => "copy_data_object";
-    public string Description => "跨库复制数据库对象（表/视图/函数/存储过程）到目标账套。要求：(1) 目标账套必须在白名单内 (2) 必须指定对象类型和对象名列表 (3) 陛下需输入目标账套编码二次确认。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制数据库对象（表/视图/函数/存储过程）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定对象类型和对象名列表。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -42,22 +42,46 @@ public class CopyDataObjectAction : IAiAction
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 动态确认：GetImpactDescription 先于 ConfirmationPrompt 调用，设置 _pendingTargetCode
-        _pendingTargetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
+        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
+
+        // 读白名单 + 检查 target 是否在白名单
+        bool inWhitelist = false;
+        List<string> whitelist = new();
+        try
+        {
+            var ds = new DataService();
+            var settings = ds.LoadSettings();
+            whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
+            if (!string.IsNullOrEmpty(targetCode))
+                inWhitelist = whitelist.Contains(targetCode);
+        }
+        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+
+        // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
+        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
-        var dst = _pendingTargetCode ?? "(未指定)";
         var type = arguments.TryGetValue("object_type", out var ot) ? ot?.ToString() ?? "U" : "U";
         var names = arguments.TryGetValue("object_names", out var n) ? n?.ToString() ?? "" : "";
         var del = arguments.TryGetValue("delete_if_exists", out var d) && bool.TryParse(d?.ToString(), out var b) && b;
 
+        var whitelistInfo = whitelist.Count == 0
+            ? "(白名单为空，所有目标账套都需要二次确认)"
+            : (inWhitelist
+                ? $"白名单内（共 {whitelist.Count} 个账套）"
+                : $"不在白名单（已配：{string.Join(", ", whitelist)}）");
+
         return $"静默执行：跨库复制数据库对象\n" +
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
-               $"  目标账套：{dst}（必须在白名单内）\n" +
+               $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  对象类型：{type}\n" +
                $"  对象名：{names}\n" +
                $"  目标已存在时{(del ? "「先删除」" : "「跳过」")}\n" +
-               $"（复制操作会修改目标数据库，请确认目标账套编码是否正确）";
+               $"  白名单状态：{whitelistInfo}\n" +
+               (inWhitelist
+                   ? "（白名单内：点「允许」即可直接执行）"
+                   : "（不在白名单：请输入目标账套编码二次确认）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -95,14 +119,19 @@ public class CopyDataObjectAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 7. ★ 白名单检查
+            // 7. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
-            if (!whitelist.Contains(targetCode))
+            bool inWhitelist = whitelist.Contains(targetCode);
+            if (!inWhitelist && _pendingTargetCode == null)
+            {
+                // 不在白名单 + 没触发二次确认（防御 GetImpactDescription 没被调用的边界）
                 return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能调用此工具。\n" +
+                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
+                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
+                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
                     $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
+            }
 
             // 8. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             var objectNames = objectNamesStr.Split(';', StringSplitOptions.RemoveEmptyEntries)
