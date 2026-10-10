@@ -1716,7 +1716,11 @@ _ = wv2.EnsureCoreWebView2Async();
             // ★ 2026-10-07 陛下反馈「AI 完成后手不能向上滚」
             //   流式完成后 WebView2 ResizeObserver 还会有 N 次延迟触发（字体/表格/代码块 ScrollToBottom 内部 8 次定时器重试）
             //   冻结 5 秒 SmartScrollToBottom，避免反复拽回底部
-            _streamFreezeUntil = DateTime.UtcNow.AddSeconds(5);
+            // ★ 2026-10-10 修陛下反馈「5s 后还跳几下」（方案 2 阶段 3）
+            //   旧：AddSeconds(5) → 5s 后冻结到期，markdown 异步渲染（表格/代码块/列表）补发 ResizeObserver
+            //     → 集中多次改 wv2.Height → FlowLayoutPanel 多次重排 → 整个列表跳几下
+            //   新：AddSeconds(10) → 留足异步渲染时间；后续可调为“连续 3 次不变化才解锁”彻底根治
+            _streamFreezeUntil = DateTime.UtcNow.AddSeconds(10);
             _currentSession.LastActiveAtUtc = DateTime.UtcNow;
             _store.SaveSession(_currentSession);
 
@@ -2543,13 +2547,18 @@ img { max-width: 100%; }
       if (body) {
         // 用 textNode 追加，避免 HTML 解析问题（纯文本不需转义）
         body.appendChild(document.createTextNode(text));
-        // ★ 2026-10-09 流式期 wv2 高度被 C# 锁住
-        //   内容超出 wv2 后被 wv2 内部 body 滚动条裁（body.streaming-mode overflow-y:auto）
-        //   这里滚到底 → 始终看最新字（仿 ChatGPT/Claude）
-        //   陛下想读历史可以手动滚 wv2 内部，但下一字来会拽回底
-        document.body.scrollTop = document.body.scrollHeight;
+        // ★ 2026-10-10 修陛下反馈「流式期闪」
+        //   旧：document.body.scrollTop = document.body.scrollHeight  + notify()
+        //     1) 直接赋值 scrollTop → 浏览器立刻跳滚动 → 重绘 → 气泡内文字跳
+        //     2) notify()  → C# ResizeObserver 走一轮 → wv2 进程重绘 → 文字边抗锯齿
+        //   新：requestAnimationFrame 平滑滚 + 不调 notify（流式期锁高用不到）
+        //     1) RAF 下一帧才赋值 scrollTop → 浏览器同帧合并多次 → 文字不跳
+        //     2) 不 notify → C# ResizeObserver 不 fire → 文字边不重新抗锯齿
+        requestAnimationFrame(function() {
+          document.body.scrollTop = document.body.scrollHeight;
+        });
       }
-      notify();
+      // ★ 2026-10-10 流式期不调 notify（锁高度用不到；避免 wv2 进程不必要重绘）
     } catch (e) {}
   };
   window.setBubbleBodyOnly = function(html) {
@@ -2559,10 +2568,21 @@ img { max-width: 100%; }
         body.innerHTML = html;
       }
       // ★ 2026-10-09 移除 streaming-mode：body 恢复 overflow:hidden
-      //   下一帧 C# ResizeObserver 收到 notify 走正常 height sync
-      //   wv2 一次性跳到真实高度 → FlowLayoutPanel 重排（这一次，不晃）
+      // ★ 2026-10-10 修陛下反馈「收尾闪」
+      //   旧：removeClass  + notify() 同步走
+      //     removeClass 立刻把 body overflow 从 auto 变 hidden → 布局突变
+      //     notify 同步立刻调 → C# ResizeObserver 当帧拿老高度 + 下一帧拿新高度 → 中间态
+      //   新：double requestAnimationFrame 延后 notify
+      //     第 1 帧：removeClass 提交（body 布局变化提交）
+      //     第 2 帧：body 重新布局完成（滚动条/高度都稳定）
+      //     notify() 在第 2 帧末尾调 → C# ResizeObserver 拿稳定后高度 → 一次到位
+      //     避免 wv2 多次重排 / FlowLayoutPanel 跳变
       try { document.body.classList.remove('streaming-mode'); } catch (e) {}
-      notify();
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          notify();
+        });
+      });
     } catch (e) {}
   };
 
