@@ -25,13 +25,13 @@ public class CopyDataObjectAction : IAiAction
         type = "object",
         properties = new Dictionary<string, object>
         {
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" },
             ["object_type"] = new { type = "string", description = "对象类型：U=表 V=视图 TF=表函数 FN=标量函数 P=存储过程（默认 U）" },
             ["object_names"] = new { type = "string", description = "对象名列表（必填，多个用分号分隔，如 S_Order;S_OrderLine）" },
             ["delete_if_exists"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" }
         },
-        required = new[] { "target_account", "object_names" }
+        required = new[] { "target_account", "object_names", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
@@ -178,10 +178,10 @@ public class CopyConfigDataAction : IAiAction
             ["type"] = new { type = "string", description = "standard_query / system_param / custom_datasource" },
             ["keys"] = new { type = "string", description = "数据键名列表（多个用分号分隔）" },
             ["delete_if_exists"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
-        required = new[] { "target_account", "type", "keys" }
+        required = new[] { "target_account", "type", "keys", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
@@ -310,10 +310,10 @@ public class CopyWinFormAction : IAiAction
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["copy_stored_procs"] = new { type = "boolean", description = "是否复制关联的存储过程（默认 false）" },
             ["copy_table_structures"] = new { type = "boolean", description = "是否复制关联的表结构（默认 false）" },
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
-        required = new[] { "target_account", "object_guids" }
+        required = new[] { "target_account", "object_guids", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
@@ -439,10 +439,10 @@ public class CopyAppFormAction : IAiAction
         {
             ["object_guids"] = new { type = "string", description = "APP 表单的 OBJECTGUID 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
-        required = new[] { "target_account", "object_guids" }
+        required = new[] { "target_account", "object_guids", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
@@ -566,10 +566,10 @@ public class CopyObjectLinkAction : IAiAction
         {
             ["codes"] = new { type = "string", description = "单据流转的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
-        required = new[] { "target_account", "codes" }
+        required = new[] { "target_account", "codes", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
@@ -693,10 +693,10 @@ public class CopyReportAction : IAiAction
         {
             ["codes"] = new { type = "string", description = "报表的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
-        required = new[] { "target_account", "codes" }
+        required = new[] { "target_account", "codes", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
@@ -820,10 +820,10 @@ public class CopyWebDashboardAction : IAiAction
         {
             ["codes"] = new { type = "string", description = "Web 看板的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
-        required = new[] { "target_account", "codes" }
+        required = new[] { "target_account", "codes", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
@@ -947,10 +947,10 @@ public class CopyAppChartAction : IAiAction
         {
             ["codes"] = new { type = "string", description = "移动看板的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
-            ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
+            ["source_account"] = new { type = "string", description = "源账套编码（★ 必填——陛下消息里指定了源账套就用指定的，没指定就用 AI 助理顶部下拉框的当前账套，绝不能省略）" },
             ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
-        required = new[] { "target_account", "codes" }
+        required = new[] { "target_account", "codes", "source_account" }
     };
     public bool RequiresConfirmation => true;
 
