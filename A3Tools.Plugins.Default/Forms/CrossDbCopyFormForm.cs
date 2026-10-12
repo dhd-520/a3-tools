@@ -1948,6 +1948,13 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         _isHeadlessMode = true;
         try
         {
+            // ★ 2026-10-12 陛下反馈：AI 路径手动一直 OK，AI 走 copy_* 报「用户登录失败」
+            //   根因：IsHttpMode 用 _srcAccount/_tgtAccount，但 AI 路径只填 textbox，从不点 BtnSelectSource
+            //         _srcAccount 留的是 MainForm preset（可能是错的账套）
+            //   修法：AI 路径开头顶替 _srcAccount/_tgtAccount，让 IsHttpMode 用对的账套
+            _srcAccount = source;
+            _tgtAccount = target;
+
             ApplyAccountToDatabaseFields(source, isSource: true);
             ApplyAccountToDatabaseFields(target, isSource: false);
 
