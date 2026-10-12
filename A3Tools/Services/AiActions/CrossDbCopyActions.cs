@@ -18,7 +18,7 @@ public class CopyDataObjectAction : IAiAction
 {
 
     public string Name => "copy_data_object";
-    public string Description => "跨库复制数据库对象（表/视图/函数/存储过程）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定对象类型和对象名列表。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制数据库对象（表/视图/函数/存储过程）到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定对象类型和对象名列表。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -26,7 +26,7 @@ public class CopyDataObjectAction : IAiAction
         properties = new Dictionary<string, object>
         {
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" },
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" },
             ["object_type"] = new { type = "string", description = "对象类型：U=表 V=视图 TF=表函数 FN=标量函数 P=存储过程（默认 U）" },
             ["object_names"] = new { type = "string", description = "对象名列表（必填，多个用分号分隔，如 S_Order;S_OrderLine）" },
             ["delete_if_exists"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" }
@@ -168,7 +168,7 @@ public class CopyConfigDataAction : IAiAction
 {
 
     public string Name => "copy_config_data";
-    public string Description => "跨库复制配置数据到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定type、keys。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制配置数据到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定type、keys。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -179,7 +179,7 @@ public class CopyConfigDataAction : IAiAction
             ["keys"] = new { type = "string", description = "数据键名列表（多个用分号分隔）" },
             ["delete_if_exists"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
         required = new[] { "target_account", "type", "keys" }
     };
@@ -299,7 +299,7 @@ public class CopyWinFormAction : IAiAction
 {
 
     public string Name => "copy_win_form";
-    public string Description => "跨库复制Win 表单（通过 OBJECTGUID）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制Win 表单（通过 OBJECTGUID）到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -311,7 +311,7 @@ public class CopyWinFormAction : IAiAction
             ["copy_stored_procs"] = new { type = "boolean", description = "是否复制关联的存储过程（默认 false）" },
             ["copy_table_structures"] = new { type = "boolean", description = "是否复制关联的表结构（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
         required = new[] { "target_account", "object_guids" }
     };
@@ -430,7 +430,7 @@ public class CopyAppFormAction : IAiAction
 {
 
     public string Name => "copy_app_form";
-    public string Description => "跨库复制APP 表单（通过 OBJECTGUID）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制APP 表单（通过 OBJECTGUID）到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -440,7 +440,7 @@ public class CopyAppFormAction : IAiAction
             ["object_guids"] = new { type = "string", description = "APP 表单的 OBJECTGUID 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
         required = new[] { "target_account", "object_guids" }
     };
@@ -557,7 +557,7 @@ public class CopyObjectLinkAction : IAiAction
 {
 
     public string Name => "copy_object_link";
-    public string Description => "跨库复制单据流转（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制单据流转（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -567,7 +567,7 @@ public class CopyObjectLinkAction : IAiAction
             ["codes"] = new { type = "string", description = "单据流转的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
         required = new[] { "target_account", "codes" }
     };
@@ -684,7 +684,7 @@ public class CopyReportAction : IAiAction
 {
 
     public string Name => "copy_report";
-    public string Description => "跨库复制报表（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制报表（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -694,7 +694,7 @@ public class CopyReportAction : IAiAction
             ["codes"] = new { type = "string", description = "报表的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
         required = new[] { "target_account", "codes" }
     };
@@ -811,7 +811,7 @@ public class CopyWebDashboardAction : IAiAction
 {
 
     public string Name => "copy_web_dashboard";
-    public string Description => "跨库复制Web 看板（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制Web 看板（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -821,7 +821,7 @@ public class CopyWebDashboardAction : IAiAction
             ["codes"] = new { type = "string", description = "Web 看板的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
         required = new[] { "target_account", "codes" }
     };
@@ -938,7 +938,7 @@ public class CopyAppChartAction : IAiAction
 {
 
     public string Name => "copy_app_chart";
-    public string Description => "跨库复制移动看板（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制移动看板（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（调用此工具后会弹窗让陛下确认） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -948,7 +948,7 @@ public class CopyAppChartAction : IAiAction
             ["codes"] = new { type = "string", description = "移动看板的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填）" }
         },
         required = new[] { "target_account", "codes" }
     };

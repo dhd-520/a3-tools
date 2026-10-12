@@ -498,12 +498,31 @@ public class OpenAiCompatibleBackend : IAiChatBackend
     }
 
     /// <summary>
+    /// ★ 2026-10-12 修「AI 0 tool_calls 收工」陛下反馈：AI 把工具调用意图写进 <thinking> 块
+    ///   现象：content 第一个字符是 <，被 <think>...</think> 包裹，ParseTextToolCalls 全文匹配 XML 失败
+    ///   修法：解析前先剥离 <think>...</think> 块
+    /// </summary>
+    private static string StripThinkingBlocks(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return content;
+        // 剥离 <think>...</think> 块（some 模型用 <thinking> 也兼容）
+        var result = Regex.Replace(content, @"<think>[\s\S]*?</think>", "", RegexOptions.IgnoreCase);
+        result = Regex.Replace(result, @"<thinking[\s\S]*?</thinking>", "", RegexOptions.IgnoreCase);
+        return result.Trim();
+    }
+
+    /// <summary>
     /// ★ 2026-09-20 解析文本格式的工具调用（某些 AI 模型不支持标准 function calling）
     ///   支持格式: XML style <function_calls><invoke>...</invoke></function_calls>
+    ///   ★ 2026-10-12 修：解析前先剥思考块（陛下反馈 AI 把工具调用意图写进 thinking 不真发）
     /// </summary>
     private static List<OpenAiToolCall> ParseTextToolCalls(string content)
     {
         var result = new List<OpenAiToolCall>();
+        if (string.IsNullOrWhiteSpace(content)) return result;
+
+        // ★ 2026-10-12 陛下反馈：AI 把工具调用意图写进 <think> 块没真发 → 先剥
+        content = StripThinkingBlocks(content);
         if (string.IsNullOrWhiteSpace(content)) return result;
 
         // 匹配 <invoke name="toolName">...<parameter ...</invoke>
@@ -538,11 +557,75 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             });
         }
 
+        // ★ 2026-10-12 V2：部分 AI 写 [{"name":"X","arguments":{...}}] JSON 数组格式（替代 XML）
+        //   陛下反馈日志里 AI 写的：「tool_calls = [{name:"copy_win_form", arguments:{...}}]」
+        //   注意：AI 写的 key 没引号（JS 风格），这里宽松匹配引号可有可无
+        if (result.Count == 0)
+        {
+            var jsonArrPattern = @"\[\s*\{[^{}]*?""name""\s*:\s*""([^""]+)""[^{}]*?""arguments""\s*:\s*(\{[\s\S]*?\})[^{}]*\}\s*\]";
+            var jsonMatches = Regex.Matches(content, jsonArrPattern, RegexOptions.IgnoreCase);
+            foreach (Match m in jsonMatches)
+            {
+                string toolName = m.Groups[1].Value.Trim();
+                string argsJsonRaw = m.Groups[2].Value.Trim();
+                // AI 写的可能不是标准 JSON（key 没引号），尝试宽松解析
+                Dictionary<string, object?> argsDict = ParseLooseJson(argsJsonRaw);
+                var argsJson = JsonSerializer.Serialize(argsDict);
+
+                result.Add(new OpenAiToolCall
+                {
+                    Id = "txt_tool_call_" + result.Count,
+                    Type = "function",
+                    Function = new OpenAiFunction
+                    {
+                        Name = toolName,
+                        Arguments = argsJson
+                    }
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// ★ 2026-10-12 V2：宽松解析 JS 风格的 JSON（key 没引号：{name:"x"} 而不是 {"name":"x"}）
+    ///   AI 写的工具调用参数常是 JS 对象字面量，不是标准 JSON
+    /// </summary>
+    private static Dictionary<string, object?> ParseLooseJson(string raw)
+    {
+        var result = new Dictionary<string, object?>();
+        if (string.IsNullOrWhiteSpace(raw)) return result;
+        // 先试标准解析
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object?>>(raw) ?? new();
+        }
+        catch { /* 不是标准 JSON，走宽松解析 */ }
+
+        // 宽松解析：key 可有可无引号、value 是字符串/数字/布尔/null
+        // 格式：name: "value" 或 name: value
+        var kvPattern = @"(\w+)\s*:\s*(?:""([^""]*)""|(\d+\.?\d*|false|true|null))";
+        var matches = Regex.Matches(raw, kvPattern, RegexOptions.IgnoreCase);
+        foreach (Match m in matches)
+        {
+            string key = m.Groups[1].Value;
+            string strVal = m.Groups[2].Value;
+            string litVal = m.Groups[3].Value;
+            if (!string.IsNullOrEmpty(strVal))
+                result[key] = strVal;
+            else if (litVal == "true") result[key] = true;
+            else if (litVal == "false") result[key] = false;
+            else if (litVal == "null") result[key] = null;
+            else if (double.TryParse(litVal, out var d)) result[key] = d;
+            else result[key] = litVal;
+        }
         return result;
     }
 
     /// <summary>
     /// ★ 2026-09-20 移除文本中的工具调用文本（function_calls/invoke/parameter 标签）
+    /// ★ 2026-10-12 V2：扩展移除 JSON 数组和 Markdown 代码块格式
     /// </summary>
     private static string RemoveToolCallText(string content)
     {
@@ -559,6 +642,18 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             @"<function_calls>[\s\S]*?</function_calls>",
             string.Empty,
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        // ★ 2026-10-12 V2：移除 JSON 数组格式（tool_calls = [{...}]）
+        result = Regex.Replace(result,
+            @"\[\s*\{[\s\S]*?""name""[\s\S]*?\}[\s\S]*?\]",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+
+        // ★ 2026-10-12 V2：移除 Markdown ```json [...]``` 代码块
+        result = Regex.Replace(result,
+            @"```(?:json)?\s*[\s\S]*?```",
+            string.Empty,
+            RegexOptions.IgnoreCase);
 
         return result.Trim();
     }
