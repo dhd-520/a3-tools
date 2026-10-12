@@ -16,11 +16,9 @@ namespace A3Tools.Services.AiActions;
 /// </summary>
 public class CopyDataObjectAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_data_object";
-    public string Description => "跨库复制数据库对象（表/视图/函数/存储过程）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定对象类型和对象名列表。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制数据库对象（表/视图/函数/存储过程）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定对象类型和对象名列表。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -28,7 +26,7 @@ public class CopyDataObjectAction : IAiAction
         properties = new Dictionary<string, object>
         {
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" },
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" },
             ["object_type"] = new { type = "string", description = "对象类型：U=表 V=视图 TF=表函数 FN=标量函数 P=存储过程（默认 U）" },
             ["object_names"] = new { type = "string", description = "对象名列表（必填，多个用分号分隔，如 S_Order;S_OrderLine）" },
             ["delete_if_exists"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" }
@@ -37,12 +35,12 @@ public class CopyDataObjectAction : IAiAction
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（陛下必须输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         // 读白名单 + 检查 target 是否在白名单
@@ -56,10 +54,9 @@ public class CopyDataObjectAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var type = arguments.TryGetValue("object_type", out var ot) ? ot?.ToString() ?? "U" : "U";
@@ -79,9 +76,7 @@ public class CopyDataObjectAction : IAiAction
                $"  对象名：{names}\n" +
                $"  目标已存在时{(del ? "「先删除」" : "「跳过」")}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -119,19 +114,10 @@ public class CopyDataObjectAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 7. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 7. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                // 不在白名单 + 没触发二次确认（防御 GetImpactDescription 没被调用的边界）
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 8. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             var objectNames = objectNamesStr.Split(';', StringSplitOptions.RemoveEmptyEntries)
@@ -180,11 +166,9 @@ public class CopyDataObjectAction : IAiAction
 /// </summary>
 public class CopyConfigDataAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_config_data";
-    public string Description => "跨库复制配置数据到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定type、keys。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制配置数据到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定type、keys。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -195,18 +179,18 @@ public class CopyConfigDataAction : IAiAction
             ["keys"] = new { type = "string", description = "数据键名列表（多个用分号分隔）" },
             ["delete_if_exists"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
         },
         required = new[] { "target_account", "type", "keys" }
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（白名单内只点允许，白名单外需输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         bool inWhitelist = false;
@@ -219,10 +203,9 @@ public class CopyConfigDataAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var whitelistInfo = whitelist.Count == 0
@@ -235,9 +218,7 @@ public class CopyConfigDataAction : IAiAction
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
                $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -272,18 +253,10 @@ public class CopyConfigDataAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 6. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 6. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 7. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             bool success;
@@ -324,11 +297,9 @@ public class CopyConfigDataAction : IAiAction
 /// </summary>
 public class CopyWinFormAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_win_form";
-    public string Description => "跨库复制Win 表单（通过 OBJECTGUID）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制Win 表单（通过 OBJECTGUID）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -340,18 +311,18 @@ public class CopyWinFormAction : IAiAction
             ["copy_stored_procs"] = new { type = "boolean", description = "是否复制关联的存储过程（默认 false）" },
             ["copy_table_structures"] = new { type = "boolean", description = "是否复制关联的表结构（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
         },
         required = new[] { "target_account", "object_guids" }
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（白名单内只点允许，白名单外需输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         bool inWhitelist = false;
@@ -364,10 +335,9 @@ public class CopyWinFormAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var whitelistInfo = whitelist.Count == 0
@@ -380,9 +350,7 @@ public class CopyWinFormAction : IAiAction
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
                $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -416,18 +384,10 @@ public class CopyWinFormAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 6. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 6. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 7. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             bool success;
@@ -468,11 +428,9 @@ public class CopyWinFormAction : IAiAction
 /// </summary>
 public class CopyAppFormAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_app_form";
-    public string Description => "跨库复制APP 表单（通过 OBJECTGUID）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制APP 表单（通过 OBJECTGUID）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定object_guids。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -482,18 +440,18 @@ public class CopyAppFormAction : IAiAction
             ["object_guids"] = new { type = "string", description = "APP 表单的 OBJECTGUID 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
         },
         required = new[] { "target_account", "object_guids" }
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（白名单内只点允许，白名单外需输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         bool inWhitelist = false;
@@ -506,10 +464,9 @@ public class CopyAppFormAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var whitelistInfo = whitelist.Count == 0
@@ -522,9 +479,7 @@ public class CopyAppFormAction : IAiAction
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
                $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -556,18 +511,10 @@ public class CopyAppFormAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 6. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 6. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 7. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             bool success;
@@ -608,11 +555,9 @@ public class CopyAppFormAction : IAiAction
 /// </summary>
 public class CopyObjectLinkAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_object_link";
-    public string Description => "跨库复制单据流转（通过 CODE）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制单据流转（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -622,18 +567,18 @@ public class CopyObjectLinkAction : IAiAction
             ["codes"] = new { type = "string", description = "单据流转的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
         },
         required = new[] { "target_account", "codes" }
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（白名单内只点允许，白名单外需输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         bool inWhitelist = false;
@@ -646,10 +591,9 @@ public class CopyObjectLinkAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var whitelistInfo = whitelist.Count == 0
@@ -662,9 +606,7 @@ public class CopyObjectLinkAction : IAiAction
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
                $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -696,18 +638,10 @@ public class CopyObjectLinkAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 6. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 6. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 7. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             bool success;
@@ -748,11 +682,9 @@ public class CopyObjectLinkAction : IAiAction
 /// </summary>
 public class CopyReportAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_report";
-    public string Description => "跨库复制报表（通过 CODE）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制报表（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -762,18 +694,18 @@ public class CopyReportAction : IAiAction
             ["codes"] = new { type = "string", description = "报表的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
         },
         required = new[] { "target_account", "codes" }
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（白名单内只点允许，白名单外需输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         bool inWhitelist = false;
@@ -786,10 +718,9 @@ public class CopyReportAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var whitelistInfo = whitelist.Count == 0
@@ -802,9 +733,7 @@ public class CopyReportAction : IAiAction
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
                $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -836,18 +765,10 @@ public class CopyReportAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 6. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 6. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 7. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             bool success;
@@ -888,11 +809,9 @@ public class CopyReportAction : IAiAction
 /// </summary>
 public class CopyWebDashboardAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_web_dashboard";
-    public string Description => "跨库复制Web 看板（通过 CODE）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制Web 看板（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -902,18 +821,18 @@ public class CopyWebDashboardAction : IAiAction
             ["codes"] = new { type = "string", description = "Web 看板的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
         },
         required = new[] { "target_account", "codes" }
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（白名单内只点允许，白名单外需输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         bool inWhitelist = false;
@@ -926,10 +845,9 @@ public class CopyWebDashboardAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var whitelistInfo = whitelist.Count == 0
@@ -942,9 +860,7 @@ public class CopyWebDashboardAction : IAiAction
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
                $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -976,18 +892,10 @@ public class CopyWebDashboardAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 6. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 6. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 7. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             bool success;
@@ -1028,11 +936,9 @@ public class CopyWebDashboardAction : IAiAction
 /// </summary>
 public class CopyAppChartAction : IAiAction
 {
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（GetImpactDescription 时设置，ConfirmationPrompt 返回）</summary>
-    private static string? _pendingTargetCode;
 
     public string Name => "copy_app_chart";
-    public string Description => "跨库复制移动看板（通过 CODE）到目标账套。要求：(1) 目标账套在白名单内只需点「允许」，不在白名单内需要输入目标账套编码二次确认 (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
+    public string Description => "跨库复制移动看板（通过 CODE）到目标账套。要求：(1) 必须指定目标账套编码（直接点 [允许] 即可执行） (2) 必须指定codes。复制操作会修改目标数据库，请谨慎操作。";
     public AiActionPermission Permission => AiActionPermission.WriteLocal;
     public object ParametersSchema => new
     {
@@ -1042,18 +948,18 @@ public class CopyAppChartAction : IAiAction
             ["codes"] = new { type = "string", description = "移动看板的 CODE 列表（多个用分号分隔）" },
             ["delete_first"] = new { type = "boolean", description = "目标已存在时是否先删除（默认 false）" },
             ["source_account"] = new { type = "string", description = "源账套编码（可选，默认 AI 助理当前选中账套）" },
-            ["target_account"] = new { type = "string", description = "目标账套编码（必填，必须在白名单内）" }
+            ["target_account"] = new { type = "string", description = "目标账套编码（必填；白名单内/外都直接点 [允许] 即可）" }
         },
         required = new[] { "target_account", "codes" }
     };
     public bool RequiresConfirmation => true;
 
-    /// <summary>★ 2026-10-10 方案 4：动态二次确认（白名单内只点允许，白名单外需输入目标账套编码）</summary>
-    public string? ConfirmationPrompt => _pendingTargetCode;
+        /// <summary>★ 2026-10-12 陛下简化：取消输入账套编码，直接点 [允许] 即可</summary>
+    public string? ConfirmationPrompt => null;
 
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
-        // ★ 2026-10-10 15:55 陛下简化设计：白名单内只点允许，白名单外二次确认
+        // ★ 2026-10-12 陛下要求：取消输入账套编码，直接点 [允许] 即可（白名单只作审计/提示）
         var targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
 
         bool inWhitelist = false;
@@ -1066,10 +972,9 @@ public class CopyAppChartAction : IAiAction
             if (!string.IsNullOrEmpty(targetCode))
                 inWhitelist = whitelist.Contains(targetCode);
         }
-        catch { /* 白名单读不到走「全部要二次确认」路径 */ }
+        catch { /* 白名单读不到走「默认非白名单」提示 */ }
 
         // ★ 动态确认：白名单内 → null（只点允许），不在白名单 → targetCode（输入编码）
-        _pendingTargetCode = inWhitelist ? null : targetCode;
 
         var src = arguments.TryGetValue("source_account", out var s) ? s?.ToString() : null;
         var whitelistInfo = whitelist.Count == 0
@@ -1082,9 +987,7 @@ public class CopyAppChartAction : IAiAction
                $"  源账套：{src ?? "AI 当前选中账套"}\n" +
                $"  目标账套：{targetCode ?? "(未指定)"}\n" +
                $"  白名单状态：{whitelistInfo}\n" +
-               (inWhitelist
-                   ? "（白名单内：点「允许」即可直接执行）"
-                   : "（不在白名单：请输入目标账套编码二次确认）");
+               (inWhitelist ? "（白名单内）" : "（不在白名单）");
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -1116,18 +1019,10 @@ public class CopyAppChartAction : IAiAction
             if (targetAccount == null)
                 return AiActionResult.Fail($"目标账套 [{targetCode}] 不存在，请先 list_accounts 查看已配置账套");
 
-            // 6. ★ 白名单检查（陛下简化设计：白名单内只点允许，白名单外二次确认）
+            // 6. ★ 2026-10-12 陛下简化：白名单只作审计/提示，不再阻塞执行（取消输入账套编码）
             var settings = ds.LoadSettings();
             var whitelist = settings.CrossDbCopyWhitelist ?? new List<string>();
             bool inWhitelist = whitelist.Contains(targetCode);
-            if (!inWhitelist && _pendingTargetCode == null)
-            {
-                return AiActionResult.Fail(
-                    $"目标账套 [{targetCode}] 不在白名单内，且未通过二次确认。\n" +
-                    $"请在 DATA/settings.json 的 CrossDbCopyWhitelist 字段配置后才能直接调用，\n" +
-                    $"或在系统确认弹窗中输入目标账套编码二次确认。\n" +
-                    $"当前白名单：{(whitelist.Count == 0 ? "(空)" : string.Join(", ", whitelist))}");
-            }
 
             // 7. ★ 静默执行：构造 Form（不 Show）→ ExecuteHeadlessAsync → Dispose
             bool success;
