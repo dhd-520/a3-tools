@@ -721,10 +721,12 @@ public class LaunchLinkDbAction : IAiAction
             if (string.IsNullOrEmpty(code)) return Task.FromResult(AiActionResult.Fail("请提供账套编码"));
 
             var tcs = new TaskCompletionSource<AiActionResult>();
-            A3Tools.Forms.MainForm.Instance.Invoke(() =>
+            // ★ 2026-10-12 修复：IsHandleCreated 检查，避免「在创建窗口句柄之前调用 Invoke」
+            var instLink = A3Tools.Forms.MainForm.Instance;
+            Action linkAction = () =>
             {
                 Button? targetBtn = null;
-                foreach (Control c in A3Tools.Forms.MainForm.Instance.Controls)
+                foreach (Control c in A3Tools.Forms.MainForm.Instance!.Controls)
                 {
                     if (c is TabControl tc)
                     {
@@ -753,7 +755,11 @@ public class LaunchLinkDbAction : IAiAction
                 {
                     tcs.SetResult(AiActionResult.Fail("找不到链接数据库按钮"));
                 }
-            });
+            };
+            if (instLink != null && instLink.IsHandleCreated && !instLink.IsDisposed)
+                instLink.Invoke(linkAction);
+            else
+                linkAction();
             return tcs.Task;
         }
         catch (Exception ex)

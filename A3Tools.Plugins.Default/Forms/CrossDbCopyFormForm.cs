@@ -100,6 +100,21 @@ public partial class CrossDbCopyFormForm : Form
     //   手动流程（BtnConfirm_Click）100% 不变（_isHeadlessMode 默认 false → ShowMessage 行为等价 MessageBox.Show）
     private bool _isHeadlessMode = false;
 
+    /// <summary>
+    /// ★ 2026-10-12 修复：安全的跨线程 UI 更新（headless 模式专用版本）
+    ///   - _isHeadlessMode=true 时直接跳过（无 UI 控件要更新，0 Invoke 风险）
+    ///   - 手动流程 _isHeadlessMode=false 时：句柄已创建才 Invoke
+    ///   修复「在创建窗口句柄之前调用 Invoke 或 BeginInvoke」异常
+    ///   手动流程 100% 等价（_isHeadlessMode 默认 false → 走原 Invoke 路径）
+    /// </summary>
+    private void SafeInvoke(Action action)
+    {
+        if (_isHeadlessMode) return;
+        if (!IsHandleCreated || IsDisposed) return;
+        this.Invoke(action);
+    }
+
+
     // ★ 2026-10-10 方案 4：_isHeadlessMode 时写审计日志，否则弹 MessageBox
     //   手动模式 _isHeadlessMode=false → MessageBox.Show（100% 等价原行为）
     //   AI 模式 _isHeadlessMode=true → 写 DATA/logs/ai_cross_db_copy_audit.log
@@ -394,7 +409,7 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     adapter.Fill(dt);
                 }
 
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     _searchResults = dt;
                     // 先移除旧的选择列（如果存在）
@@ -434,23 +449,23 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
                     lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
                     lblSearchProgress.ForeColor = Color.Green;
-                }));
+                });
             }
             catch (Exception ex)
             {
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     lblSearchProgress.Text = "查询失败";
                     lblSearchProgress.ForeColor = Color.Red;
                     MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }));
+                });
             }
             finally
             {
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     btnSearch.Enabled = true;
-                }));
+                });
             }
         });
     }
@@ -634,11 +649,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                 {
                     current++;
                     var progress = 30 + (current * 70 / total);
-                    this.Invoke(new Action(() =>
+                    SafeInvoke(() =>
                     {
                         progressBar.Value = progress;
                         lblProgress.Text = "正在复制：" + objectGuid + " (" + current + "/" + total + ")";
-                    }));
+                    });
 
                     // 复制S_OBJECT表
                     TableCopyService.CopyTableData(srcConn, tgtConn, "S_OBJECT", "GUID", objectGuid, deleteFirst, "[Win表单]");
@@ -661,10 +676,10 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     // 复制关联存储过程（仅当勾选时）
                     if (copyStoredProcs)
                     {
-                        this.Invoke(new Action(() =>
+                        SafeInvoke(() =>
                         {
                             lblProgress.Text = "正在复制存储过程：" + objectGuid + " (" + current + "/" + total + ")";
-                        }));
+                        });
                         CopyStoredProcsForObject(srcConn, tgtConn, objectGuid, deleteFirst);
                     }
 
@@ -674,10 +689,10 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                         var objType = GetObjectType(srcConn, objectGuid);
                         if (objType == "1" || objType == "5")
                         {
-                            this.Invoke(new Action(() =>
+                            SafeInvoke(() =>
                             {
                                 lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
-                            }));
+                            });
                             CopyTableStructuresForObject(srcConn, tgtConn, objectGuid);
                         }
                         else
@@ -691,10 +706,10 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
             }
             catch (Exception ex)
             {
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }));
+                });
                 return false;
             }
         });
@@ -721,11 +736,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
             {
                 current++;
                 var progress = 30 + (current * 70 / total);
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     progressBar.Value = progress;
                     lblProgress.Text = "正在复制：" + objectGuid + " (" + current + "/" + total + ")";
-                }));
+                });
 
                 // 复制S_OBJECT表
                 await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, "S_OBJECT", "GUID", objectGuid, deleteFirst, "[Win表单]");
@@ -748,10 +763,10 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                 // 复制关联存储过程（仅当勾选时）
                 if (copyStoredProcs)
                 {
-                    this.Invoke(new Action(() =>
+                    SafeInvoke(() =>
                     {
                         lblProgress.Text = "正在复制存储过程：" + objectGuid + " (" + current + "/" + total + ")";
-                    }));
+                    });
                     await CopyStoredProcsForObjectHttpAsync(srcDA, tgtDA, objectGuid, deleteFirst);
                 }
 
@@ -761,10 +776,10 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     var objType = await GetObjectTypeHttpAsync(srcDA, objectGuid);
                     if (objType == "1" || objType == "5")
                     {
-                        this.Invoke(new Action(() =>
+                        SafeInvoke(() =>
                         {
                             lblProgress.Text = "正在复制表结构：" + objectGuid + " (" + current + "/" + total + ")";
-                        }));
+                        });
                         await CopyTableStructuresForObjectHttpAsync(srcDA, tgtDA, objectGuid);
                     }
                     else
@@ -778,10 +793,10 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         }
         catch (Exception ex)
         {
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }));
+            });
             return false;
         }
     }
@@ -1046,11 +1061,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[表结构] 复制失败：{ex.Message}");
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 lblProgress.Text = $"✗ 表结构复制失败：{ex.Message}";
                 lblProgress.ForeColor = Color.Red;
-            }));
+            });
         }
     }
 
@@ -1079,11 +1094,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                 using var cmd = new SqlCommand(createSql, tgtConn);
                 cmd.ExecuteNonQuery();
                 System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已在目标库创建");
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     lblProgress.Text = $"✓ {viewName} 表结构已创建";
                     lblProgress.ForeColor = Color.Green;
-                }));
+                });
                 return;
             }
 
@@ -1104,20 +1119,20 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                 cmd.ExecuteNonQuery();
                 System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已加列 {col.Name} {col.Type}");
             }
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 lblProgress.Text = $"✓ {viewName} 已补 {missing.Count} 个缺失列";
                 lblProgress.ForeColor = Color.Green;
-            }));
+            });
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 复制失败：{ex.Message}");
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 lblProgress.Text = $"✗ {viewName} 复制失败：{ex.Message}";
                 lblProgress.ForeColor = Color.Red;
-            }));
+            });
         }
     }
 
@@ -1257,11 +1272,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[表结构] 复制失败：{ex.Message}");
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 lblProgress.Text = $"✗ 表结构复制失败：{ex.Message}";
                 lblProgress.ForeColor = Color.Red;
-            }));
+            });
         }
     }
 
@@ -1298,11 +1313,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                 if (!result.Success)
                     throw new Exception($"创建表 {viewName} 失败: {result.Message}");
                 System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已在目标库创建");
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     lblProgress.Text = $"✓ {viewName} 表结构已创建";
                     lblProgress.ForeColor = Color.Green;
-                }));
+                });
                 return;
             }
 
@@ -1318,20 +1333,20 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                 await ProxyHelper.ExecuteNonQueryAsync(tgtDA, alterSql);
                 System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 已加列 {col.Name} {col.Type}");
             }
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 lblProgress.Text = $"✓ {viewName} 已补 {missing.Count} 个缺失列";
                 lblProgress.ForeColor = Color.Green;
-            }));
+            });
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[表结构] {viewName} 复制失败：{ex.Message}");
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 lblProgress.Text = $"✗ {viewName} 复制失败：{ex.Message}";
                 lblProgress.ForeColor = Color.Red;
-            }));
+            });
         }
     }
 
@@ -1413,20 +1428,20 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     if (string.IsNullOrWhiteSpace(definition))
                     {
                         System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 无法获取定义（可能加密或不存在）");
-                        this.Invoke(new Action(() =>
+                        SafeInvoke(() =>
                         {
                             lblProgress.Text = $"⚠ {procName} 无法获取定义（加密或不存在）";
                             lblProgress.ForeColor = Color.Orange;
-                        }));
+                        });
                         continue;
                     }
                     CreateProcInTarget(tgtConn, procName, definition);
                     System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制成功（字段：{fieldName}）");
-                    this.Invoke(new Action(() =>
+                    SafeInvoke(() =>
                     {
                         lblProgress.Text = $"✓ {procName} 复制成功";
                         lblProgress.ForeColor = Color.Green;
-                    }));
+                    });
                 }
                 else
                 {
@@ -1436,11 +1451,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制失败：{ex.Message}");
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     lblProgress.Text = $"✗ {procName} 复制失败：{ex.Message}";
                     lblProgress.ForeColor = Color.Red;
-                }));
+                });
             }
         }
     }
@@ -1752,20 +1767,20 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
                     if (string.IsNullOrWhiteSpace(definition))
                     {
                         System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 无法获取定义（可能加密或不存在）");
-                        this.Invoke(new Action(() =>
+                        SafeInvoke(() =>
                         {
                             lblProgress.Text = $"⚠ {procName} 无法获取定义（加密或不存在）";
                             lblProgress.ForeColor = Color.Orange;
-                        }));
+                        });
                         continue;
                     }
                     await CreateProcInTargetHttpAsync(tgtDA, procName, definition);
                     System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制成功（字段：{fieldName}）");
-                    this.Invoke(new Action(() =>
+                    SafeInvoke(() =>
                     {
                         lblProgress.Text = $"✓ {procName} 复制成功";
                         lblProgress.ForeColor = Color.Green;
-                    }));
+                    });
                 }
                 else
                 {
@@ -1775,11 +1790,11 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[存储过程] {procName} 复制失败：{ex.Message}");
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     lblProgress.Text = $"✗ {procName} 复制失败：{ex.Message}";
                     lblProgress.ForeColor = Color.Red;
-                }));
+                });
             }
         }
     }

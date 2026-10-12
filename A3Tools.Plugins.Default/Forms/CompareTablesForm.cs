@@ -13,6 +13,17 @@ public partial class CompareTablesForm : Form
     private readonly Account? _tgtAccount;
     private readonly List<string> _tables;
 
+    /// <summary>
+    /// ★ 2026-10-12 修复：安全的跨线程 UI 更新
+    ///   - 句柄未创建或已释放时直接跳过
+    ///   修复「在创建窗口句柄之前调用 Invoke 或 BeginInvoke」异常
+    /// </summary>
+    private void SafeInvoke(Action action)
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        this.Invoke(action);
+    }
+
     public CompareTablesForm(
         Account? srcAccount,
         Account? tgtAccount,
@@ -117,11 +128,11 @@ public partial class CompareTablesForm : Form
             {
                 current++;
                 var percent = (int)((double)current / total * 100);
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     progressBar.Value = percent;
                     lblProgress.Text = $"对比中：{tableName} ({current}/{total})";
-                }));
+                });
 
                 try
                 {
@@ -160,27 +171,27 @@ public partial class CompareTablesForm : Form
                 }
             }
 
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 RenderDifferences(differences);
-            }));
+            });
         }
         catch (Exception ex)
         {
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 lblSummary.Text = "对比失败";
                 lblSummary.ForeColor = Color.Red;
                 lblProgress.Text = ex.Message;
                 MessageBox.Show($"对比失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }));
+            });
         }
         finally
         {
-            this.Invoke(new Action(() =>
+            SafeInvoke(() =>
             {
                 btnRefresh.Enabled = true;
-            }));
+            });
         }
     }
 
@@ -530,12 +541,12 @@ ORDER BY c.column_id";
             for (int i = 0; i < scripts.Count; i++)
             {
                 var script = scripts[i];
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     var percent = (int)((double)(i + 1) / total * 100);
                     progressBar.Value = percent;
                     lblProgress.Text = $"执行中：{i + 1}/{total}";
-                }));
+                });
 
                 try
                 {

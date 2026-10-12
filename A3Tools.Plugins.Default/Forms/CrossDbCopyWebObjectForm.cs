@@ -29,6 +29,21 @@ public partial class CrossDbCopyWebObjectForm : Form
     //   手动流程（BtnConfirm_Click）100% 不变（_isHeadlessMode 默认 false → ShowMessage 行为等价 MessageBox.Show）
     private bool _isHeadlessMode = false;
 
+    /// <summary>
+    /// ★ 2026-10-12 修复：安全的跨线程 UI 更新（headless 模式专用版本）
+    ///   - _isHeadlessMode=true 时直接跳过（无 UI 控件要更新，0 Invoke 风险）
+    ///   - 手动流程 _isHeadlessMode=false 时：句柄已创建才 Invoke
+    ///   修复「在创建窗口句柄之前调用 Invoke 或 BeginInvoke」异常
+    ///   手动流程 100% 等价（_isHeadlessMode 默认 false → 走原 Invoke 路径）
+    /// </summary>
+    private void SafeInvoke(Action action)
+    {
+        if (_isHeadlessMode) return;
+        if (!IsHandleCreated || IsDisposed) return;
+        this.Invoke(action);
+    }
+
+
     // ★ 2026-10-10 方案 4：_isHeadlessMode 时写审计日志，否则弹 MessageBox
     //   手动模式 _isHeadlessMode=false → MessageBox.Show（100% 等价原行为）
     //   AI 模式 _isHeadlessMode=true → 写 DATA/logs/ai_cross_db_copy_audit.log
@@ -497,7 +512,7 @@ ORDER BY NAME";
                 var dt = new System.Data.DataTable();
                 adapter.Fill(dt);
 
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     _searchResults = dt;
                     // 先移除旧的选择列（如果存在）
@@ -534,23 +549,23 @@ ORDER BY NAME";
                     lblSearchProgress.Location = new Point(dgvSearchResults.Left, dgvSearchResults.Bottom + 5);
                     lblSearchProgress.Text = $"查询完成，共 {dt.Rows.Count} 条记录";
                     lblSearchProgress.ForeColor = Color.Green;
-                }));
+                });
             }
             catch (Exception ex)
             {
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     lblSearchProgress.Text = "查询失败";
                     lblSearchProgress.ForeColor = Color.Red;
                     MessageBox.Show($"查询失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }));
+                });
             }
             finally
             {
-                this.Invoke(new Action(() =>
+                SafeInvoke(() =>
                 {
                     btnSearch.Enabled = true;
-                }));
+                });
             }
         });
     }
