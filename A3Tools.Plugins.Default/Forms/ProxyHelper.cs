@@ -276,12 +276,20 @@ internal static class ProxyHelper
 
     /// <summary>
     /// DataTable → ResultTable 转换（BulkCopyAsync 入参）
+    /// ★ 2026-10-12 修复：保留源列实际类型到 TypeName（之前全 System.Object 丢类型）
+    ///   不保留会让 DirectDataAccess.BulkCopyAsync 重建的 DataTable 全 object 列
+    ///   SqlBulkCopy 喂给目标强类型列就 InvalidCastException（如 Byte→Int32）
     /// </summary>
     private static ResultTable DataTableToResultTable(DataTable dt, List<string> columns)
     {
         var resultTable = new ResultTable();
         foreach (var col in columns)
-            resultTable.Columns.Add(new ColumnInfo { Name = col, TypeName = "System.Object" });
+        {
+            // ★ 从源 DataTable 拿真实列类型（byte/int/DateTime/string/...）
+            var srcCol = dt.Columns[col];
+            var typeName = srcCol.DataType?.FullName ?? "System.Object";
+            resultTable.Columns.Add(new ColumnInfo { Name = col, TypeName = typeName });
+        }
 
         foreach (DataRow row in dt.Rows)
         {

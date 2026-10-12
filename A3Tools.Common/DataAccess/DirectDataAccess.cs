@@ -288,17 +288,48 @@ namespace A3Tools.Common.DataAccess
         /// <summary>
         /// 直连模式 BulkCopy：直接 SqlBulkCopy.WriteToServerAsync。
         /// 性能等价于老的 TableCopyService.CopyTableData 路径，几万行 1-2 秒搞定。
+        /// ★ 2026-10-12 修复：用 ResultTable.Columns[i].TypeName 保留源列实际类型
+        ///   之前全 typeof(object) → SqlBulkCopy 喂给目标强类型列时
+        ///   源 tinyint(Byte) 强转目标 int(Int32) → InvalidCastException
         /// </summary>
         public async Task<int> BulkCopyAsync(ResultTable table, string tableName, CancellationToken ct = default)
         {
             if (table.Rows.Count == 0) return 0;
 
-            // ResultTable 转 DataTable（SqlBulkCopy 只吃 DataTable/DataReader）
+            // ResultTable 转 DataTable：用 TypeName 还原源列类型
             var dt = new DataTable();
-            foreach (var col in table.Columns)
-                dt.Columns.Add(col.Name, typeof(object));
+            var colTypes = new Type[table.Columns.Count];
+            for (int i = 0; i < table.Columns.Count; i++)
+            {
+                var name = table.Columns[i].Name;
+                var typeName = table.Columns[i].TypeName ?? "System.Object";
+                // 防御性：GetType 失败回退 object
+                colTypes[i] = Type.GetType(typeName, throwOnError: false) ?? typeof(object);
+                dt.Columns.Add(name, colTypes[i]);
+            }
             foreach (var row in table.Rows)
-                dt.Rows.Add(row.Select(v => v ?? DBNull.Value).ToArray());
+            {
+                var arr = new object?[table.Columns.Count];
+                for (int i = 0; i < table.Columns.Count; i++)
+                {
+                    var v = row[i];
+                    if (v == null || v == DBNull.Value)
+                    {
+                        arr[i] = DBNull.Value;
+                    }
+                    else if (colTypes[i] != typeof(object) && v.GetType() != colTypes[i])
+                    {
+                        // 防御性类型转换：万一源值跟推断列类型不匹配（比如老 ResultTable 没类型）
+                        try { arr[i] = Convert.ChangeType(v, colTypes[i]); }
+                        catch { arr[i] = v; }
+                    }
+                    else
+                    {
+                        arr[i] = v;
+                    }
+                }
+                dt.Rows.Add(arr);
+            }
 
             using var conn = new SqlConnection(_connStr);
             await conn.OpenAsync(ct);
