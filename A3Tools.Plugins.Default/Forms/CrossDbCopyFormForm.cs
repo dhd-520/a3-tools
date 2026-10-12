@@ -706,6 +706,8 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
             }
             catch (Exception ex)
             {
+                // ★ 2026-10-12 修复：headless 模式 rethrow，让外层 catch 把 ex.Message 写进 audit 日志
+                if (_isHeadlessMode) throw;
                 SafeInvoke(() =>
                 {
                     MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -793,6 +795,8 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         }
         catch (Exception ex)
         {
+            // ★ 2026-10-12 修复：headless 模式 rethrow，让外层 catch 把 ex.Message 写进 audit 日志
+            if (_isHeadlessMode) throw;
             SafeInvoke(() =>
             {
                 MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);

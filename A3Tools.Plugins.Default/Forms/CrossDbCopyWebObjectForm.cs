@@ -417,6 +417,8 @@ public partial class CrossDbCopyWebObjectForm : Form
         }
         catch (Exception ex)
         {
+            // ★ 2026-10-12 修复：headless 模式 rethrow
+            if (_isHeadlessMode) throw;
             MessageBox.Show("复制失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }
