@@ -400,7 +400,7 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
 
                     var connString = string.IsNullOrEmpty(user)
                         ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
-                        : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.Decrypt(password)};TrustServerCertificate=True;";
+                        : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.TryDecrypt(password)};TrustServerCertificate=True;";
 
                     using var conn = new SqlConnection(connString);
                     using var cmd = new SqlCommand(sql, conn);
@@ -601,7 +601,7 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         {
             try
             {
-                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
+                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.TryDecrypt(password) + ";TrustServerCertificate=True;";
                 using var conn = new SqlConnection(connStr);
                 conn.Open();
                 return true;
@@ -630,8 +630,8 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         {
             try
             {
-                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.Decrypt(srcPassword) + ";TrustServerCertificate=True;";
-                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
+                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.TryDecrypt(srcPassword) + ";TrustServerCertificate=True;";
+                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.TryDecrypt(tgtPassword) + ";TrustServerCertificate=True;";
 
                 using var srcConn = new SqlConnection(srcConnStr);
                 using var tgtConn = new SqlConnection(tgtConnStr);

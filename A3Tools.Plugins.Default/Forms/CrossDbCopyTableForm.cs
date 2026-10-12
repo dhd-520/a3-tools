@@ -229,7 +229,7 @@ ORDER BY o.name";
                     // 直连模式：原逻辑
                     var connString = string.IsNullOrEmpty(user)
                         ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
-                        : $"Server={server};Database={dbName};User Id={user};Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
+                        : $"Server={server};Database={dbName};User Id={user};Password=" + EncryptionService.TryDecrypt(password) + ";TrustServerCertificate=True;";
 
                     var sql = @"
 SELECT o.name AS 对象名称,
@@ -550,7 +550,7 @@ WHERE o.type = @objType
         {
             return $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;";
         }
-        var pwd = string.IsNullOrEmpty(password) ? "" : EncryptionService.Decrypt(password);
+        var pwd = string.IsNullOrEmpty(password) ? "" : EncryptionService.TryDecrypt(password);
         return $"Server={server};Database={dbName};User Id={user};Password={pwd};TrustServerCertificate=True;";
     }
 
@@ -1041,7 +1041,7 @@ WHERE o.type = @objType
         {
             try
             {
-                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.Decrypt(password) + ";TrustServerCertificate=True;";
+                var connStr = "Server=" + server + ";Database=" + dbName + ";User Id=" + user + ";Password=" + EncryptionService.TryDecrypt(password) + ";TrustServerCertificate=True;";
                 using var conn = new Microsoft.Data.SqlClient.SqlConnection(connStr);
                 conn.Open();
                 return true;
@@ -1077,7 +1077,7 @@ WHERE o.type = @objType
             else
             {
                 // 直连模式
-                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.Decrypt(srcPassword) + ";TrustServerCertificate=True;";
+                var srcConnStr = "Server=" + srcServer + ";Database=" + srcDbName + ";User Id=" + srcUser + ";Password=" + EncryptionService.TryDecrypt(srcPassword) + ";TrustServerCertificate=True;";
                 srcConn = new Microsoft.Data.SqlClient.SqlConnection(srcConnStr);
                 srcConn.Open();
             }
@@ -1089,7 +1089,7 @@ WHERE o.type = @objType
             else
             {
                 // 直连模式
-                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.Decrypt(tgtPassword) + ";TrustServerCertificate=True;";
+                var tgtConnStr = "Server=" + tgtServer + ";Database=" + tgtDbName + ";User Id=" + tgtUser + ";Password=" + EncryptionService.TryDecrypt(tgtPassword) + ";TrustServerCertificate=True;";
                 tgtConn = new Microsoft.Data.SqlClient.SqlConnection(tgtConnStr);
                 tgtConn.Open();
             }

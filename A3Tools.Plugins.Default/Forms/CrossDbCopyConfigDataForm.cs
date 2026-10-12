@@ -291,7 +291,7 @@ public partial class CrossDbCopyConfigDataForm : Form
 
                 var connString = string.IsNullOrEmpty(user)
                     ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
-                    : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.Decrypt(password)};TrustServerCertificate=True;";
+                    : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.TryDecrypt(password)};TrustServerCertificate=True;";
 
                 // 构造 WHERE 子句（OR 多列模糊匹配）
                 var whereConditions = type.WhereColumns.Select(c => $"[{c}] LIKE @kw");
@@ -541,7 +541,7 @@ public partial class CrossDbCopyConfigDataForm : Form
         {
             return $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;";
         }
-        var pwd = string.IsNullOrEmpty(password) ? "" : EncryptionService.Decrypt(password);
+        var pwd = string.IsNullOrEmpty(password) ? "" : EncryptionService.TryDecrypt(password);
         return $"Server={server};Database={dbName};User Id={user};Password={pwd};TrustServerCertificate=True;";
     }
 

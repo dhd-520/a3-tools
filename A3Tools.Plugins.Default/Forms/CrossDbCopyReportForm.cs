@@ -527,7 +527,7 @@ public partial class CrossDbCopyReportForm : Form
 
                 var connString = string.IsNullOrEmpty(user)
                     ? $"Server={server};Database={dbName};Integrated Security=True;TrustServerCertificate=True;"
-                    : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.Decrypt(password)};TrustServerCertificate=True;";
+                    : $"Server={server};Database={dbName};User Id={user};Password={EncryptionService.TryDecrypt(password)};TrustServerCertificate=True;";
 
                 var sql = $"SELECT GUID, CODE, NAME, NOTES FROM S_REPORT WHERE CODE LIKE '%{keyword}%' OR NAME LIKE '%{keyword}%' ORDER BY NAME";
 
