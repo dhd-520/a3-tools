@@ -557,12 +557,14 @@ public class OpenAiCompatibleBackend : IAiChatBackend
             });
         }
 
-        // ★ 2026-10-12 V2：部分 AI 写 [{"name":"X","arguments":{...}}] JSON 数组格式（替代 XML）
-        //   陛下反馈日志里 AI 写的：「tool_calls = [{name:"copy_win_form", arguments:{...}}]」
-        //   注意：AI 写的 key 没引号（JS 风格），这里宽松匹配引号可有可无
+        // ★ 2026-10-12 V2/V3：部分 AI 写 JSON 数组格式（替代 XML）
+        //   陛下反馈日志里 AI 写的：「tool_calls = [{name:"copy_win_form", arguments:{... 填必要参数 ...}}]」
+        //   V2 bug：regex 要求 key 带引号（"name"），但 AI 实际写的是 JS 风格不带引号（name:）→ regex 匹配失败 → args={}
+        //   V3 修法：让 key 的引号可有可无（同时支持 "name" 和 name 两种写法）
         if (result.Count == 0)
         {
-            var jsonArrPattern = @"\[\s*\{[^{}]*?""name""\s*:\s*""([^""]+)""[^{}]*?""arguments""\s*:\s*(\{[\s\S]*?\})[^{}]*\}\s*\]";
+            // 引号可有可无：兼容 [{name:"X", arguments:{...}}] 和 [{"name":"X","arguments":{...}}] 两种风格
+            var jsonArrPattern = @"\[\s*\{\s*""?name""?\s*:\s*""?(\w[\w\-]*)""?\s*,\s*""?arguments""?\s*:\s*(\{[\s\S]*?\})\s*\}\s*\]";
             var jsonMatches = Regex.Matches(content, jsonArrPattern, RegexOptions.IgnoreCase);
             foreach (Match m in jsonMatches)
             {
