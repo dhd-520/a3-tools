@@ -233,13 +233,14 @@ public partial class MainForm : Form, IToolContext
     [Obsolete("场景 2 重启后自动重拉 devtools 的设计被陛下取消，保留仅为不破坏调用方")]
     public MainForm(string[]? startupArgs)
     {
-        Instance = this; // ★ 2026-08-26 AI Action 调用入口
         _dataService = new DataService();
         _toolsConfigService = new ToolsConfigService();
         _toolExecutorService = new ToolExecutorService();
         // 启动时更新所有现有账套的拼音
         _dataService.UpdateAllPinyin();
         InitializeComponent();
+        // ★ 2026-10-12 修复「Invoke 必须在窗口句柄创建后」：Instance 赋值移到 InitializeComponent 之后
+        Instance = this; // ★ 2026-08-26 AI Action 调用入口
         InitLaunchTabControls();
         InitToolsTabControls();
         InitStatusTabControls();

@@ -411,11 +411,12 @@ public class StartAccountAction : IAiAction
             if (string.IsNullOrEmpty(code)) return Task.FromResult(AiActionResult.Fail("请提供账套编码"));
 
             var tcs = new TaskCompletionSource<AiActionResult>();
-            A3Tools.Forms.MainForm.Instance.Invoke(() =>
+            var inst = A3Tools.Forms.MainForm.Instance;
+            Action launchAction = () =>
             {
                 try
                 {
-                    bool ok = A3Tools.Forms.MainForm.Instance.LaunchAccountByCode(code);
+                    bool ok = A3Tools.Forms.MainForm.Instance!.LaunchAccountByCode(code);
                     tcs.SetResult(ok
                         ? AiActionResult.Ok($"账套 [{code}] 启动指令已发出")
                         : AiActionResult.Fail($"账套 [{code}] 启动失败（检查 A3 程序目录设置）"));
@@ -424,7 +425,12 @@ public class StartAccountAction : IAiAction
                 {
                     tcs.SetResult(AiActionResult.Fail(ex.Message));
                 }
-            });
+            };
+            // ★ 2026-10-12 修复：IsHandleCreated 检查，避免「在创建窗口句柄之前调用 Invoke」
+            if (inst.IsHandleCreated && !inst.IsDisposed)
+                inst.Invoke(launchAction);
+            else
+                launchAction();
             return tcs.Task;
         }
         catch (Exception ex)
@@ -471,7 +477,8 @@ public class StopAccountAction : IAiAction
             if (string.IsNullOrEmpty(code)) return Task.FromResult(AiActionResult.Fail("请提供账套编码"));
 
             var tcs = new TaskCompletionSource<AiActionResult>();
-            A3Tools.Forms.MainForm.Instance.Invoke(() =>
+            var inst = A3Tools.Forms.MainForm.Instance;
+            Action stopAction = () =>
             {
                 try
                 {
@@ -512,7 +519,12 @@ public class StopAccountAction : IAiAction
                 {
                     tcs.SetResult(AiActionResult.Fail(ex.Message));
                 }
-            });
+            };
+            // ★ 2026-10-12 修复：IsHandleCreated 检查，避免「在创建窗口句柄之前调用 Invoke」
+            if (inst.IsHandleCreated && !inst.IsDisposed)
+                inst.Invoke(stopAction);
+            else
+                stopAction();
             return tcs.Task;
         }
         catch (Exception ex)
@@ -561,14 +573,20 @@ public class DeleteAccountAction : IAiAction
 
             ds.DeleteAccount(code);
 
-            if (A3Tools.Forms.MainForm.Instance != null)
+            // ★ 2026-10-12 修复：IsHandleCreated 检查，避免「在创建窗口句柄之前调用 Invoke」
+            var instDel = A3Tools.Forms.MainForm.Instance;
+            if (instDel != null)
             {
-                A3Tools.Forms.MainForm.Instance.Invoke(() =>
+                Action reloadAction = () =>
                 {
                     var m = typeof(A3Tools.Forms.MainForm).GetMethod("LoadAccounts",
                         BindingFlags.NonPublic | BindingFlags.Instance);
                     m?.Invoke(A3Tools.Forms.MainForm.Instance, null);
-                });
+                };
+                if (instDel.IsHandleCreated && !instDel.IsDisposed)
+                    instDel.Invoke(reloadAction);
+                else
+                    reloadAction();
             }
 
             return Task.FromResult(AiActionResult.Ok($"账套 [{code}] 已永久删除"));
@@ -641,14 +659,20 @@ public class AddAccountAction : IAiAction
             };
             ds.AddAccount(account);
 
-            if (A3Tools.Forms.MainForm.Instance != null)
+            // ★ 2026-10-12 修复：IsHandleCreated 检查，避免「在创建窗口句柄之前调用 Invoke」
+            var instAdd = A3Tools.Forms.MainForm.Instance;
+            if (instAdd != null)
             {
-                A3Tools.Forms.MainForm.Instance.Invoke(() =>
+                Action reloadAction = () =>
                 {
                     var m = typeof(A3Tools.Forms.MainForm).GetMethod("LoadAccounts",
                         BindingFlags.NonPublic | BindingFlags.Instance);
                     m?.Invoke(A3Tools.Forms.MainForm.Instance, null);
-                });
+                };
+                if (instAdd.IsHandleCreated && !instAdd.IsDisposed)
+                    instAdd.Invoke(reloadAction);
+                else
+                    reloadAction();
             }
 
             return Task.FromResult(AiActionResult.Ok($"账套 [{code}] {name} 已新增"));
