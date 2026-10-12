@@ -1,3 +1,4 @@
+using System.Text.Json;
 using A3Tools.Models;
 using A3Tools.Plugins.Default.Forms;
 
@@ -85,6 +86,11 @@ public class CopyDataObjectAction : IAiAction
         {
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
+
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
 
             // 1. 解析目标账套（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var t) ? t?.ToString() : null;
@@ -228,6 +234,11 @@ public class CopyConfigDataAction : IAiAction
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
 
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
+
             // 1. 解析 target_account（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var tac) ? tac?.ToString() : null;
 
@@ -360,6 +371,11 @@ public class CopyWinFormAction : IAiAction
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
 
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
+
             // 1. 解析 target_account（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var tac) ? tac?.ToString() : null;
 
@@ -489,6 +505,11 @@ public class CopyAppFormAction : IAiAction
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
 
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
+
             // 1. 解析 target_account（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var tac) ? tac?.ToString() : null;
 
@@ -615,6 +636,11 @@ public class CopyObjectLinkAction : IAiAction
         {
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
+
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
 
             // 1. 解析 target_account（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var tac) ? tac?.ToString() : null;
@@ -743,6 +769,11 @@ public class CopyReportAction : IAiAction
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
 
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
+
             // 1. 解析 target_account（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var tac) ? tac?.ToString() : null;
 
@@ -869,6 +900,11 @@ public class CopyWebDashboardAction : IAiAction
         {
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
+
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
 
             // 1. 解析 target_account（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var tac) ? tac?.ToString() : null;
@@ -997,6 +1033,11 @@ public class CopyAppChartAction : IAiAction
             var main = A3Tools.Forms.MainForm.Instance;
             if (main == null) return AiActionResult.Fail("MainForm 未初始化");
 
+            // ★ 2026-10-12 陛下反馈：AI 模型把 object_guids 写成对象/target_account 包 XML 标签
+            //   先校验参数类型，错误时返回带「正确格式示例」的错误，让 AI 自我纠正
+            var validationError = CopyArgsValidator.Validate(arguments, Name);
+            if (validationError != null) return AiActionResult.Fail(validationError);
+
             // 1. 解析 target_account（必填）
             string? targetCode = arguments.TryGetValue("target_account", out var tac) ? tac?.ToString() : null;
 
@@ -1084,4 +1125,74 @@ internal static class CrossDbCopyHelper
         error = "请先在 AI 助理面板选择账套，或在调用时传 source_account 参数";
         return null;
     }
+}
+
+/// <summary>
+/// ★ 2026-10-12 陛下反馈：AI 模型在 tool_call 里把 object_guids 写成对象、target_account 值包 XML 标签
+///   根因：模型层 schema 理解错 / 模型本身在产出垃圾
+///   修法：每个 CopyXxxAction.ExecuteAsync 开头调一次 Validate，类型错就返回带「正确格式示例」的错误
+///   效果：AI 看到「正确格式示例」后能自我纠正（下一轮调用就传对）
+/// </summary>
+internal static class CopyArgsValidator
+{
+    /// <summary>校验参数：string 必填字段必须是 string（或 JsonElement 字符串），否则返回错误信息（带格式示例）</summary>
+    /// <returns>null = 通过；非 null = 错误信息</returns>
+    public static string? Validate(Dictionary<string, object?> args, string toolName)
+    {
+        var stringFields = GetStringFields(toolName);
+        var errors = new List<string>();
+
+        foreach (var field in stringFields)
+        {
+            if (!args.TryGetValue(field, out var val) || val == null)
+            {
+                errors.Add($"缺少必填参数 {field}");
+                continue;
+            }
+            if (val is string) continue;
+            // JsonElement 字符串：转回 C# string（AI 有时把字符串也包成 JsonElement）
+            if (val is JsonElement je && je.ValueKind == JsonValueKind.String)
+            {
+                args[field] = je.GetString();
+                continue;
+            }
+            // 类型错：val 是对象、数组、bool、数字、JsonElement(object/array) 等
+            string actualType = val is JsonElement je2 ? je2.ValueKind.ToString().ToLower() : val.GetType().Name;
+            string snippet = val.ToString() ?? "";
+            if (snippet.Length > 80) snippet = snippet.Substring(0, 80) + "...";
+            errors.Add($"{field} 必须是 string，但收到的是 {actualType}：{snippet}");
+        }
+
+        if (errors.Count == 0) return null;
+        return $"{toolName} 参数类型错误：\n  - " + string.Join("\n  - ", errors) +
+               $"\n\n正确格式示例：\n  {GetFormatExample(toolName)}";
+    }
+
+    /// <summary>各工具的 string 必填字段（其他类型字段不校验）</summary>
+    private static string[] GetStringFields(string toolName) => toolName switch
+    {
+        "copy_data_object" => new[] { "source_account", "target_account", "object_names" },
+        "copy_config_data" => new[] { "source_account", "target_account", "type", "keys" },
+        "copy_win_form" => new[] { "source_account", "target_account", "object_guids" },
+        "copy_app_form" => new[] { "source_account", "target_account", "object_guids" },
+        "copy_object_link" => new[] { "source_account", "target_account", "codes" },
+        "copy_report" => new[] { "source_account", "target_account", "codes" },
+        "copy_web_dashboard" => new[] { "source_account", "target_account", "codes" },
+        "copy_app_chart" => new[] { "source_account", "target_account", "codes" },
+        _ => new[] { "source_account", "target_account" }
+    };
+
+    /// <summary>各工具的「正确格式示例」（错误信息会带，让 AI 自我纠正）</summary>
+    public static string GetFormatExample(string toolName) => toolName switch
+    {
+        "copy_data_object" => "{\"object_names\": \"S_Order;S_OrderLine\", \"source_account\": \"0109\", \"target_account\": \"0080\", \"delete_if_exists\": false}",
+        "copy_config_data" => "{\"type\": \"U\", \"keys\": \"B1;B2\", \"source_account\": \"0109\", \"target_account\": \"0080\"}",
+        "copy_win_form" => "{\"object_guids\": \"S_SCM_OLITEMFORBIDDEN_INPUT\", \"source_account\": \"0109\", \"target_account\": \"0080\", \"delete_first\": true}",
+        "copy_app_form" => "{\"object_guids\": \"S_APP_001\", \"source_account\": \"0109\", \"target_account\": \"0080\", \"delete_first\": true}",
+        "copy_object_link" => "{\"codes\": \"OL001;OL002\", \"source_account\": \"0109\", \"target_account\": \"0080\", \"delete_first\": false}",
+        "copy_report" => "{\"codes\": \"R001;R002\", \"source_account\": \"0109\", \"target_account\": \"0080\", \"delete_first\": false}",
+        "copy_web_dashboard" => "{\"codes\": \"DASH001\", \"source_account\": \"0109\", \"target_account\": \"0080\", \"delete_first\": false}",
+        "copy_app_chart" => "{\"codes\": \"CHART001\", \"source_account\": \"0109\", \"target_account\": \"0080\", \"delete_first\": false}",
+        _ => "{}"
+    };
 }
