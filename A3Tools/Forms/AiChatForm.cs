@@ -33,6 +33,15 @@ public partial class AiChatForm : Form
     private readonly OpenAiCompatibleBackend _backend = new();
     private readonly MarkdownPipeline _mdPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
 
+    // ★ 2026-10-13 增：跨回合 Skill 续命持久化
+    //   同一聊天会话里用户发第二条消息时，AI 可能不重新调 load_skill（因为 system context 已有 Skill 信息）
+    //   → 记下上一回合的 Skill 元数据，新回合开头给后端 ResumedSkill* → 后端 fire Phase=resumed → 横幅重新出现
+    //   只在 load_skill Phase=loaded 时更新（“同 Skill 重调”也会更新，以便获取最新的 title）
+    //   不在 completed/aborted 时清空，因为下下回合可能还需要
+    private string? _lastSkillName;
+    private string? _lastSkillTitle;
+    private List<string>? _lastSkillSteps;
+
     /// <summary>
     /// ★★★ 2026-10-07 根治 WebView2 DPI 空白问题（陛下多次反馈「气泡下方大片空白/内容不全」）：
     ///   反射探针证实根因：CoreWebView2Controller.BoundsMode 默认 UseRawPixels，
@@ -1743,10 +1752,29 @@ _ = wv2.EnsureCoreWebView2Async();
                             placeholderAi.Content = $"📋 Skill 流程：{ev.SkillName} ({ev.StepTitles?.Count ?? 0} 步)";
                         }
                     });
+                    // ★ 2026-10-13 增：跨回合 Skill 续命持久化
+                    //   loaded 阶段才存（load_skill 调用成功后），下回合可以 resume
+                    if (ev.Phase == "loaded" && !string.IsNullOrEmpty(ev.SkillName))
+                    {
+                        _lastSkillName = ev.SkillName;
+                        _lastSkillTitle = ev.SkillTitle;
+                        _lastSkillSteps = ev.StepTitles != null ? new List<string>(ev.StepTitles) : null;
+                    }
                 }
                 catch { /* 可视化失败不影响主流程 */ }
             };
 
+            // ★ 2026-10-13 增：跨回合 Skill 续命
+            //   如果上一回合在 Skill 模式下走完（_lastSkillName 有值），本回合开头把元数据塞给后端
+            //   后端在第一次 loop fire Phase=resumed → 横幅重新出现（即使 AI 不调 load_skill）
+            //   后端只消费一次（一次性 fire 后清空 ResumedSkillName）
+            //   但 _lastSkill* 仍保留（如果 AI 本回合调 load_skill，会被新的元数据覆盖）
+            if (!string.IsNullOrEmpty(_lastSkillName))
+            {
+                _backend.ResumedSkillName = _lastSkillName;
+                _backend.ResumedSkillTitle = _lastSkillTitle;
+                _backend.ResumedSkillSteps = _lastSkillSteps;
+            }
             var turnResult = await _backend.SendWithToolsAsync(_currentProvider, messagesForApi, toolCallLog, onToolExecuted, OnToolNeedsConfirmAsync, onSkillProgress, _cts.Token);
 
             // AI 返回最终文本 → 替换占位 → 流式显示
@@ -2628,6 +2656,7 @@ img { max-width: 100%; }
       if (!body) return;
       var banner = document.getElementById('skill-banner');
       // 1) loaded 阶段：全量重建横幅
+      //   resumed 阶段：保留已有横幅（全量重建会闪），只重置步骤状态为 ⏸️ + 去除 completed/aborted 色
       if (phase === 'loaded') {
         if (banner) banner.remove();
         banner = document.createElement('div');
@@ -2654,6 +2683,44 @@ img { max-width: 100%; }
           noStep.className = 'skill-banner-empty';
           noStep.textContent = '（此 Skill 未定义 ## 步骤 段，将按工具调用顺序推进）';
           banner.appendChild(noStep);
+        }
+        body.insertBefore(banner, body.firstChild);
+      } else if (phase === 'resumed' && banner) {
+        // ★ 2026-10-13 增：跨回合续命 → 保留横幅，只重置状态为“重新进行中”
+        //   步骤全部重置为 ⏸️（避免上一回合全勾完成状态的视觉干扰）
+        //   去除 completed/aborted 类（背景色变回默认橙色）
+        //   头部进度文字重置为 “⏳ 重新进行中 0/N”
+        banner.classList.remove('skill-banner-completed', 'skill-banner-aborted');
+        var items = banner.querySelectorAll('.skill-step');
+        for (var i = 0; i < items.length; i++) {
+          items[i].className = 'skill-step skill-step-pending';
+          items[i].textContent = '⏸️ Step ' + (i + 1) + '：' + items[i].getAttribute('data-title');
+        }
+        var headerEl = banner.querySelector('.skill-banner-header');
+        if (headerEl) {
+          headerEl.textContent = '📋 Skill 模式：' + skillName + (skillTitle ? '（' + skillTitle + '）' : '') + ' · ⏳ 重新进行中 0/' + (stepTitles ? stepTitles.length : 0);
+        }
+      } else if (phase === 'resumed' && !banner) {
+        // 极端：横幅被外部清了 → 降级为全量重建（加一个标记区别 loaded）
+        banner = document.createElement('div');
+        banner.id = 'skill-banner';
+        banner.className = 'skill-banner skill-banner-resumed';
+        var header2 = document.createElement('div');
+        header2.className = 'skill-banner-header';
+        header2.textContent = '🔄 Skill 续命：' + skillName + (skillTitle ? '（' + skillTitle + '）' : '') + ' · ⏳ 重新进行中 0/' + (stepTitles ? stepTitles.length : 0);
+        banner.appendChild(header2);
+        if (stepTitles && stepTitles.length > 0) {
+          var list2 = document.createElement('ul');
+          list2.className = 'skill-step-list';
+          for (var j = 0; j < stepTitles.length; j++) {
+            var li2 = document.createElement('li');
+            li2.className = 'skill-step skill-step-pending';
+            li2.setAttribute('data-step', j);
+            li2.setAttribute('data-title', stepTitles[j]);
+            li2.textContent = '⏸️ Step ' + (j + 1) + '：' + stepTitles[j];
+            list2.appendChild(li2);
+          }
+          banner.appendChild(list2);
         }
         body.insertBefore(banner, body.firstChild);
       }
