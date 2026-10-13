@@ -172,15 +172,20 @@ public partial class AiChatForm : Form
         splitChat.Panel2.Resize += (_, _) => LayoutInputPanel();
         pnlSidebar.Resize += (_, _) => LayoutSidebar();
 
-        // ★ 2026-10-13 陛下 15:51 反馈：取消虚拟列表 / 倒序 / “加载更多” sentinel
-        //   下面三行原是 “滚到顶 LoadOlder” 机制：会触发 scroll 条跳 + 加载中闪烁 + 复杂 v12 Timer
-        //   现在 LoadOlderMessages 变成死代码，但保留定义不删（避免大动结构，LoadOlder 可以随时走 git log 找回）
-        //   三处防护：
-        //   1) 不挂 Scroll handler（防 Scroll 事件触发 EnsureScrollPollTimer）
-        //   2) 不启 EnsureScrollPollTimer（防 Timer 轮询触发 LoadOlder）
-        //   3) ScrollPollTimer_Tick / PnlMessagesScroll_Scroll 保留为空实现（如果以后被补挂，也是 no-op）
-        // pnlMessagesScroll.Scroll += PnlMessagesScroll_Scroll;  ← 不挂
-        // EnsureScrollPollTimer();  ← 不启
+        // ★ 2026-09-30 虚拟列表: Scroll 事件监听"滚到顶", 触发 LoadOlderMessages
+        //   (但 Scroll 事件在某些场景不触发, 见下方 EnsureScrollPollTimer 注释)
+        pnlMessagesScroll.Scroll += PnlMessagesScroll_Scroll;
+
+        // ★ 2026-09-30 v4 根因修复: 不依赖 Scroll 事件, 构造时直接启动轮询 Timer
+        //   原因: 陛下报告 "多次滚动都不加载, 日志文件也没" — 二哈看代码发现
+        //   EnsureScrollPollTimer() 只在 Scroll handler 里调, 如果 Scroll 事件不触发
+        //   Timer 永远不启动, LoadOlder 永远不进, 日志没一行
+        //   修法: 构造时直接启动 Timer, Scroll handler 只是个 fallback
+        EnsureScrollPollTimer();
+        DebugLog("===== AI scroll diag started (v4) =====");
+        DebugLog($"current dir = {AppDomain.CurrentDomain.BaseDirectory}");
+        DebugLog($"form created, _visibleStartIndex={_visibleStartIndex}");
+
         // ★ 2026-08-27 修陛下反馈「打开聊天框后不自动滚动到最下方」：
         //   窗体完全显示后 + layout 完成后才滚到底（构造函数里 RenderMessages 时控件还没 layout 完，Maximum=0 滚不动）
         Shown += (_, _) =>
@@ -482,13 +487,10 @@ public partial class AiChatForm : Form
         int idx = lstSessions.SelectedIndex;
         if (idx < 0 || idx >= sessions.Count) return;
         _currentSession = sessions[idx];
-        // ★ 2026-10-13 陛下 15:51 反馈：「不是从下向上加载，还是从上向下加载，滚动条直至不停向下跳」
-        //   原因：之前只拉 GetSessionTail(id, 10)，但用户期望「正常」加载 = 一次性看到全部
-        //   虚拟列表 / 倒序渲染 / LoadOlderMessages / CreateLoadMoreSentinel 全部取消
-        //   保留：侧边栏 list 走 sessions-index.json（明文，秒开）
-        //   现在：选会话 → GetSession(id) 全量解密 + 反序列化（接受 1-2 秒卡顿，换取正确性）
-        //   未来如需：加后台异步加载 + 进度提示，不要再搞花哨的倒序/分片
-        _currentSession.Messages = _store.GetSession(_currentSession.Id).Messages;
+        // ★ 2026-10-13 B+C 优化：只拉最后 InitialWindowSize 条消息，不加载全量
+        //   之前是 _currentSession = sessions[idx]（GetSession() 会全量解密），1000+ 条消息卡顿
+        //   现在 GetSessions() 只返元数据 + GetSessionTail 只解密最后 10 条 ≈ 5ms
+        _currentSession.Messages = _store.GetSessionTail(_currentSession.Id, InitialWindowSize);
         RenderMessages();
     }
 
@@ -527,9 +529,7 @@ public partial class AiChatForm : Form
 
     private void RenderMessages()
     {
-        // ★ 2026-10-13 陛下 15:51 反馈：不需要虚拟列表 / 倒序渲染 / 加载更多 sentinel
-        //   跟工具调用一样、正常聊天一样：全量加载 + 顺序渲染 + 滚到底
-        //   之前 2559664 搞的“初始窗口 + 滚到顶加载更多”太复杂，bug 多、闪烁、跳滚动条，全部取消
+        // ★ 2026-09-30 虚拟列表: 切换会话/重画时只渲染最后 N 条
         flpMessages.SuspendLayout();
         flpMessages.Controls.Clear();
         if (_currentSession == null) { flpMessages.ResumeLayout(true); return; }
@@ -539,8 +539,16 @@ public partial class AiChatForm : Form
         int total = _currentSession.Messages.Count;
         if (total == 0) { flpMessages.ResumeLayout(true); return; }
 
-        // 顺序渲染全部消息（从老到新 = 列表从上到下 = 聊天常规）
-        for (int i = 0; i < total; i++)
+        // 初始窗口: 只显示最后 InitialWindowSize 条
+        _visibleStartIndex = Math.Max(0, total - InitialWindowSize);
+
+        // 若有更早消息, 加一个 "加载更早" sentinel 在最顶部
+        if (_visibleStartIndex > 0)
+        {
+            flpMessages.Controls.Add(CreateLoadMoreSentinel(_visibleStartIndex));
+        }
+
+        for (int i = _visibleStartIndex; i < total; i++)
         {
             var msg = _currentSession.Messages[i];
             var bubble = CreateBubbleRow(msg, source: "Render");
