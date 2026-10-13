@@ -1013,24 +1013,9 @@ public partial class AiChatForm : Form
                         int hVisible = doc.RootElement.TryGetProperty("h_visible", out var hvProp) ? hvProp.GetInt32() : 0;
                         int hBody = doc.RootElement.TryGetProperty("h_body", out var hbProp) ? hbProp.GetInt32() : 0;
                         int hHtml = doc.RootElement.TryGetProperty("h_html", out var hhProp) ? hhProp.GetInt32() : 0;
-                        try { System.IO.File.AppendAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebView2Debug.log"), $"notify: h_used={realH}, h_scroll={hScroll}, h_visible={hVisible}, h_body={hBody}, h_html={hHtml}, wv2.H={wv2.Height}, DeviceDpi={wv2.DeviceDpi}\n"); } catch { }
-                        // ★★★ 2026-10-08 诊断强化：记录 controller 真实状态，定位为何 Mode B 不生效
-                        try
-                        {
-                            var _ctrl = GetController(wv2);
-                            string _mode = "?", _raster = "?", _bounds = "?";
-                            if (_ctrl != null)
-                            {
-                                try { _mode = _ctrl.BoundsMode.ToString(); } catch { }
-                                try { _raster = _ctrl.RasterizationScale.ToString("F2"); } catch { }
-                                try { _bounds = _ctrl.Bounds.ToString(); } catch { }
-                            }
-                            else
-                            {
-                                _mode = "CTRL_NULL";
-                            }
-                            System.IO.File.AppendAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebView2Debug.log"), $"  ctrl: mode={_mode}, raster={_raster}, bounds={_bounds}\n");
-                        } catch { }
+                        // ★ 2026-10-13 陛下要求：调试期 WebView2Debug.log 全部清理
+                        //   - 之前为「内容总高度」「Mode B 不生效」加的诊断写入
+                        //   - hScroll/hVisible/hBody/hHtml 仍保留局部变量（被下方 contentH 兜底用）
                         // ★★★ 2026-10-08 终极修法（同步 Resize 钩子强制 Mode B 后 vpH = wv2.Height）：
                         //   Mode B 下 vpH = Bounds.H = wv2.Height（CSS 像素解释），
                         //   所以 wv2.Height = contentH 即可让内容完整填满气泡，不需 ×DPI/96。

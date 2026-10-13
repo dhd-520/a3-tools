@@ -126,12 +126,9 @@ public static class SqlIntelliSenseProvider
                                 || p.Full.IndexOf(effectivePrefix, StringComparison.OrdinalIgnoreCase) >= 0)
                     .Select(p => p.Full)
                     .ToList();
-                try
-                {
-                    var t3 = $"  [EXEC] matched.Count={matched.Count} (first 5: {string.Join(",", matched.Take(5))})" + Environment.NewLine;
-                    System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "a3-intellisense.log"), t3);
-                }
-                catch { }
+                // ★ 2026-10-13 陛下要求：调试期 a3-intellisense.log 全部清理
+                //   - 之前为定位「存储过程联想」匹配问题加的诊断写入
+                //   - matched 仍按正常逻辑返回给调用方
                 return matched;
             }
             return new List<string>();

@@ -356,34 +356,11 @@ public static class SqlObjectSchemaCache
         }
         catch (Exception ex)
         {
-            LogLoadFailure("LoadColumnsForObject", connectionString, ex);
+            // ★ 2026-10-13 陛下要求：调试期 diag/schema-load-error.log 全部清理
+            //   - 原 LogLoadFailure 调用已删除
             return new List<string>();
         }
     }
-
-    /// <summary>统一的失败日志入口（不让 catch 静默吞）</summary>
-    private static void LogLoadFailure(string source, string connStr, Exception ex)
-    {
-        try
-        {
-            string dbHint = "";
-            try
-            {
-                var b = new SqlConnectionStringBuilder(connStr);
-                dbHint = $"[{b.DataSource}/{b.InitialCatalog}] ";
-            }
-            catch { }
-            var dir = System.IO.Path.Combine(
-                System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".",
-                "diag");
-            System.IO.Directory.CreateDirectory(dir);
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(dir, "schema-load-error.log"),
-                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {dbHint}{source}: {ex}\n---\n");
-        }
-        catch { /* 日志也写不动就别挣扎了 */ }
-    }
-
 
     /// <summary>清掉指定 server 下所有库的缓存</summary>
     public static void InvalidateServer(string server)
@@ -463,8 +440,8 @@ ORDER BY s.name, o.name";
         }
         catch (Exception ex)
         {
-            // 失败：只记录日志，让外层 return list 兜底（list 此时是空的，等价于空列表）
-            LogLoadFailure("LoadFromDbAsync", connStr, ex);
+            // ★ 2026-10-13 陛下要求：调试期 LogLoadFailure 全部清理
+            //   - 失败兜底：让外层 return list 兜底（list 保留 try 块内已成功 Add 的部分）
         }
         return list;
     }
@@ -515,8 +492,8 @@ ORDER BY s.name, o.name";
         }
         catch (Exception ex)
         {
-            // 失败：只记录日志，让外层 return list 兜底
-            LogLoadFailure("LoadFromDbViaHttpAsync", "", ex);
+            // ★ 2026-10-13 陛下要求：调试期 LogLoadFailure 全部清理
+            //   - 失败兜底：让外层 return list 兜底
         }
         return list;
     }
