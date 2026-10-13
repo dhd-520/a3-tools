@@ -410,15 +410,19 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                             if (sk != null)
                             {
                                 currentSkillWriteRequired = sk.WriteRequired;
-                                // ★ 2026-10-13 增：Skill 流程可视化 1+2 层
-                                //   1) 记下 Skill name + title
-                                //   2) 解析 Skill 正文里的 "## 步骤 N: 标题"
-                                //   3) 发火 loaded 事件 → UI 渲染横幅 + 步骤清单
+                                // ★ 2026-10-13 优化：同一个 Skill 重复 load 不重建横幅、不重置步骤
+                                //   之前每次 load_skill 都触发 loaded 事件 → JS 删掉旧横幅 + 重建 → 闪一下
+                                //   现在：同 name 的二次 load 只更新元数据（write_required），步骤索引也不重置
+                                //   跨 Skill 调 load_skill 仍重建（新横幅 + 步骤 0）
+                                bool isNewSkill = string.IsNullOrEmpty(currentSkillName) || currentSkillName != sk.Name;
                                 currentSkillName = sk.Name;
                                 currentSkillTitle = sk.Title ?? "";
-                                currentSkillSteps = SkillProgressEvent.ParseStepTitles(sk.Body);
-                                currentSkillStepIndex = -1;  // -1 = 未开始
-                                if (onSkillProgress != null)
+                                if (isNewSkill)
+                                {
+                                    currentSkillSteps = SkillProgressEvent.ParseStepTitles(sk.Body);
+                                    currentSkillStepIndex = -1;  // -1 = 未开始（首次 load 才重置）
+                                }
+                                if (isNewSkill && onSkillProgress != null)
                                 {
                                     onSkillProgress(new SkillProgressEvent
                                     {
