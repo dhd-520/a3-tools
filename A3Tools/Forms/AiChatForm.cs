@@ -172,6 +172,14 @@ public partial class AiChatForm : Form
         splitChat.Panel2.Resize += (_, _) => LayoutInputPanel();
         pnlSidebar.Resize += (_, _) => LayoutSidebar();
 
+        // ★ v15: WebView2 异步渲染时 FlowLayoutPanel 高度变化 → 强制 Value = Maximum
+        //   陛下 17:30 反馈："正常应该是交叉渲染"（正序交叉 Add 顺序）✅
+        //   加上 Resize 事件: WebView2 加载完 → Resize 触发 → Value 跟随 Maximum 同步
+        //   视觉：屏幕焦点始终在 FlowLayoutPanel 底部 = 最新消息 (AI:对话10)
+        //   滚动条 Value 不变（在 Maximum）→ "滚动条不动" ✅
+        //   debounce 200ms 在 flpMessages_Resize 里处理
+        flpMessages.Resize += flpMessages_Resize;
+
         // ★ 2026-09-30 虚拟列表: Scroll 事件监听"滚到顶", 触发 LoadOlderMessages
         //   (但 Scroll 事件在某些场景不触发, 见下方 EnsureScrollPollTimer 注释)
         pnlMessagesScroll.Scroll += PnlMessagesScroll_Scroll;
@@ -527,20 +535,41 @@ public partial class AiChatForm : Form
 
     // ========== 渲染消息 ==========
 
+    // ★ v15: RenderScroll debounce 跟踪
+    //   避免 FlowLayoutPanel.Resize 事件被 WebView2 频繁触发
+    //   200ms 内不重复设 Value = Maximum
+    private DateTime _lastRenderScrollTime = DateTime.MinValue;
+    private const int RenderScrollDebounceMs = 200;
+
     private void RenderMessages()
     {
-        // ★ 2026-10-13 陛下 17:08 反馈：倒序渲染 + 一次向上
-        //   场景：打开有 20 条消息的历史会话，只加载最后 10 条
-        //     陛下期望：第一个看到的是 “AI: 对话10” （最新）在底部，一次向上插入老消息
-        //     滚动条不动（在底部），视觉外的老消息静默渲染
-        //     最终：最老在顶部，最新在底部（微信样式）
-        //   之前错的：
-        //     顺序 Add（从老到新） → 第一个 add 是最老 → 但 WebView2 异步渲染 → 闪烁
-        //     ScrollToBottom 8 次重试 → 滚动条跳
-        //   现在对的：
-        //     倒序循环（从 total-1 到 visibleStartIndex）+ Insert(0, ...) → 第一个 add 是最新
-        //     Insert(0) 在可视外增加 → 滚动条始终在底部 → 视觉上“一次向上静默渲染”
-        //     单次延迟 ScrollToBottom（500ms 等 WebView2 渲染完）→ 一次性设 Value = Maximum
+        // ★ v15: 2026-10-13 陛下 17:26 反馈
+        //   "感觉没有什么变化，看起来你像是先渲染用户对话内容，又渲染AI对话内容"
+        //   陛下又澄清了 "先渲染" 的真正含义：
+        //     "先渲染 AI: 对话10内容" → 用户视觉上第一个看到的是 AI:对话10（最新）
+        //     "再渲染 我: 问题10"    → 然后才看到 我:问题10
+        //     "一次向上"             → 视觉上从底部向上扩展
+        //
+        // 修法（v15）：
+        //   1) 正序 Add (最老先 Add, 最新最后 Add)
+        //      v14 倒序 Add + SetChildIndex(0) 跟正序 Add 最终 Controls 集合索引完全一样
+        //      （倒序 Add 后 SetChildIndex(0) = 新加的移到顶部, 但 后续 Add 又把之前的挤下去）
+        //      所以 v14 跟 v13 之前的正序 Add 最终结果完全一样 = "没有变化" 正是陛下的反馈
+        //
+        //   2) ResumeLayout(true) 后**立即** Value = Maximum (不绕扊eginInvoke, 不用 500ms Timer)
+        //      关键洞察：ResumeLayout(true) 同步 layout, Maximum 已更新
+        //      立即 Value = Maximum 触发 Invalidate
+        //      下一次 paint 直接画 FlowLayoutPanel 底部 (AI:对话10)
+        //      用户**第一个看到**的就是 AI:对话10 (最新) ✅
+        //      没有 "先看到 我:问题6 然后跳到 AI:对话10" 的闪烁
+        //
+        //   3) FlowLayoutPanel.Resize 事件 + 200ms debounce
+        //      WebView2 异步渲染时 FlowLayoutPanel 高度变化 → Resize 触发
+        //      自动 Value = Maximum → 屏幕焦点始终在 FlowLayoutPanel 底部
+        //      视觉：屏幕内容向上滚（老内容向上滚出屏幕，新内容从屏幕底部扩展）
+        //      滚动条 Value 不变 (在 Maximum) → "滚动条不动" ✅
+        //      老内容在屏幕上方 = 视觉外 = "静默渲染" ✅
+        //      debounce 200ms 避免 WebView2 频繁 resize 时反复设 Value (闪烁)
         flpMessages.SuspendLayout();
         flpMessages.Controls.Clear();
         if (_currentSession == null) { flpMessages.ResumeLayout(true); return; }
@@ -553,44 +582,39 @@ public partial class AiChatForm : Form
         // 初始窗口: 只显示最后 InitialWindowSize 条
         _visibleStartIndex = Math.Max(0, total - InitialWindowSize);
 
-        // 倒序渲染：从最新到最老, Add + SetChildIndex(0) 实现 “先 Add 最新、一次向上插入”
-        //   例：total=20, InitialWindowSize=10, _visibleStartIndex=10
-        //     i=19 → Add(AI:对话10) → SetChildIndex(0) → 面板: [AI:对话10]
-        //     i=18 → Add(我:问题10) → SetChildIndex(0) → 面板: [我:问题10, AI:对话10]
-        //     i=17 → Add(AI:对话9)  → SetChildIndex(0) → 面板: [AI:对话9, 我:问题10, AI:对话10]
-        //     ...
-        //     i=10 → Add(我:问题6)  → SetChildIndex(0) → 面板: [我:问题6, AI:对话6, ..., AI:对话10]
-        //   最终：最老在顶部 (index 0), 最新在底部 (index N-1)
-        //   滚动条在底部 → “一次向上” 的插入都在视觉外 → 静默渲染
-        //   用 SuspendLayout 包裹避免 N 次 SetChildIndex 中间重 layout（闪烁）
-        for (int i = total - 1; i >= _visibleStartIndex; i--)
+        // ★ v15: 正序 Add (最老先 Add, 最新最后 Add)
+        //   最终 Controls 集合索引: [sentinel, 我:问题6, AI:对话6, ..., 我:问题10, AI:对话10]
+        //   视觉布局：最老在顶部, 最新在底部 (微信样式)
+        //   跟 v14 倒序 Add + SetChildIndex(0) 最终结果完全一样, 但代码更简洁
+        if (_visibleStartIndex > 0)
+        {
+            flpMessages.Controls.Add(CreateLoadMoreSentinel(_visibleStartIndex));
+        }
+
+        for (int i = _visibleStartIndex; i < total; i++)
         {
             var msg = _currentSession.Messages[i];
             var bubble = CreateBubbleRow(msg, source: "Render");
             flpMessages.Controls.Add(bubble);
-            flpMessages.Controls.SetChildIndex(bubble, 0);
-        }
-
-        // Sentinel 在最顶部 (index 0, 在所有气泡上面)
-        if (_visibleStartIndex > 0)
-        {
-            var sentinel = CreateLoadMoreSentinel(_visibleStartIndex);
-            flpMessages.Controls.Add(sentinel);
-            flpMessages.Controls.SetChildIndex(sentinel, 0);
         }
 
         flpMessages.ResumeLayout(true);
 
-        // ★ v14: 延迟滚到底（一次性，不轮询）
-        //   陛下 17:08 反馈：“滚动条应该不用动”
-        //   修法：等 WebView2 渲染完（500ms）→ 一次性设 Value = Maximum
-        //         不再 ScrollToBottom 的 8 次重试 → 不跳
-        //         不再 v12 Timer 5fps 10 次轮询 → 不闪
-        //   为什么 Insert(0, ...) 后滚动条“在底部”：
-        //     Insert(0, ...) 增加新控件在顶部 → FlowLayoutPanel 高度增加 → Maximum 增加
-        //     如果 Value 保持不变 → 视口向上偏移 → 看起来“跳” ← 错
-        //     正确：Value 跟着 Maximum 同步增加 → 视口保持“在底部” → 不跳
-        //     Insert(0) 后 Read Maximum → Set Value = Maximum
+        // ★ v15: 立即 Value = Maximum (ResumeLayout(true) 后 layout 完, Maximum 已更新)
+        //   paint 时直接画 FlowLayoutPanel 底部 (AI:对话10)
+        //   用户**第一个看到**的就是 AI:对话10 ✅
+        try
+        {
+            int max = pnlMessagesScroll.VerticalScroll.Maximum;
+            if (max > 0)
+            {
+                pnlMessagesScroll.VerticalScroll.Value = max;
+                _lastRenderScrollTime = DateTime.Now;
+            }
+        }
+        catch { /* 静默失败 */ }
+
+        // ★ v15: 500ms 保险 Timer (万一流 LayoutPanel.Resize 事件不触发)
         try
         {
             var scrollTimer = new System.Windows.Forms.Timer { Interval = 500, Enabled = false };
@@ -601,7 +625,7 @@ public partial class AiChatForm : Form
                 try
                 {
                     int max = pnlMessagesScroll.VerticalScroll.Maximum;
-                    if (max > 0)
+                    if (max > 0 && pnlMessagesScroll.VerticalScroll.Value != max)
                     {
                         pnlMessagesScroll.VerticalScroll.Value = max;
                     }
@@ -611,6 +635,31 @@ public partial class AiChatForm : Form
             scrollTimer.Start();
         }
         catch { /* Timer 启动失败不影响主流程 */ }
+    }
+
+    /// <summary>
+    /// ★ v15: FlowLayoutPanel.Resize 事件处理
+    ///   WebView2 异步渲染时 FlowLayoutPanel 高度变化 → Resize 触发
+    ///   200ms debounce + 强制 Value = Maximum → 滚动条始终在底部
+    /// </summary>
+    private void flpMessages_Resize(object sender, EventArgs e)
+    {
+        if (flpMessages.Controls.Count == 0) return;
+        if (!pnlMessagesScroll.Visible) return;
+
+        var now = DateTime.Now;
+        if ((now - _lastRenderScrollTime).TotalMilliseconds < RenderScrollDebounceMs) return;
+        _lastRenderScrollTime = now;
+
+        try
+        {
+            int max = pnlMessagesScroll.VerticalScroll.Maximum;
+            if (max > 0 && pnlMessagesScroll.VerticalScroll.Value != max)
+            {
+                pnlMessagesScroll.VerticalScroll.Value = max;
+            }
+        }
+        catch { /* 静默失败 */ }
     }
 
     /// <summary>
