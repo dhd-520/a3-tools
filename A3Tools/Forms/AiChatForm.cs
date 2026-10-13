@@ -1708,7 +1708,46 @@ _ = wv2.EnsureCoreWebView2Async();
                 return true;
             };
 
-            var turnResult = await _backend.SendWithToolsAsync(_currentProvider, messagesForApi, toolCallLog, onToolExecuted, OnToolNeedsConfirmAsync, _cts.Token);
+            // ★ 2026-10-13 增：Skill 流程可视化 1+2 层回调
+            //   - load_skill 进入 Skill 模式 → UI 渲染横幅 + 步骤清单
+            //   - 后续每次 tool call → UI 推进一步（⏸️→⏳→✅）
+            Action<SkillProgressEvent> onSkillProgress = (ev) =>
+            {
+                try
+                {
+                    var (bubble, isWv2) = FindBubbleForStream(placeholderAi);
+                    if (bubble == null || !isWv2) return;
+                    if (bubble is not Microsoft.Web.WebView2.WinForms.WebView2 wv2) return;
+                    if (wv2.CoreWebView2 == null) return;
+                    pnlMessagesScroll.InvokeAsync(() =>
+                    {
+                        // 1) 步骤标题序列化成 JSON 数组喂 JS
+                        var stepTitlesJson = System.Text.Json.JsonSerializer.Serialize(ev.StepTitles ?? new List<string>());
+                        string skillNameJson = System.Text.Json.JsonSerializer.Serialize(ev.SkillName ?? "");
+                        string skillTitleJson = System.Text.Json.JsonSerializer.Serialize(ev.SkillTitle ?? "");
+                        string phaseJson = System.Text.Json.JsonSerializer.Serialize(ev.Phase ?? "");
+                        int curStep = ev.CurrentStepIndex;
+                        // 2) 调 JS：loaded 阶段全量渲染；progress 阶段只更新勾选；aborted/completed 阶段全勾完成
+                        string script =
+                            "window.updateSkillBanner(" +
+                                skillNameJson + "," +
+                                skillTitleJson + "," +
+                                stepTitlesJson + "," +
+                                curStep + "," +
+                                phaseJson +
+                            ");";
+                        _ = wv2.CoreWebView2.ExecuteScriptAsync(script);
+                        // 3) 同步更新 placeholderAi.Content（刷新历史 / 切会话能看）
+                        if (string.IsNullOrEmpty(placeholderAi.Content))
+                        {
+                            placeholderAi.Content = $"📋 Skill 流程：{ev.SkillName} ({ev.StepTitles?.Count ?? 0} 步)";
+                        }
+                    });
+                }
+                catch { /* 可视化失败不影响主流程 */ }
+            };
+
+            var turnResult = await _backend.SendWithToolsAsync(_currentProvider, messagesForApi, toolCallLog, onToolExecuted, OnToolNeedsConfirmAsync, onSkillProgress, _cts.Token);
 
             // AI 返回最终文本 → 替换占位 → 流式显示
             await StreamDisplayAsync(placeholderAi, turnResult.FinalContent);
@@ -2386,6 +2425,66 @@ img { max-width: 100%; }
   max-height: 400px;
   overflow-y: auto;
 }
+/* ★ 2026-10-13 增：Skill 流程可视化横幅（1+2 层）
+   需求：AI 调 load_skill 后，在气泡顶部显示 Skill 模式 + 步骤清单
+   - skill-banner：横幅本体，橙色背景，醒目提示在走 Skill 流程
+   - skill-step-active：当前正在执行的步骤，橙色加粗
+   - skill-step-done：已完成步骤，绿色 + 删除线
+   - skill-step-pending：未开始步骤，灰色
+   - skill-banner-completed/aborted：完成/中断时改色提示 */
+.skill-banner {
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+  border-left: 4px solid #ff9800;
+  padding: 10px 14px;
+  margin: 0 0 14px 0;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 20px;
+  box-shadow: 0 2px 4px rgba(255, 152, 0, 0.15);
+}
+.skill-banner-header {
+  font-weight: 600;
+  color: #e65100;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.skill-banner-empty {
+  color: #999;
+  font-style: italic;
+  font-size: 12px;
+}
+.skill-step-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+.skill-step {
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 18px;
+  transition: all 0.2s;
+}
+.skill-step-pending { color: #999; }
+.skill-step-active {
+  color: #ff9800;
+  font-weight: 600;
+  background: rgba(255, 152, 0, 0.08);
+  padding-left: 8px;
+  border-radius: 4px;
+}
+.skill-step-done {
+  color: #4caf50;
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+.skill-banner-completed {
+  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+  border-left-color: #4caf50;
+}
+.skill-banner-aborted {
+  background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+  border-left-color: #f44336;
+}
 </style></head><body><div id=""bubble-body"">" + bodyHtml + @"</div><div id=""tools-stream"">" + toolCardsHtml + @"</div><script>
 (function() {
   // ★ 2026-08-31 方案 X：用 getBoundingClientRect().bottom - top 推真实高度
@@ -2516,6 +2615,81 @@ img { max-width: 100%; }
       window.__appendedToolBlocks.push({name: name, summary: summary || ''});
       rerenderToolStream();
       notify();  // 高度变化推回 C#
+    } catch (e) {}
+  };
+  // ★ 2026-10-13 增：Skill 流程可视化（1+2 层）
+  //   C# 端在 load_skill 时调一次（phase='loaded' 渲染横幅 + 步骤清单）
+  //   后续每次 tool call 调一次（phase='progress' 推进 ⏸️→⏳→✅）
+  //   Skill 结束时调一次（phase='completed' / 'aborted' 全勾完成/改色）
+  //   stepTitles 允许为空数组（Skill 无 ## 步骤 段时降级显示提示）
+  window.updateSkillBanner = function(skillName, skillTitle, stepTitles, currentStepIndex, phase) {
+    try {
+      var body = document.getElementById('bubble-body');
+      if (!body) return;
+      var banner = document.getElementById('skill-banner');
+      // 1) loaded 阶段：全量重建横幅
+      if (phase === 'loaded') {
+        if (banner) banner.remove();
+        banner = document.createElement('div');
+        banner.id = 'skill-banner';
+        banner.className = 'skill-banner';
+        var header = document.createElement('div');
+        header.className = 'skill-banner-header';
+        header.textContent = '📋 Skill 模式：' + skillName + (skillTitle ? '（' + skillTitle + '）' : '') + ' · 共 ' + (stepTitles ? stepTitles.length : 0) + ' 步';
+        banner.appendChild(header);
+        if (stepTitles && stepTitles.length > 0) {
+          var list = document.createElement('ul');
+          list.className = 'skill-step-list';
+          for (var i = 0; i < stepTitles.length; i++) {
+            var li = document.createElement('li');
+            li.className = 'skill-step skill-step-pending';
+            li.setAttribute('data-step', i);
+            li.setAttribute('data-title', stepTitles[i]);
+            li.textContent = '⏸️ Step ' + (i + 1) + '：' + stepTitles[i];
+            list.appendChild(li);
+          }
+          banner.appendChild(list);
+        } else {
+          var noStep = document.createElement('div');
+          noStep.className = 'skill-banner-empty';
+          noStep.textContent = '（此 Skill 未定义 ## 步骤 段，将按工具调用顺序推进）';
+          banner.appendChild(noStep);
+        }
+        body.insertBefore(banner, body.firstChild);
+      }
+      if (!banner) return;
+      // 2) 更新步骤状态（progress / completed / aborted 都走这段）
+      var items = banner.querySelectorAll('.skill-step');
+      var total = stepTitles ? stepTitles.length : 0;
+      if (phase === 'completed' || phase === 'aborted') {
+        banner.classList.add('skill-banner-' + phase);
+        for (var j = 0; j < items.length; j++) {
+          items[j].className = 'skill-step skill-step-done';
+          items[j].textContent = '✅ Step ' + (j + 1) + '：' + items[j].getAttribute('data-title');
+        }
+      } else {
+        for (var k = 0; k < items.length; k++) {
+          if (k < currentStepIndex) {
+            items[k].className = 'skill-step skill-step-done';
+            items[k].textContent = '✅ Step ' + (k + 1) + '：' + items[k].getAttribute('data-title');
+          } else if (k === currentStepIndex) {
+            items[k].className = 'skill-step skill-step-active';
+            items[k].textContent = '⏳ Step ' + (k + 1) + '：' + items[k].getAttribute('data-title');
+          } else {
+            items[k].className = 'skill-step skill-step-pending';
+            items[k].textContent = '⏸️ Step ' + (k + 1) + '：' + items[k].getAttribute('data-title');
+          }
+        }
+      }
+      // 3) 更新头部进度文字
+      var headerEl = banner.querySelector('.skill-banner-header');
+      if (headerEl && phase !== 'loaded') {
+        var doneCount = (phase === 'completed' || phase === 'aborted') ? total : Math.max(0, currentStepIndex + 1);
+        var phaseLabel = phase === 'completed' ? '✅ 完成' : (phase === 'aborted' ? '⚠️ 中断' : ('⏳ 进行中 ' + doneCount + '/' + total));
+        headerEl.textContent = '📋 Skill 模式：' + skillName + (skillTitle ? '（' + skillTitle + '）' : '') + ' · ' + phaseLabel;
+      }
+      // 4) 高度变化推回 C#
+      if (typeof _notifyNow === 'function') _notifyNow();
     } catch (e) {}
   };
   // ★ 2026-10-07 陛下反馈：AI 流式完成后又重设 body.innerHTML，把 tools-stream 里的 tool cards 全擦了

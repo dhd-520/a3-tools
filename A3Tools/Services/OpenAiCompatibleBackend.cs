@@ -146,6 +146,7 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         List<ChatToolCallRecord>? toolCallLog,
         Func<AiActionResult, Task<bool>>? onToolExecuted,
         Func<string, string, string?, Task<bool>>? onToolNeedsConfirm,
+        Action<SkillProgressEvent>? onSkillProgress = null,
         CancellationToken ct = default)
     {
         var url = provider.ApiUrl.TrimEnd('/') + "/chat/completions";
@@ -172,6 +173,12 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         // ★ 2026-10-06 Skill 工作流强制续命器追踪
         bool skillMode = false;             // load_skill 是否调过
         var calledWriteTools = new HashSet<string>();  // 调过的 write-tools
+        // ★ 2026-10-13 增：Skill 流程可视化（1+2 层）追踪
+        string currentSkillName = "";                       // Skill name（用于事件 payload）
+        string currentSkillTitle = "";                      // Skill title
+        List<string> currentSkillSteps = new();             // 解析的步骤标题列表
+        int currentSkillStepIndex = -1;                     // 当前步骤索引（-1=未开始）
+        // ★ 2026-10-13 增：进入 Skill 模式后已发过的 progress 事件数（防止一轮跑出多个 tool call 时重复发火）
         bool brokeEarly = false;             // 是否 break（修双重日志 bug）
         // ★ 2026-10-06 增：当前加载的 Skill 是否需要写工具（read-only Skill 跳过续命检查，避免死循环到 maxLoops）
         bool currentSkillWriteRequired = true;  // 默认 true（安全起见，未明确标记的 Skill 仍走严格检查）
@@ -400,12 +407,55 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                         if (!string.IsNullOrWhiteSpace(skillName))
                         {
                             var sk = SkillRegistry.Instance.Get(skillName);
-                            if (sk != null) currentSkillWriteRequired = sk.WriteRequired;
+                            if (sk != null)
+                            {
+                                currentSkillWriteRequired = sk.WriteRequired;
+                                // ★ 2026-10-13 增：Skill 流程可视化 1+2 层
+                                //   1) 记下 Skill name + title
+                                //   2) 解析 Skill 正文里的 "## 步骤 N: 标题"
+                                //   3) 发火 loaded 事件 → UI 渲染横幅 + 步骤清单
+                                currentSkillName = sk.Name;
+                                currentSkillTitle = sk.Title ?? "";
+                                currentSkillSteps = SkillProgressEvent.ParseStepTitles(sk.Body);
+                                currentSkillStepIndex = -1;  // -1 = 未开始
+                                if (onSkillProgress != null)
+                                {
+                                    onSkillProgress(new SkillProgressEvent
+                                    {
+                                        Phase = "loaded",
+                                        SkillName = currentSkillName,
+                                        SkillTitle = currentSkillTitle,
+                                        StepTitles = new List<string>(currentSkillSteps),
+                                        CurrentStepIndex = -1
+                                    });
+                                }
+                            }
                         }
                     }
                     catch { /* 解析失败保持默认 true */ }
                 }
                 if (SkillWorkflowEnforcer.IsWriteTool(toolName)) calledWriteTools.Add(toolName);
+
+                // ★ 2026-10-13 增：Skill 流程可视化 progress 事件
+                //   每次 tool call 都推进一步（粗略：AI 调 N 个工具 = N 个步骤；最坏情况最后一步会被压缩）
+                //   真正准确的步骤-工具映射留给 Layer 3（Skill frontmatter 加 step_tool_mapping 字段）
+                if (skillMode && currentSkillSteps.Count > 0 && onSkillProgress != null)
+                {
+                    // load_skill 自己不算步骤推进（步骤 0 才算开始），其他所有 tool call 都推进一步
+                    if (toolName != "load_skill")
+                    {
+                        currentSkillStepIndex = Math.Min(currentSkillStepIndex + 1, currentSkillSteps.Count - 1);
+                    }
+                    onSkillProgress(new SkillProgressEvent
+                    {
+                        Phase = "progress",
+                        SkillName = currentSkillName,
+                        SkillTitle = currentSkillTitle,
+                        StepTitles = new List<string>(currentSkillSteps),
+                        CurrentStepIndex = currentSkillStepIndex,
+                        LastToolName = toolName
+                    });
+                }
 
                 if (onToolExecuted != null)
                     await onToolExecuted(result);
@@ -427,6 +477,20 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                 AiAssistantLogger.LogLoopEnd(maxLoops, "max_loops_ceiling_reached", sb.ToString(), true,
                     $"达到 maxLoops={maxLoops} 上限，AI 工具调用已耗尽额度（可能还在 Skill 流程中途）。如未完成，请陛下手动或下条消息继续追问。");
             }
+
+        // ★ 2026-10-13 增：Skill 流程可视化 completed 事件
+        //   正常结束（maxLoops 自然耗尽或 break）时发火，UI 把所有步骤标为 ✅
+        if (skillMode && onSkillProgress != null)
+        {
+            onSkillProgress(new SkillProgressEvent
+            {
+                Phase = brokeEarly ? "completed" : "aborted",
+                SkillName = currentSkillName,
+                SkillTitle = currentSkillTitle,
+                StepTitles = new List<string>(currentSkillSteps),
+                CurrentStepIndex = currentSkillSteps.Count  // 表示全部完成
+            });
+        }
 
         return new AiChatTurnResult
         {
@@ -1007,5 +1071,6 @@ public interface IAiChatBackend
         List<ChatToolCallRecord>? toolCallLog,
         Func<AiActionResult, Task<bool>>? onToolExecuted,
         Func<string, string, string?, Task<bool>>? onToolNeedsConfirm,
+        Action<SkillProgressEvent>? onSkillProgress = null,
         CancellationToken ct = default);
 }
