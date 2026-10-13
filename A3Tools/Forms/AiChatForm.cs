@@ -487,6 +487,10 @@ public partial class AiChatForm : Form
         int idx = lstSessions.SelectedIndex;
         if (idx < 0 || idx >= sessions.Count) return;
         _currentSession = sessions[idx];
+        // ★ 2026-10-13 B+C 优化：只拉最后 InitialWindowSize 条消息，不加载全量
+        //   之前是 _currentSession = sessions[idx]（GetSession() 会全量解密），1000+ 条消息卡顿
+        //   现在 GetSessions() 只返元数据 + GetSessionTail 只解密最后 10 条 ≈ 5ms
+        _currentSession.Messages = _store.GetSessionTail(_currentSession.Id, InitialWindowSize);
         RenderMessages();
     }
 
@@ -585,19 +589,29 @@ public partial class AiChatForm : Form
                 flpMessages.Controls.RemoveAt(0);
             }
 
-            // 3) ★★ v2 修法: 先按"从老到新"顺序 add (全部堆到末尾), 再用 SetChildIndex 移到顶部
-            //   ★ v5 修法: 不在循环里算 prependedHeight (那时 layout 没跑, PreferredSize 错的)
-            //              改在 ResumeLayout + PerformLayout 后用 lastNewBubble.Bottom 算真实高度
+            // 3) ★★ 2026-10-13 B+C 优化: 从 store 拉增量切片, 不动整个 in-memory messages 数组
+            //   之前是从 _currentSession.Messages[newStart.._visibleStartIndex] 切片
+            //   现在改成 _store.GetSessionMessagesRange(id, newStart, count) 只读 + 解密 older
+            //   然后 _currentSession.Messages.InsertRange(0, older) 同步 in-memory 累积视图
+            var olderMessages = _store.GetSessionMessagesRange(_currentSession.Id, newStart, actuallyLoad);
+            if (olderMessages.Count == 0)
+            {
+                // store 没拉到（文件被删/损坏）→ 直接退出，不渲染也不动 _visibleStartIndex
+                return;
+            }
+            // 同步 in-memory 累积视图
+            _currentSession.Messages.InsertRange(0, olderMessages);
+
             flpMessages.SuspendLayout();
             var newBubbles = new System.Collections.Generic.List<Control>();
-            for (int i = newStart; i < _visibleStartIndex; i++)  // forward: msg80, 81, ..., 89
+            for (int i = 0; i < olderMessages.Count; i++)  // forward: 拉到的消息
             {
-                var msg = _currentSession.Messages[i];
+                var msg = olderMessages[i];
                 var bubble = CreateBubbleRow(msg, source: "LoadOlder");
                 flpMessages.Controls.Add(bubble);  // append 到末尾
                 newBubbles.Add(bubble);
             }
-            // 把新气泡从末尾移到顶部, 按顺序排 (b80 在 index 0, b89 在 index 9)
+            // 把新气泡从末尾移到顶部, 按顺序排 (older[0] 在 index 0, older[last] 在 index N-1)
             for (int i = 0; i < newBubbles.Count; i++)
             {
                 flpMessages.Controls.SetChildIndex(newBubbles[i], i);
@@ -3143,6 +3157,23 @@ internal class NullChatStore : IChatStore
     public void SaveSession(ChatSession session) => _current = session;
     public void DeleteSession(string sessionId) { if (_current?.Id == sessionId) _current = null; }
     public void ClearAll() => _current = null;
+
+    // ★ 2026-10-13 同步 IChatStore 新接口（Disabled 策略下全部走 in-memory 当前的 _current）
+    public ChatSession? GetSessionMetadata(string sessionId)
+        => _current?.Id == sessionId
+            ? new ChatSession { Id = _current.Id, Title = _current.Title, CreatedAtUtc = _current.CreatedAtUtc, LastActiveAtUtc = _current.LastActiveAtUtc, ProviderId = _current.ProviderId, Model = _current.Model, MessagesCount = _current.Messages?.Count ?? 0, Messages = new() }
+            : null;
+    public List<ChatMessage> GetSessionTail(string sessionId, int count)
+        => _current?.Id == sessionId && count > 0
+            ? _current.Messages.Skip(Math.Max(0, _current.Messages.Count - count)).ToList()
+            : new List<ChatMessage>();
+    public List<ChatMessage> GetSessionMessagesRange(string sessionId, int skip, int take)
+    {
+        if (_current?.Id != sessionId) return new List<ChatMessage>();
+        var query = _current.Messages.Skip(Math.Max(0, skip));
+        if (take >= 0) query = query.Take(take);
+        return query.ToList();
+    }
 }
 
 internal static class ControlExtensions

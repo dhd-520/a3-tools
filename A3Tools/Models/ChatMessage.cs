@@ -84,4 +84,11 @@ public class ChatSession
 
     /// <summary>使用的模型名（可中途切换）</summary>
     public string Model { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 消息总数（仅 index 维护；Messages 文件本身不含此字段）
+    /// <para>★ 2026-10-13 优化：GetSessions() 返回此字段让 UI 知道消息总数，无需加载全部消息</para>
+    /// <para>LocalChatStore 在读 index 时填这个字段；读 messages 文件时此字段为 0</para>
+    /// </summary>
+    public int MessagesCount { get; set; } = 0;
 }
