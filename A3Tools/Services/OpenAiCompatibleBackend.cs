@@ -19,13 +19,6 @@ namespace A3Tools.Services;
 /// </summary>
 public class OpenAiCompatibleBackend : IAiChatBackend
 {
-    // ★ 2026-10-13 增：跨回合 Skill 续命字段
-    //   调用方（AiChatForm）在 SendWithToolsAsync 之前设置，后端在第一次 loop 开头 fire Phase=resumed 事件
-    //   一次性消费（用完即清），不影响下下次
-    public string? ResumedSkillName { get; set; }
-    public string? ResumedSkillTitle { get; set; }
-    public List<string>? ResumedSkillSteps { get; set; }
-
     private readonly HttpClient _http;
     private readonly ActionRegistry _actions = ActionRegistry.Instance;
 
@@ -156,21 +149,6 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         Action<SkillProgressEvent>? onSkillProgress = null,
         CancellationToken ct = default)
     {
-        // ★ 2026-10-13 增：跨回合 Skill 续命
-        //   场景：用户在同一个聊天会话里发了第二条消息，AI 已经"知道"当前 Skill（system context 还在）
-        //         不会重新调 load_skill，但后端 currentSkillName 是空的 → 横幅不出现
-        //   修法：调用方（AiChatForm）在调 SendWithToolsAsync 之前把上次的 Skill 元数据塞进来
-        //         后端在第一次 tool call 之前发火 Phase=resumed 事件，把横幅从"完成"恢复成"重新进行中"
-        //   一次性消费（用完即清），避免影响下下次（除非调用方再次设置）
-        bool resumedFromLastTurn = ResumedSkillName != null;
-        string? resumeName = ResumedSkillName;
-        string? resumeTitle = ResumedSkillTitle;
-        List<string>? resumeSteps = ResumedSkillSteps;
-        bool resumedFired = false;  // ★ 2026-10-13 增：防止重复 fire Phase=resumed（仅第一次 loop fire）
-        ResumedSkillName = null;
-        ResumedSkillTitle = null;
-        ResumedSkillSteps = null;
-
         var url = provider.ApiUrl.TrimEnd('/') + "/chat/completions";
         var toolsSchema = _actions.ToOpenAiToolsSchema();
 
@@ -218,32 +196,6 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         for (int loop = 0; loop < maxLoops; loop++)
         {
             ct.ThrowIfCancellationRequested();
-
-            // ★ 2026-10-13 增：跨回合 Skill 续命横幅（每个 loop 开头都检查，但只 fire 一次）
-            //   场景：同一聊天会话里用户发了第二条消息，AI 不重新调 load_skill
-            //         （因为 system context 已有 Skill 信息，AI 觉得不需要再 load）
-            //         但 AI 实际上在用 Skill 的工具（execute_sql、add_knowledge_entry...）
-            //         → 横幅不出现 → 陛下看不到“正在调用 Skill”
-            //   修法：第一次 loop 开头把 currentSkill* 恢复 + fire Phase=resumed
-            //         JS 端横幅从“完成”变回“重新进行中”，步骤进度重置为 ⏸️
-            //         此后 AI 调工具照常推进（onSkillProgress progress 事件）
-            //   注意：只 fire 一次（flag resumedFired），后续 loop 不重复
-            if (resumedFromLastTurn && !resumedFired)
-            {
-                currentSkillName = resumeName;
-                currentSkillTitle = resumeTitle ?? "";
-                currentSkillSteps = resumeSteps ?? new List<string>();
-                currentSkillStepIndex = -1;
-                onSkillProgress?.Invoke(new SkillProgressEvent
-                {
-                    Phase = "resumed",
-                    SkillName = currentSkillName,
-                    SkillTitle = currentSkillTitle,
-                    StepTitles = new List<string>(currentSkillSteps),
-                    CurrentStepIndex = -1
-                });
-                resumedFired = true;
-            }
 
             AiAssistantLogger.LogLoopStart(loop, maxLoops, msgs.Count);
 
