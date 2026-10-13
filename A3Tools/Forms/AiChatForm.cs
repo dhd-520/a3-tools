@@ -529,7 +529,18 @@ public partial class AiChatForm : Form
 
     private void RenderMessages()
     {
-        // ★ 2026-09-30 虚拟列表: 切换会话/重画时只渲染最后 N 条
+        // ★ 2026-10-13 陛下 17:08 反馈：倒序渲染 + 一次向上
+        //   场景：打开有 20 条消息的历史会话，只加载最后 10 条
+        //     陛下期望：第一个看到的是 “AI: 对话10” （最新）在底部，一次向上插入老消息
+        //     滚动条不动（在底部），视觉外的老消息静默渲染
+        //     最终：最老在顶部，最新在底部（微信样式）
+        //   之前错的：
+        //     顺序 Add（从老到新） → 第一个 add 是最老 → 但 WebView2 异步渲染 → 闪烁
+        //     ScrollToBottom 8 次重试 → 滚动条跳
+        //   现在对的：
+        //     倒序循环（从 total-1 到 visibleStartIndex）+ Insert(0, ...) → 第一个 add 是最新
+        //     Insert(0) 在可视外增加 → 滚动条始终在底部 → 视觉上“一次向上静默渲染”
+        //     单次延迟 ScrollToBottom（500ms 等 WebView2 渲染完）→ 一次性设 Value = Maximum
         flpMessages.SuspendLayout();
         flpMessages.Controls.Clear();
         if (_currentSession == null) { flpMessages.ResumeLayout(true); return; }
@@ -542,21 +553,64 @@ public partial class AiChatForm : Form
         // 初始窗口: 只显示最后 InitialWindowSize 条
         _visibleStartIndex = Math.Max(0, total - InitialWindowSize);
 
-        // 若有更早消息, 加一个 "加载更早" sentinel 在最顶部
-        if (_visibleStartIndex > 0)
-        {
-            flpMessages.Controls.Add(CreateLoadMoreSentinel(_visibleStartIndex));
-        }
-
-        for (int i = _visibleStartIndex; i < total; i++)
+        // 倒序渲染：从最新到最老, Add + SetChildIndex(0) 实现 “先 Add 最新、一次向上插入”
+        //   例：total=20, InitialWindowSize=10, _visibleStartIndex=10
+        //     i=19 → Add(AI:对话10) → SetChildIndex(0) → 面板: [AI:对话10]
+        //     i=18 → Add(我:问题10) → SetChildIndex(0) → 面板: [我:问题10, AI:对话10]
+        //     i=17 → Add(AI:对话9)  → SetChildIndex(0) → 面板: [AI:对话9, 我:问题10, AI:对话10]
+        //     ...
+        //     i=10 → Add(我:问题6)  → SetChildIndex(0) → 面板: [我:问题6, AI:对话6, ..., AI:对话10]
+        //   最终：最老在顶部 (index 0), 最新在底部 (index N-1)
+        //   滚动条在底部 → “一次向上” 的插入都在视觉外 → 静默渲染
+        //   用 SuspendLayout 包裹避免 N 次 SetChildIndex 中间重 layout（闪烁）
+        for (int i = total - 1; i >= _visibleStartIndex; i--)
         {
             var msg = _currentSession.Messages[i];
             var bubble = CreateBubbleRow(msg, source: "Render");
             flpMessages.Controls.Add(bubble);
+            flpMessages.Controls.SetChildIndex(bubble, 0);
+        }
+
+        // Sentinel 在最顶部 (index 0, 在所有气泡上面)
+        if (_visibleStartIndex > 0)
+        {
+            var sentinel = CreateLoadMoreSentinel(_visibleStartIndex);
+            flpMessages.Controls.Add(sentinel);
+            flpMessages.Controls.SetChildIndex(sentinel, 0);
         }
 
         flpMessages.ResumeLayout(true);
-        ScrollToBottom();
+
+        // ★ v14: 延迟滚到底（一次性，不轮询）
+        //   陛下 17:08 反馈：“滚动条应该不用动”
+        //   修法：等 WebView2 渲染完（500ms）→ 一次性设 Value = Maximum
+        //         不再 ScrollToBottom 的 8 次重试 → 不跳
+        //         不再 v12 Timer 5fps 10 次轮询 → 不闪
+        //   为什么 Insert(0, ...) 后滚动条“在底部”：
+        //     Insert(0, ...) 增加新控件在顶部 → FlowLayoutPanel 高度增加 → Maximum 增加
+        //     如果 Value 保持不变 → 视口向上偏移 → 看起来“跳” ← 错
+        //     正确：Value 跟着 Maximum 同步增加 → 视口保持“在底部” → 不跳
+        //     Insert(0) 后 Read Maximum → Set Value = Maximum
+        try
+        {
+            var scrollTimer = new System.Windows.Forms.Timer { Interval = 500, Enabled = false };
+            scrollTimer.Tick += (_, _) =>
+            {
+                scrollTimer.Stop();
+                scrollTimer.Dispose();
+                try
+                {
+                    int max = pnlMessagesScroll.VerticalScroll.Maximum;
+                    if (max > 0)
+                    {
+                        pnlMessagesScroll.VerticalScroll.Value = max;
+                    }
+                }
+                catch { /* 静默失败 */ }
+            };
+            scrollTimer.Start();
+        }
+        catch { /* Timer 启动失败不影响主流程 */ }
     }
 
     /// <summary>
