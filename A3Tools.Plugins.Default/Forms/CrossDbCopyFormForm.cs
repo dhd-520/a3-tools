@@ -1193,9 +1193,15 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
         {
             var colName = reader.GetString(0);
             var dataType = reader.GetString(1).ToUpper();
+            // ★ 2026-10-13 陛下 9:52 反馈修复：GetInt32 强类型 getter 读 tinyint 抛 InvalidCastException(Byte→Int32)
+            //   INFORMATION_SCHEMA.COLUMNS:
+            //     CHARACTER_MAXIMUM_LENGTH → int        → GetInt32 OK
+            //     NUMERIC_PRECISION         → tinyint    → GetInt32 炸！要 GetByte
+            //     NUMERIC_SCALE             → tinyint    → GetInt32 炸！要 GetByte
+            //   byte 在字符串拼接里自动 ToString 跟 int 输出一致（"DECIMAL(18,2)"），下游不受影响
             var charMax = reader.GetInt32(2);
-            var numPrec = reader.GetInt32(3);
-            var numScale = reader.GetInt32(4);
+            var numPrec = reader.GetByte(3);
+            var numScale = reader.GetByte(4);
             var isNullable = reader.GetString(5) == "YES";
 
             string typeStr;
