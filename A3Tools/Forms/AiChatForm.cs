@@ -628,87 +628,51 @@ public partial class AiChatForm : Form
             flpMessages.ResumeLayout(true);
             pnlMessagesScroll.PerformLayout();
 
-            // 5) ★ v5: 算"实际 prepended 高度" (layout 后用真实 Y 坐标, 不用 PreferredSize 估算)
-            //   = 最后一个新气泡的 Bottom (flp 坐标系里, 它在新气泡底部)
-            //   例: newSentinel.Top=14 (Padding.Top), 10 个气泡依次排, lastNew.Bottom=14+10气泡高+sentinel高
-            //   视口需要向下挪这个高度, 让用户原本看到的 msg90 还在屏幕同一位置
+            int capturedNewBubblesCount = newBubbles.Count;
+            int capturedOldY = oldScrollY;
             int actualPrependedHeight = 0;
             if (newBubbles.Count > 0)
             {
                 Control lastNew = newBubbles[newBubbles.Count - 1];
                 actualPrependedHeight = lastNew.Bottom + lastNew.Margin.Bottom;
-                // 如果有新 sentinel, 它在最顶部, lastNew.Bottom 不含 sentinel 高度
-                // 实际上 sentinel 之上没有内容, lastNew.Bottom 已经包含从顶部到 lastNew 底部的所有内容
             }
-
-            // 7) ★ v12: Timer 延迟 + 直接 VerticalScroll.Value (代替 v11 的 ScrollControlIntoView)
-            //   v11 失败原因: 调用时 max=6595 没变, originalFirst.Top=0, ScrollControlIntoView 认为控件已可见, 不滚动
-            //   v12: BeginInvoke 触发后, 500ms Timer 重试, 每次重新 PerformLayout + 取 originalFirst.Top
-            //       直到 max 增长 (说明 WebView2 注册完成), 再设 Value
-            //   ★ v11 SmartScrollToBottom 保护: 我们设的位置不在底部, ResizeObserver 的 SmartScrollToBottom 不再触发
-            int capturedNewBubblesCount = newBubbles.Count;
-            int capturedOldY = oldScrollY;
-            int initialMax = pnlMessagesScroll.VerticalScroll.Maximum;
-            DebugLog($"scroll preserve v12 scheduled: oldY={capturedOldY} prepended={actualPrependedHeight} (newBubbles={capturedNewBubblesCount}) initialMax={initialMax}");
+            // 5) ★ v13: 简化滚动保持 — 取消 v12 5fps 10 次轮询
+            //   陛下 15:51 反馈：“滚动条直至不停向下跳，加载完可视区域闪烁”
+            //   根因：v12 Timer 200ms × 10 = 2 秒轮询，每次都设 Value + PerformLayout → 连续重布局
+            //         ResizeObserver 看到 wv2.Height 变多次 → 多次 SmartScrollToBottom → 跳到底部
+            //   修法：一次性等 WebView2 init（单次 Timer 500ms），读 originalFirst.Top 设 Value 后立刻 Stop+Dispose
+            //         不再轮询、不再 PerformLayout 中间态 → 布局稳定 + 滚动条不跳
+            //   失败容忍：500ms 还没 init 也无所谓，不强求还原（用户可以手动重新滚到原位置）
+            int capturedIdx = 1 + capturedNewBubblesCount;
+            DebugLog($"scroll preserve v13 scheduled: oldY={capturedOldY} prepended={actualPrependedHeight} (newBubbles={capturedNewBubblesCount}) capturedIdx={capturedIdx}");
             try
             {
-                var deferTimer = new System.Windows.Forms.Timer { Interval = 200 };  // 5fps
-                int tries = 0;
-                deferTimer.Tick += (_, _) =>
+                var singleShot = new System.Windows.Forms.Timer { Interval = 500, Enabled = false };
+                singleShot.Tick += (_, _) =>
                 {
-                    tries++;
+                    singleShot.Stop();
+                    singleShot.Dispose();
                     try
                     {
-                        // 强制 layout 让控件位置更新
-                        flpMessages.PerformLayout();
-                        pnlMessagesScroll.PerformLayout();
-
-                        int originalFirstIdx = 1 + capturedNewBubblesCount;
-                        if (originalFirstIdx >= flpMessages.Controls.Count)
-                        {
-                            DebugLog($"v12 try {tries}: idx OOR {originalFirstIdx} >= {flpMessages.Controls.Count}");
-                            return;
-                        }
-
-                        Control originalFirst = flpMessages.Controls[originalFirstIdx];
+                        if (capturedIdx >= flpMessages.Controls.Count) return;
+                        Control originalFirst = flpMessages.Controls[capturedIdx];
                         int targetY = originalFirst.Top;
                         int maxY = pnlMessagesScroll.VerticalScroll.Maximum;
-
-                        DebugLog($"v12 try {tries}: originalFirst.Top={targetY} maxY={maxY} (initialMax={initialMax})");
-
-                        // 如果 max 还没增长 (WebView2 未注册), 等下一轮
-                        if (maxY <= initialMax && tries < 10)
-                        {
-                            return;  // 继续 tick
-                        }
-
-                        // 设 Value
                         if (targetY > maxY) targetY = maxY;
                         if (targetY < 0) targetY = 0;
                         pnlMessagesScroll.VerticalScroll.Value = targetY;
-                        int actualY = pnlMessagesScroll.VerticalScroll.Value;
-                        DebugLog($"v12 try {tries} SET: targetY={targetY} actualY={actualY} maxY={maxY}");
-
-                        // 成功 (或 10 次都没等来 max 增长, 强行停)
-                        if (actualY == targetY || tries >= 10)
-                        {
-                            deferTimer.Stop();
-                            deferTimer.Dispose();
-                            DebugLog($"v12 TIMER stopped at try {tries}");
-                        }
+                        DebugLog($"scroll preserve v13 SET: targetY={targetY} maxY={maxY}");
                     }
                     catch (Exception ex)
                     {
-                        DebugLog($"v12 try {tries} EXCEPTION: {ex.GetType().Name}: {ex.Message}");
-                        deferTimer.Stop();
-                        deferTimer.Dispose();
+                        DebugLog($"scroll preserve v13 EXCEPTION: {ex.GetType().Name}: {ex.Message}");
                     }
                 };
-                deferTimer.Start();
+                singleShot.Start();
             }
             catch (Exception ex)
             {
-                DebugLog($"v12 Timer start FAILED: {ex.GetType().Name}: {ex.Message}");
+                DebugLog($"scroll preserve v13 Timer start FAILED: {ex.GetType().Name}: {ex.Message}");
             }
         }
         finally
