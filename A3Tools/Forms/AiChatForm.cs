@@ -538,6 +538,84 @@ public partial class AiChatForm : Form
     // ★ v16: 删掉了 v15 的 _lastRenderScrollTime / RenderScrollDebounceMs
     //   每次 Resize 都设 Value = Maximum 即可, WinForms 同值自动去重, 不需要防抖
 
+    // ★ v17: 跳底追逐 Timer (覆盖 WebView2 异步加载)
+    //   Maximum 稳定 500ms 后自动停止, 避免一直跟用户滚动抢位置
+    private System.Windows.Forms.Timer? _scrollChaseTimer = null;
+
+    /// <summary>
+    /// v17 核心: 设 Value = Maximum (O(1), WinForms 同值自动去重)
+    ///   抽出来给 RenderMessages 末尾 + BeginInvoke + flpMessages_Resize + 追逐 Timer 共用
+    /// </summary>
+    private void JumpToBottom()
+    {
+        try
+        {
+            int max = pnlMessagesScroll.VerticalScroll.Maximum;
+            int cur = pnlMessagesScroll.VerticalScroll.Value;
+            if (max > 0 && cur != max)
+            {
+                pnlMessagesScroll.VerticalScroll.Value = max;
+            }
+        }
+        catch { /* 静默失败 */ }
+    }
+
+    /// <summary>
+    /// v17 追逐 Timer: WebView2 异步加载时 Maximum 持续增大, 启动一个 Timer
+    ///   每 100ms 设一次 Value = Maximum, Maximum 连续 5 tick (500ms) 稳定后停止
+    ///   避免一直跟用户上滚抢位置 (Maximum 稳定意味着 WebView2 全部加载完)
+    /// </summary>
+    private void StartScrollChase()
+    {
+        // 停掉旧的 (避免多次 RenderMessages 调用积累 Timer 泄露)
+        StopScrollChase();
+        try
+        {
+            _scrollChaseTimer = new System.Windows.Forms.Timer { Interval = 100, Enabled = false };
+            int lastMax = -1;
+            int stableTicks = 0;
+            _scrollChaseTimer.Tick += (_, _) =>
+            {
+                try
+                {
+                    int max = pnlMessagesScroll.VerticalScroll.Maximum;
+                    // Maximum 稳定 5 tick (500ms) 意味着 WebView2 全部加载完, 停止追逐
+                    if (max == lastMax)
+                    {
+                        stableTicks++;
+                        if (stableTicks >= 5)
+                        {
+                            StopScrollChase();
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        stableTicks = 0;
+                        lastMax = max;
+                    }
+                    JumpToBottom();
+                }
+                catch
+                {
+                    StopScrollChase();
+                }
+            };
+            _scrollChaseTimer.Start();
+        }
+        catch { /* Timer 启动失败不影响主流程 */ }
+    }
+
+    private void StopScrollChase()
+    {
+        if (_scrollChaseTimer != null)
+        {
+            try { _scrollChaseTimer.Stop(); } catch { }
+            try { _scrollChaseTimer.Dispose(); } catch { }
+            _scrollChaseTimer = null;
+        }
+    }
+
     private void RenderMessages()
     {
         // ★ v15: 2026-10-13 陛下 17:26 反馈
@@ -597,40 +675,49 @@ public partial class AiChatForm : Form
 
         flpMessages.ResumeLayout(true);
 
-        // ★ v15: 立即 Value = Maximum (ResumeLayout(true) 后 layout 完, Maximum 已更新)
-        //   paint 时直接画 FlowLayoutPanel 底部 (AI:对话10)
-        //   用户**第一个看到**的就是 AI:对话10 ✅
-        try
-        {
-            int max = pnlMessagesScroll.VerticalScroll.Maximum;
-            if (max > 0)
-            {
-                pnlMessagesScroll.VerticalScroll.Value = max;
-            }
-        }
-        catch { /* 静默失败 */ }
+        // ★ v17: 2026-10-14 陛下 09:03 反馈
+        //   "还是不行很奇怪奇数此是可以的，比如第一次打开可以定位到最低处，
+        //    但切换到其他会话再切换回来，就不行，但再切换其他会话，再切换回来确是可以的"
+        //
+        // 真根因：flpMessages.ResumeLayout(true) 只 layout flpMessages 自身,
+        //   不会自动 layout 父控件 pnlMessagesScroll.
+        //   立刻读 pnlMessagesScroll.VerticalScroll.Maximum 拿到的是**旧值或 0**
+        //   → Value = 0 设进去 → 跳不到底
+        //
+        // 奇偶差异解释：
+        //   - 1st (LoadLastSession) 成功: Form 第一次显示, Application 主动跑完整 layout pass,
+        //                              pnlMessagesScroll.Maximum 已是正确值
+        //   - 2nd 失败: pnlMessagesScroll 自上次切换后没人触发 layout, Maximum 残留旧值
+        //   - 3rd 成功: 2nd 失败时 pnlMessagesScroll.VerticalScroll 内部状态异常
+        //              导致下个 Application.Idle 主动 layout → Maximum 正确
+        //   - 4th 失败: 跟 2nd 一样
+        //
+        // 修法 4 层防御:
+        //   1) pnlMessagesScroll.PerformLayout() 强制父控件 layout (修根因)
+        //   2) JumpToBottom() 立即设 Value = Maximum
+        //   3) BeginInvoke: 消息循环空闲时再跳一次 (覆盖 PerformLayout 还没生效的情况)
+        //   4) ScrollControlIntoView(lastBubble): WinForms 内置 API, 最可靠
+        //   5) StartScrollChase(): 2 秒追逐 Timer 覆盖 WebView2 异步加载
+        try { pnlMessagesScroll.PerformLayout(); } catch { /* 静默失败 */ }
+        JumpToBottom();
 
-        // ★ v15: 500ms 保险 Timer (万一流 LayoutPanel.Resize 事件不触发)
         try
         {
-            var scrollTimer = new System.Windows.Forms.Timer { Interval = 500, Enabled = false };
-            scrollTimer.Tick += (_, _) =>
+            this.BeginInvoke(new Action(() =>
             {
-                scrollTimer.Stop();
-                scrollTimer.Dispose();
-                try
+                JumpToBottom();
+                // ScrollControlIntoView: WinForms 内置 API, 强制把最后一个气泡滚到可见
+                if (flpMessages.Controls.Count > 0)
                 {
-                    int max = pnlMessagesScroll.VerticalScroll.Maximum;
-                    if (max > 0 && pnlMessagesScroll.VerticalScroll.Value != max)
-                    {
-                        pnlMessagesScroll.VerticalScroll.Value = max;
-                    }
+                    var lastCtrl = flpMessages.Controls[flpMessages.Controls.Count - 1];
+                    try { pnlMessagesScroll.ScrollControlIntoView(lastCtrl); } catch { }
+                    JumpToBottom();
                 }
-                catch { /* 静默失败 */ }
-            };
-            scrollTimer.Start();
+            }));
         }
-        catch { /* Timer 启动失败不影响主流程 */ }
+        catch { /* BeginInvoke 失败不影响主流程 */ }
+
+        StartScrollChase();
     }
 
     /// <summary>
@@ -650,16 +737,7 @@ public partial class AiChatForm : Form
     {
         if (flpMessages.Controls.Count == 0) return;
         if (!pnlMessagesScroll.Visible) return;
-
-        try
-        {
-            int max = pnlMessagesScroll.VerticalScroll.Maximum;
-            if (max > 0 && pnlMessagesScroll.VerticalScroll.Value != max)
-            {
-                pnlMessagesScroll.VerticalScroll.Value = max;
-            }
-        }
-        catch { /* 静默失败 */ }
+        JumpToBottom();
     }
 
     /// <summary>
