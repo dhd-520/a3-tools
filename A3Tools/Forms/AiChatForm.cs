@@ -535,11 +535,8 @@ public partial class AiChatForm : Form
 
     // ========== 渲染消息 ==========
 
-    // ★ v15: RenderScroll debounce 跟踪
-    //   避免 FlowLayoutPanel.Resize 事件被 WebView2 频繁触发
-    //   200ms 内不重复设 Value = Maximum
-    private DateTime _lastRenderScrollTime = DateTime.MinValue;
-    private const int RenderScrollDebounceMs = 200;
+    // ★ v16: 删掉了 v15 的 _lastRenderScrollTime / RenderScrollDebounceMs
+    //   每次 Resize 都设 Value = Maximum 即可, WinForms 同值自动去重, 不需要防抖
 
     private void RenderMessages()
     {
@@ -609,7 +606,6 @@ public partial class AiChatForm : Form
             if (max > 0)
             {
                 pnlMessagesScroll.VerticalScroll.Value = max;
-                _lastRenderScrollTime = DateTime.Now;
             }
         }
         catch { /* 静默失败 */ }
@@ -638,18 +634,22 @@ public partial class AiChatForm : Form
     }
 
     /// <summary>
-    /// ★ v15: FlowLayoutPanel.Resize 事件处理
-    ///   WebView2 异步渲染时 FlowLayoutPanel 高度变化 → Resize 触发
-    ///   200ms debounce + 强制 Value = Maximum → 滚动条始终在底部
+    /// ★ v16: 2026-10-14 陛下 08:40 反馈
+    ///   "第一次打开会话可以滚动到最底部，但切换后再次切换回来无法定位到最底部"
+    ///
+    /// 真根因：v15 用了 200ms debounce, 切回时 RenderMessages 立即设 Value = Maximum
+    ///   之后 WebView2 异步加载, FlowLayoutPanel.Resize 频繁触发
+    ///   200ms 内 Resize 全部被 debounce 吃掉 → Maximum 持续增大但 Value 不跟 → 屏幕停在中间
+    ///   200ms 后才更新一次, 跳到一半又可能错过 WebView2 最终状态
+    ///
+    /// 修法：去掉 debounce! 每次 Resize 都设 Value = Maximum
+    ///   设 Value = Maximum 是 O(1), WinForms 同值不触发 Invalidate
+    ///   即使 Resize 触发 100 次, 也只是设 100 次同一个值, 无性能/闪烁问题
     /// </summary>
     private void flpMessages_Resize(object sender, EventArgs e)
     {
         if (flpMessages.Controls.Count == 0) return;
         if (!pnlMessagesScroll.Visible) return;
-
-        var now = DateTime.Now;
-        if ((now - _lastRenderScrollTime).TotalMilliseconds < RenderScrollDebounceMs) return;
-        _lastRenderScrollTime = now;
 
         try
         {
