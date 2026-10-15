@@ -188,11 +188,28 @@ public static class SqlIntelliSenseProvider
                 else if (!string.IsNullOrEmpty(prefix))
                 {
                     // 有空白 → 才检查 word 是否真在 aliasMap/schema 中(避免 `FROM NonExistingTable ` 误弹列)
+                    // ★ 2026-10-15 陛下反馈修复: SELECT 列表里的 word (如 "G") 不该被当作表名验证
+                    //   区分: caret 是在 SELECT/WHERE/ON 列表里 (列上下文, prefix 是新列名前缀)
+                    //         还是在 FROM/JOIN 后 (对象上下文, prefix 是新表名)
+                    //   用 DetectContext 二分: 如果 SELECT/WHERE/ON 在 FROM 之前出现 → 列上下文
                     string lastWord = ExtractLastWordBeforeCaret(fullSql, caretOffset);
                     bool isKnown = IsKnownTableOrAlias(lastWord, fullSql, caretOffset, connectionString);
                     if (!isKnown)
                     {
-                        ctx = SqlContextKind.AfterObjectKeyword;
+                        // ★ 关键: 即使 word 不是已知表/别名, 如果 aliasMap 里有表 → 走列路径
+                        //   例: SELECT G,* FROM S_SCM_ITEM WHERE → aliasMap={"S_SCM_ITEM"} → G 是 SELECT 列表新列
+                        //   例: SELECT Foo FROM S_SCM_ITEM WHERE → aliasMap 有 S_SCM_ITEM → Foo 是列
+                        //   降级到对象会导致: 用户想找列时被弹一坨 dbo.对象, 完全错位
+                        var aliasMapHas = SqlAliasResolver.Parse(fullSql, caretOffset).Count;
+                        if (aliasMapHas > 0)
+                        {
+                            // aliasMap 有表 → 保持列上下文, 让 GetAllColumnsFromAliases 处理 (即便 0 命中也返空)
+                            // 不修改 ctx, 不降级
+                        }
+                        else
+                        {
+                            ctx = SqlContextKind.AfterObjectKeyword;
+                        }
                     }
                 }
             }
@@ -202,11 +219,22 @@ public static class SqlIntelliSenseProvider
                 // ★ 2026-09-14: 透传 caretOffset, 让 SqlAliasResolver.Parse 缩到当前语句
                 var cols = GetAllColumnsFromAliases(connectionString, fullSql, caretOffset, prefix);
                 if (cols != null && cols.Count > 0) return cols;
-                // 降级补底: aliasMap 查出 0 列也走对象路径
-                if (cols == null || cols.Count == 0)
+
+                // ★ 2026-10-15 陛下反馈修复: aliasMap 命中(有表) 但 prefix 过滤后无列 (例 SELECT G,* FROM S_SCM_ITEM WHERE)
+                //   旧行为: cols 返 null → ctx 降级到 AfterObjectKeyword → 弹 dbo.GETACCOUNTBALANCE 等函数
+                //   真根因: SELECT 列表里 prefix "G" 是新列名 (用户想找 GUID/GUDIE 列), 跟 S_SCM_ITEM 表的列做前缀匹配, 可能命中 0 条
+                //   这种情况下绝不应该降级到对象搜索 (会误弹函数/存储过程给用户当成列候选)
+                //   修法: 如果 SQL 文本里解析到至少一张 FROM 表 (aliasMap 不空), 就保持 AfterColumnKeyword 上下文
+                //         返空 → 弹窗里什么都不弹 (保持干净), 不会误给函数
+                //   只有 SQL 里完全没表 (aliasMap 空) 才降级到对象 (用户想输表名)
+                var aliasMapCount = SqlAliasResolver.Parse(fullSql ?? string.Empty, caretOffset).Count;
+                if (aliasMapCount > 0)
                 {
-                    ctx = SqlContextKind.AfterObjectKeyword;
+                    // SQL 里有 FROM 表, 列联想 0 命中 → 返空, 不降级
+                    return new List<string>();
                 }
+                // SQL 里没表 (aliasMap 空) → 用户可能想输新表名, 降级到对象
+                ctx = SqlContextKind.AfterObjectKeyword;
             }
         }
 
