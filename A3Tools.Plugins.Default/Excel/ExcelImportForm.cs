@@ -32,6 +32,12 @@ public partial class ExcelImportForm : Form
     /// <summary>用户点 [导入] 确认的结果, 调用方读这个</summary>
     public TempTableImportRequest? Result { get; private set; }
 
+    /// <summary>
+    /// ★ 2026-10-15 v2.4: [全部 Sheet 导入] 的批量结果 (多 sheet, 每 sheet 一个 #temp 表)
+    /// 单 sheet 精细导入仍走 <see cref="Result"/>
+    /// </summary>
+    public List<TempTableImportRequest>? Results { get; private set; }
+
     private static readonly Regex AliasRegex =
         new(@"^[A-Za-z_][A-Za-z_0-9]*$", RegexOptions.Compiled);
 
@@ -298,8 +304,11 @@ public partial class ExcelImportForm : Form
         }
 
         // 5. 收集 RawRows (按用户选定的列顺序, 跳过未勾选的列)
-        var rawRows = new List<object?[]>(_previewData.Rows.Count);
-        foreach (DataRow srcRow in _previewData.Rows)
+        // ★ 2026-10-15 v2.4 陛下反馈修复: 之前从 _previewData 收集 → 导入被静默限制在 200 行以内!
+        //   预览保持 200 行不卡 UI, 但导入必须重读整个 sheet (maxRows: 0 = 不限)
+        var fullData = ExcelImporter.ReadSheet(_filePath, sheetName, maxRows: 0);
+        var rawRows = new List<object?[]>(fullData.Rows.Count);
+        foreach (DataRow srcRow in fullData.Rows)
         {
             var arr = new object?[columns.Count];
             for (int i = 0; i < columns.Count; i++)
@@ -343,6 +352,126 @@ public partial class ExcelImportForm : Form
         {
             row.Cells["colImport"].Value = false;
         }
+    }
+
+    // ===== v2.4: 一键导入所有 Sheet =====
+    private void BtnImportAllSheets_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrEmpty(_filePath))
+        {
+            MessageBox.Show(this, "请先选择 Excel 文件", "提示",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        List<string> sheets;
+        try { sheets = ExcelImporter.ListSheets(_filePath); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"读取文件失败:\n{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (sheets.Count == 0)
+        {
+            MessageBox.Show(this, "Excel 里没有 Sheet", "提示",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 每个 sheet 一个导入请求 (列名 = 表头, 类型自动推断, 别名 = sheet 名去重)
+        var usedAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var results = new List<TempTableImportRequest>(sheets.Count);
+        foreach (var sheetName in sheets)
+        {
+            try
+            {
+                var req = BuildAutoRequest(_filePath, sheetName, usedAliases);
+                if (req is not null) results.Add(req);
+            }
+            catch { /* 空 sheet / 坏 sheet 静默跳过 */ }
+        }
+
+        if (results.Count == 0)
+        {
+            MessageBox.Show(this, "所有 Sheet 都没有数据行, 无法导入", "提示",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 确认摘要
+        var summary = string.Join("\n", results.Select(r =>
+            $"  #{r.Alias}  ←  {r.SheetName}  ({r.RawRows.Count} 行 × {r.Columns.Count} 列)"));
+        var confirm = MessageBox.Show(this,
+            $"将导入 {results.Count} 个 Sheet (列名 = Excel 表头, 类型自动推断):\n\n{summary}\n\n点 [是] 确认导入。",
+            "全部 Sheet 导入", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (confirm != DialogResult.Yes) return;
+
+        Results = results;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    /// <summary>
+    /// ★ 2026-10-15 v2.4: 自动构建单 sheet 导入请求 (无 UI)
+    /// 列名 = Excel 表头 (清理为合法标识符), 类型 = TypeInferrer 推断, 别名 = sheet 名 (冲突自动加 _2/_3)
+    /// 用于 [全部 Sheet 导入] + SqlQueryForm 多文件自动导入
+    /// </summary>
+    public static TempTableImportRequest? BuildAutoRequest(string filePath, string sheetName, HashSet<string> usedAliases)
+    {
+        var data = ExcelImporter.ReadSheet(filePath, sheetName, maxRows: 0); // 全量
+        if (data.Rows.Count == 0) return null;
+
+        var inferred = TypeInferrer.Infer(data, sampleSize: Math.Min(100, data.Rows.Count));
+        var columns = new List<TempTableColumn>(data.Columns.Count);
+        var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int c = 0; c < data.Columns.Count; c++)
+        {
+            var colName = data.Columns[c].ColumnName;
+            var tgt = SanitizeAlias(colName);
+            if (string.IsNullOrEmpty(tgt)) tgt = $"COL{c + 1}";
+            if (!seenTargets.Add(tgt)) tgt = $"{tgt}_{c + 1}";
+            var type = inferred.TryGetValue(colName, out var t) ? t : "NVARCHAR";
+            columns.Add(new TempTableColumn
+            {
+                SourceName = colName,
+                TargetName = tgt,
+                TypeName = type,
+                OriginalIndex = c
+            });
+        }
+
+        // 别名 = sheet 名, 被占用则加 _2/_3
+        var baseAlias = SanitizeAlias(sheetName);
+        if (string.IsNullOrEmpty(baseAlias)) baseAlias = "SHEET";
+        var alias = baseAlias;
+        int suffix = 2;
+        while (!usedAliases.Add(alias))
+        {
+            alias = $"{baseAlias}_{suffix++}";
+        }
+
+        // 全量 RawRows
+        var rawRows = new List<object?[]>(data.Rows.Count);
+        foreach (DataRow row in data.Rows)
+        {
+            var arr = new object?[columns.Count];
+            for (int i = 0; i < columns.Count; i++)
+            {
+                var v = row[columns[i].OriginalIndex];
+                arr[i] = (v is null || v is DBNull) ? null : v.ToString();
+            }
+            rawRows.Add(arr);
+        }
+
+        return new TempTableImportRequest
+        {
+            Alias = alias,
+            SourceFile = filePath,
+            SheetName = sheetName,
+            Columns = columns,
+            RawRows = rawRows
+        };
     }
 
     private void SetStatus(string text)

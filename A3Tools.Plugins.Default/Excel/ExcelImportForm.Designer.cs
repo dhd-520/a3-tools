@@ -19,6 +19,7 @@ partial class ExcelImportForm
     private System.Windows.Forms.Button btnCancel = null!;
     private System.Windows.Forms.Button btnSelectAll = null!;
     private System.Windows.Forms.Button btnUnselectAll = null!;
+    private System.Windows.Forms.Button btnImportAllSheets = null!;
     private System.Windows.Forms.StatusStrip statusStrip = null!;
     private System.Windows.Forms.ToolStripStatusLabel lblStatus = null!;
 
@@ -58,6 +59,7 @@ partial class ExcelImportForm
         btnCancel = new System.Windows.Forms.Button();
         btnSelectAll = new System.Windows.Forms.Button();
         btnUnselectAll = new System.Windows.Forms.Button();
+        btnImportAllSheets = new System.Windows.Forms.Button();
         statusStrip = new System.Windows.Forms.StatusStrip();
         lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -240,6 +242,16 @@ partial class ExcelImportForm
         btnUnselectAll.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right;
         btnUnselectAll.Click += BtnUnselectAll_Click;
 
+        // ===== btnImportAllSheets =====
+        btnImportAllSheets.Location = new System.Drawing.Point(299, 488);
+        btnImportAllSheets.Name = "btnImportAllSheets";
+        btnImportAllSheets.Size = new System.Drawing.Size(105, 28);
+        btnImportAllSheets.TabIndex = 15;
+        btnImportAllSheets.Text = "全部Sheet导入";
+        btnImportAllSheets.UseVisualStyleBackColor = true;
+        btnImportAllSheets.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right;
+        btnImportAllSheets.Click += BtnImportAllSheets_Click;
+
         // ===== btnImport =====
         btnImport.Location = new System.Drawing.Point(569, 488);
         btnImport.Name = "btnImport";
@@ -289,6 +301,7 @@ partial class ExcelImportForm
         Controls.Add(dgvMapping);
         Controls.Add(lblPreview);
         Controls.Add(dgvPreview);
+        Controls.Add(btnImportAllSheets);
         Controls.Add(btnSelectAll);
         Controls.Add(btnUnselectAll);
         Controls.Add(btnImport);

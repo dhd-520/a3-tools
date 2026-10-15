@@ -598,39 +598,78 @@ public partial class SqlQueryForm : Form
     /// </summary>
     private async void BtnImportExcel_Click(object? sender, EventArgs e)
     {
-        // 1. 选文件
-        string? filePath = null;
+        // 1. 选文件 (★ 2026-10-15 v2.4: 支持多选, 多文件一起导)
+        string[] filePaths;
         using (var ofd = new OpenFileDialog
         {
             Filter = "Excel 文件 (*.xlsx;*.xls)|*.xlsx;*.xls|所有文件 (*.*)|*.*",
-            Title = "选择要导入的 Excel"
+            Title = "选择要导入的 Excel (可多选)",
+            Multiselect = true
         })
         {
             if (ofd.ShowDialog(this) != DialogResult.OK) return;
-            filePath = ofd.FileName;
+            filePaths = ofd.FileNames;
         }
+        if (filePaths.Length == 0) return;
 
-        // 2. 弹出导入 UI
-        TempTableImportRequest? request;
-        try
+        // 2. 收集导入请求
+        var requests = new List<TempTableImportRequest>();
+        if (filePaths.Length == 1)
         {
-            using var form = new ExcelImportForm(filePath);
-            if (form.ShowDialog(this) != DialogResult.OK) return;
-            request = form.Result;
+            // 单文件: 映射 UI (精细控制), 也可点 [全部 Sheet 导入]
+            try
+            {
+                using var form = new ExcelImportForm(filePaths[0]);
+                if (form.ShowDialog(this) != DialogResult.OK) return;
+                if (form.Results is { Count: > 0 }) requests.AddRange(form.Results);
+                else if (form.Result is not null) requests.Add(form.Result);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"打开 Excel 失败:\n{ex.Message}", "错误",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
         }
-        catch (Exception ex)
+        else
         {
-            MessageBox.Show(this, $"打开 Excel 失败:\n{ex.Message}", "错误",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-        if (request is null) return;
+            // 多文件: 自动导入所有文件的所有 Sheet (列名 = 表头, 类型自动推断)
+            var usedAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var fp in filePaths)
+            {
+                try
+                {
+                    foreach (var sheetName in ExcelImporter.ListSheets(fp))
+                    {
+                        var req = ExcelImportForm.BuildAutoRequest(fp, sheetName, usedAliases);
+                        if (req is not null) requests.Add(req);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, $"读取 {Path.GetFileName(fp)} 失败:\n{ex.Message}", "错误",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            if (requests.Count == 0) return;
 
-        // 3. 确认: 已存在 #temp 提示覆盖
-        if (_tempTables.Contains(request.Alias))
+            var lines = requests.Take(15)
+                .Select(r => $"  #{r.Alias}  ←  {Path.GetFileName(r.SourceFile)}/{r.SheetName}  ({r.RawRows.Count} 行 × {r.Columns.Count} 列)");
+            var summary = string.Join("\n", lines) +
+                (requests.Count > 15 ? $"\n  ... 等共 {requests.Count} 个" : "");
+            var confirmAll = MessageBox.Show(this,
+                $"将自动导入 {requests.Count} 个临时表 (列名 = Excel 表头, 类型自动推断):\n\n{summary}\n\n点 [是] 确认导入。",
+                "批量导入确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirmAll != DialogResult.Yes) return;
+        }
+        if (requests.Count == 0) return;
+
+        // 3. 确认: 已存在 #temp 提示覆盖 (批量一次性确认)
+        var conflicts = requests.Where(r => _tempTables.Contains(r.Alias)).Select(r => r.Alias).ToList();
+        if (conflicts.Count > 0)
         {
             var confirm = MessageBox.Show(this,
-                $"别名 #{request.Alias} 已存在。\n\n点 [是] 覆盖现有临时表, [否] 取消导入。",
+                $"以下别名已存在, 将被覆盖:\n  {string.Join(", ", conflicts.Select(a => "#" + a))}\n\n点 [是] 覆盖, [否] 取消导入。",
                 "别名已存在", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes) return;
         }
@@ -641,9 +680,18 @@ public partial class SqlQueryForm : Form
         //   3. SqlBulkCopy 批量拷贝 (TDS Bulk Load 协议, 万行 <1s, 比 INSERT 快一个数量级)
         UseWaitCursor = true;
         btnImportExcel.Enabled = false;
-        lblStatus.Text = $"⏳ 正在导入 #{request.Alias}: 解析数据...";
         lblStatus.ForeColor = Color.DarkBlue;
         lblStatus.BackColor = Color.LightYellow;
+        statusStrip.Refresh();
+        try
+        {
+        // ★ v2.4 批量导入循环: 每个请求一个 #temp 表 (单文件单 sheet = 1 个, 多 sheet/多文件 = N 个)
+        var imported = new List<(TempTableImportRequest req, int rows, int nulls)>();
+        var failed = new List<string>();
+        for (int reqIdx = 0; reqIdx < requests.Count; reqIdx++)
+        {
+        var request = requests[reqIdx];
+        lblStatus.Text = $"⏳ ({reqIdx + 1}/{requests.Count}) 正在导入 #{request.Alias}: 解析数据...";
         statusStrip.Refresh();
         try
         {
@@ -739,68 +787,101 @@ public partial class SqlQueryForm : Form
                 }
                 tx.Commit();
                 _tempTables.Add(alias);
-
-                // ★ 2026-10-15 v2.1 成功提示改造 (陛下反馈: 导入后没提示 + 不知道怎么用)
-                //   1. 状态栏绿底大字持久显示
-                //   2. 自动给当前 Tab 编辑器插入 SELECT 模板 (按 F5 直接跑)
-                //   3. 弹教学 MessageBox 说明 #别名 怎么用 (含 JOIN / 聚合示例)
-                var nullHint = nullCount > 0 ? $"（{nullCount} 个 NULL）" : "";
-
-                // 1. 状态栏绿底大字
-                lblStatus.Text = $"✓ 已导入 #{alias}: {parsedRows.Count} 行 × {request.Columns.Count} 列 {nullHint}  |  来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}";
-                lblStatus.ForeColor = Color.White;
-                lblStatus.BackColor = Color.SeaGreen;
-                var statusResetTimer = new System.Windows.Forms.Timer { Interval = 15000 };
-                statusResetTimer.Tick += (_, _) =>
-                {
-                    statusResetTimer.Stop();
-                    statusResetTimer.Dispose();
-                    lblStatus.ForeColor = SystemColors.ControlText;
-                    lblStatus.BackColor = SystemColors.Control;
-                };
-                statusResetTimer.Start();
-
-                // 2. 自动插 SELECT 模板到当前 Tab 编辑器 (空编辑器替换, 有内容追加)
-                var template =
-                    $"SELECT TOP 100 *\nFROM #{alias};  -- 导入成功, 按 F5 执行\n" +
-                    $"-- 示例 JOIN: SELECT a.*, b.* FROM #{alias} a JOIN dbo.S_SCM_ITEM b ON a.列 = b.列;";
-                GetActiveTab()?.InsertSqlTemplate(template);
-
-                // 3. 教学 MessageBox
-                MessageBox.Show(this,
-                    $"✓ 已导入临时表 #{alias}\n\n" +
-                    $"数据: {parsedRows.Count} 行 × {request.Columns.Count} 列{nullHint}\n" +
-                    $"来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}\n\n" +
-                    $"━━━━━━━━━━━━ 使用方法 ━━━━━━━━━━━━\n\n" +
-                    $"#别名 就像一张普通表, SQL 里直接用:\n\n" +
-                    $"  SELECT * FROM #{alias};\n\n" +
-                    $"  SELECT a.*, b.*\n" +
-                    $"  FROM #{alias} a\n" +
-                    $"  JOIN dbo.真实表 b ON a.列 = b.列;\n\n" +
-                    $"  SELECT 分类列, COUNT(*), SUM(数值列)\n" +
-                    $"  FROM #{alias} GROUP BY 分类列;\n\n" +
-                    $"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-                    $"已在编辑器插入查询模板, 按 F5 执行!\n" +
-                    $"关闭本窗体时 #{alias} 自动清理。",
-                    "导入成功 + 使用说明",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                imported.Add((request, parsedRows.Count, nullCount));
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"建 #temp 表失败:\n{ex.Message}", "错误",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // 内层: 建表/写入失败 → 记录后继续下一个请求 (不打断批量)
+                failed.Add($"#{request.Alias}: {ex.Message}");
             }
         }
         else
         {
-            // Http 模式: 拼接 prefix, 后续 Execute 前置
-            // ★ v2 简化: Http 模式临时表暂未完整支持, 提示用户切直连或后续支持
+            // Http 模式: #temp 临时表暂未支持 (v2.1 起), 记失败继续
+            failed.Add($"#{request.Alias}: Http 代理模式暂不支持 #temp 临时表, 请用直连账套");
+        }
+        }
+        catch (Exception ex)
+        {
+            // per-request 兜底: 解析/DDL 等未被内层捕获的异常
+            failed.Add($"#{request.Alias}: {ex.Message}");
+        }
+        } // end for requests
+
+        // ★ v2.4 批量汇总反馈 (单表 = 完整教学弹窗, 多表 = 汇总列表)
+        if (imported.Count > 0)
+        {
+            var totalRows = imported.Sum(x => x.rows);
+            var totalNulls = imported.Sum(x => x.nulls);
+            var nullHint = totalNulls > 0 ? $"（{totalNulls} 个 NULL）" : "";
+            var aliasList = string.Join(", ", imported.Select(x => "#" + x.req.Alias));
+
+            // 1. 状态栏绿底大字
+            lblStatus.Text = $"✓ 已导入 {imported.Count} 个临时表: {aliasList} | 共 {totalRows} 行 {nullHint}";
+            lblStatus.ForeColor = Color.White;
+            lblStatus.BackColor = Color.SeaGreen;
+            var statusResetTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+            statusResetTimer.Tick += (_, _) =>
+            {
+                statusResetTimer.Stop();
+                statusResetTimer.Dispose();
+                lblStatus.ForeColor = SystemColors.ControlText;
+                lblStatus.BackColor = SystemColors.Control;
+            };
+            statusResetTimer.Start();
+
+            // 2. 自动插 SELECT 模板 (每个表一段)
+            var template = string.Join("\n\n", imported.Select(x =>
+                $"SELECT TOP 100 * FROM #{x.req.Alias};  -- 导入成功, 按 F5 执行"));
+            GetActiveTab()?.InsertSqlTemplate(template);
+
+            // 3. 教学/汇总 MessageBox
+            if (imported.Count == 1)
+            {
+                var one = imported[0];
+                MessageBox.Show(this,
+                    $"✓ 已导入临时表 #{one.req.Alias}\n\n" +
+                    $"数据: {one.rows} 行 × {one.req.Columns.Count} 列{(one.nulls > 0 ? $"（{one.nulls} 个 NULL）" : "")}\n" +
+                    $"来源: {Path.GetFileName(one.req.SourceFile)} / {one.req.SheetName}\n\n" +
+                    $"━━━━━━━━━━━━ 使用方法 ━━━━━━━━━━━━\n\n" +
+                    $"#别名 就像一张普通表, SQL 里直接用:\n\n" +
+                    $"  SELECT * FROM #{one.req.Alias};\n\n" +
+                    $"  SELECT a.*, b.*\n" +
+                    $"  FROM #{one.req.Alias} a\n" +
+                    $"  JOIN dbo.真实表 b ON a.列 = b.列;\n\n" +
+                    $"  SELECT 分类列, COUNT(*), SUM(数值列)\n" +
+                    $"  FROM #{one.req.Alias} GROUP BY 分类列;\n\n" +
+                    $"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                    $"已在编辑器插入查询模板, 按 F5 执行!\n" +
+                    $"关闭本窗体时 #{one.req.Alias} 自动清理。",
+                    "导入成功 + 使用说明",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                var list = string.Join("\n", imported.Select(x =>
+                    $"  #{x.req.Alias}  ←  {Path.GetFileName(x.req.SourceFile)}/{x.req.SheetName}  ({x.rows} 行 × {x.req.Columns.Count} 列)"));
+                MessageBox.Show(this,
+                    $"✓ 已导入 {imported.Count} 个临时表:\n\n{list}\n\n" +
+                    $"━━━━━━━━━━━━ 使用方法 ━━━━━━━━━━━━\n\n" +
+                    $"每个 #别名 都像普通表, 可互相 JOIN:\n\n" +
+                    $"  SELECT a.*, b.*\n" +
+                    $"  FROM #{imported[0].req.Alias} a\n" +
+                    $"  JOIN #{imported[1].req.Alias} b ON a.列 = b.列;\n\n" +
+                    $"已在编辑器插入全部查询模板, 按 F5 执行!\n" +
+                    $"关闭本窗体时所有 #临时表 自动清理。",
+                    "批量导入成功",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+        if (failed.Count > 0)
+        {
             MessageBox.Show(this,
-                "当前账套是 Http 代理模式, #temp 临时表暂未完整支持。\n\n" +
-                "建议: 切到直连账套 或 后续版本补 Http 模式 session 持久化。\n\n" +
-                "本导入的数据已解析, 但未建到任何 SQL Server 表, 关闭窗口即丢。",
-                "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                $"以下 {failed.Count} 个表导入失败:\n\n{string.Join("\n", failed.Take(10))}" +
+                (failed.Count > 10 ? $"\n  ... 等共 {failed.Count} 个" : ""),
+                "部分导入失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         }
         finally
