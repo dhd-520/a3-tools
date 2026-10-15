@@ -1,6 +1,4 @@
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
 
 namespace A3Tools.Plugins.Default.Forms;
 
@@ -89,19 +87,6 @@ public static class SqlIntelliSenseProvider
         int caretOffset = 0,
         int maxResults = 80)
     {
-        // ★ 2026-10-15 陛下要求: 详细 trace 每次调用, 写到程序运行目录 a3-sql-intellisense.log
-        var log = new StringBuilder();
-        log.AppendLine($"--- {DateTime.Now:HH:mm:ss.fff} GetSuggestions ---");
-        log.AppendLine($"  prefix='{prefix}' caret={caretOffset} conn={(string.IsNullOrEmpty(connectionString) ? "<null>" : "OK")}");
-        var sqlPreview = fullSql ?? "<null>";
-        if (sqlPreview.Length > 200) sqlPreview = sqlPreview.Substring(0, 200) + "...";
-        log.AppendLine($"  sql: '{sqlPreview.Replace("\r", "\\r").Replace("\n", "\\n")}'");
-        if (!string.IsNullOrEmpty(fullSql) && caretOffset >= 0 && caretOffset <= fullSql.Length)
-        {
-            int s = Math.Max(0, caretOffset - 10);
-            int e = Math.Min(fullSql.Length, caretOffset + 10);
-            log.AppendLine($"  caret context: '...{fullSql.Substring(s, e - s).Replace("\r", "\\r").Replace("\n", "\\n")}...' (caret@pos {s}-{e})");
-        }
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<string>(maxResults);
 
@@ -114,12 +99,10 @@ public static class SqlIntelliSenseProvider
         // ===== -2. 上下文检测：光标位置决定弹什么类型（不依赖 prefix） =====
         // 陛下反馈：“EXEC 空格后” / “SELECT * 后” 必须弹（即使 word="" 也不能关 popup）。
         var ctx = DetectContext(fullSql, caretOffset);
-        log.AppendLine($"  [ctx] DetectContext → {ctx}");
 
         // ===== -1. EXEC/EXECUTE 上下文 → 提示存储过程 =====
         if (ctx == SqlContextKind.AfterExec)
         {
-            log.AppendLine("  [branch] AfterExec → query procs");
             if (!string.IsNullOrEmpty(connectionString))
             {
                 var procs = SqlObjectSchemaCache.GetObjectsByKind(connectionString,
@@ -137,18 +120,13 @@ public static class SqlIntelliSenseProvider
                 // 修复：完全照搬对象资源管理器的 contains 匹配逻辑（IndexOf 包含）。
                 // 去除 80 条截断限制（对象资源管理器不截断），让陛下看到全部。
                 // 不按 schema 点额外过滤。
-                var matched = procs
+                return procs
                     .Where(p => string.IsNullOrEmpty(effectivePrefix)
                                 || p.Name.IndexOf(effectivePrefix, StringComparison.OrdinalIgnoreCase) >= 0
                                 || p.Full.IndexOf(effectivePrefix, StringComparison.OrdinalIgnoreCase) >= 0)
                     .Select(p => p.Full)
                     .ToList();
-                log.AppendLine($"  [result] AfterExec: {matched.Count} procs");
-                WriteLog(log.ToString());
-                return matched;
             }
-            log.AppendLine("  [result] AfterExec: 0 (no conn)");
-            WriteLog(log.ToString());
             return new List<string>();
         }
 
@@ -166,7 +144,6 @@ public static class SqlIntelliSenseProvider
         //             不存在 → 完全没出现过,降级到对象联想弹表。
         if (ctx == SqlContextKind.AfterColumnKeyword)
         {
-            log.AppendLine("  [branch] AfterColumnKeyword");
             if (!string.IsNullOrEmpty(fullSql) && !string.IsNullOrEmpty(prefix))
             {
                 // ★ 2026-10-15 v20 陛下反馈修复 Bug A: 去掉 hasSeparator + no-separator 降级
@@ -178,16 +155,12 @@ public static class SqlIntelliSenseProvider
                 //           aliasMap 里有表 → 走列路径 (即便 0 命中也返空, 不降级)
                 //           aliasMap 空 → 才降级到对象 (用户想输新表名)
                 string lastWord = ExtractLastWordBeforeCaret(fullSql, caretOffset);
-                log.AppendLine($"  [branch] prefix='{prefix}' lastWord='{lastWord}'");
                 bool isKnown = IsKnownTableOrAlias(lastWord, fullSql, caretOffset, connectionString);
-                log.AppendLine($"  [branch] isKnown={isKnown}");
                 if (!isKnown)
                 {
                     var aliasMapHas = SqlAliasResolver.Parse(fullSql, caretOffset).Count;
-                    log.AppendLine($"  [branch] aliasMap.Count={aliasMapHas}");
                     if (aliasMapHas == 0)
                     {
-                        log.AppendLine("  [branch] aliasMap empty → degrade to AfterObjectKeyword");
                         ctx = SqlContextKind.AfterObjectKeyword;
                     }
                 }
@@ -196,13 +169,9 @@ public static class SqlIntelliSenseProvider
             if (ctx == SqlContextKind.AfterColumnKeyword)
             {
                 // ★ 2026-09-14: 透传 caretOffset, 让 SqlAliasResolver.Parse 缩到当前语句
-                log.AppendLine("  [branch] GetAllColumnsFromAliases");
                 var cols = GetAllColumnsFromAliases(connectionString, fullSql, caretOffset, prefix);
-                log.AppendLine($"  [result] GetAllColumnsFromAliases → {(cols == null ? "null" : cols.Count.ToString())}");
                 if (cols != null && cols.Count > 0)
                 {
-                    log.AppendLine($"  [result] return cols: {string.Join(",", cols.Take(5))}...");
-                    WriteLog(log.ToString());
                     return cols;
                 }
 
@@ -214,7 +183,6 @@ public static class SqlIntelliSenseProvider
                 //         返空 → 弹窗里什么都不弹 (保持干净), 不会误给函数
                 //   只有 SQL 里完全没表 (aliasMap 空) 才降级到对象 (用户想输表名)
                 var aliasMapCount = SqlAliasResolver.Parse(fullSql ?? string.Empty, caretOffset).Count;
-                log.AppendLine($"  [branch] fall-through aliasMap.Count={aliasMapCount}");
                 if (aliasMapCount > 0)
                 {
                     // ★ 2026-10-15 v21 陛下反馈修复: prefix 含 "." 时 (例 "Where A.") 不能返空!
@@ -247,29 +215,23 @@ public static class SqlIntelliSenseProvider
                                         SqlObjectSchemaCache.ObjectKind.View,
                                         SqlObjectSchemaCache.ObjectKind.TableValuedFunction });
                             matchesObjects = matchingObjs != null && matchingObjs.Count > 0;
-                            log.AppendLine($"  [branch] v22 obj-match check prefix='{prefix}' → {matchesObjects} ({matchingObjs?.Count ?? 0} objs)");
                         }
                         if (matchesObjects)
                         {
                             // prefix 匹配对象名前缀 → 降级到 AfterObjectKeyword 弹表
-                            log.AppendLine("  [branch] v22 prefix matches objects → degrade to AfterObjectKeyword");
                             ctx = SqlContextKind.AfterObjectKeyword;
                         }
                         else
                         {
                             // SQL 里有 FROM 表, 列联想 0 命中, 也没匹配对象 → 返空, 不降级
-                            log.AppendLine("  [result] return empty (aliasMap>0, no col match, no obj match)");
-                            WriteLog(log.ToString());
                             return new List<string>();
                         }
                     }
                     // prefix 含 "." → fall through 到下方 priority path (TryGetColumnSuggestion)
-                    log.AppendLine("  [branch] prefix contains '.' → fall through to priority path (TryGetColumnSuggestion)");
                 }
                 // SQL 里没表 (aliasMap 空) → 用户可能想输新表名, 降级到对象
                 else
                 {
-                    log.AppendLine("  [branch] aliasMap empty → degrade to AfterObjectKeyword");
                     ctx = SqlContextKind.AfterObjectKeyword;
                 }
             }
@@ -278,19 +240,14 @@ public static class SqlIntelliSenseProvider
         // ===== -0. FROM/JOIN 后空白 → 弹对象 =====
         if (ctx == SqlContextKind.AfterObjectKeyword)
         {
-            log.AppendLine($"  [branch] AfterObjectKeyword prefix='{prefix}'");
             if (!string.IsNullOrEmpty(connectionString))
             {
                 // FROM/JOIN/UPDATE/TABLE 上下文只允许表/视图/表值函数
                 // 排除存储过程 P、标量函数 FN、触发器 TR（陛下 2026-07-17 反馈）
                 var fromKinds = new[] { SqlObjectSchemaCache.ObjectKind.Table, SqlObjectSchemaCache.ObjectKind.View, SqlObjectSchemaCache.ObjectKind.TableValuedFunction };
                 var objs = SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix ?? "", fromKinds);
-                log.AppendLine($"  [result] AfterObjectKeyword → {objs.Count} objs, first 3: {string.Join(",", objs.Take(3))}");
-                WriteLog(log.ToString());
                 return objs.Take(maxResults).ToList();
             }
-            log.AppendLine("  [result] AfterObjectKeyword: 0 (no conn)");
-            WriteLog(log.ToString());
             return new List<string>();
         }
 
@@ -306,7 +263,6 @@ public static class SqlIntelliSenseProvider
         //   - "xxx."                → 既不是表/别名，也不是 schema → 空（之前会涌关键字进来）
         if (!string.IsNullOrEmpty(prefix) && prefix.Contains('.'))
         {
-            log.AppendLine($"  [branch] TryGetColumnSuggestion prefix='{prefix}'");
             var colResult = TryGetColumnSuggestion(prefix, connectionString, fullSql);
             if (colResult != null && colResult.Columns.Count > 0)
             {
@@ -315,8 +271,6 @@ public static class SqlIntelliSenseProvider
                     if (list.Count >= maxResults) break;
                     if (seen.Add(c)) list.Add(c);
                 }
-                log.AppendLine($"  [result] TryGetColumnSuggestion → {list.Count} cols");
-                WriteLog(log.ToString());
                 return list;
             }
             // miss → 尝试 schema 路径（如 "dbo." → 返 dbo 下所有对象）
@@ -327,19 +281,14 @@ public static class SqlIntelliSenseProvider
                 var objs = SqlObjectSchemaCache.GetObjectSuggestions(connectionString, prefix, fromKinds);
                 if (objs.Count > 0)
                 {
-                    log.AppendLine($"  [result] schema-path → {objs.Count} objs");
-                    WriteLog(log.ToString());
                     return objs.Take(maxResults).ToList();
                 }
             }
             // 既不是表/别名，也不是 schema → 返回空列表（保持弹窗干净）
-            log.AppendLine("  [result] TryGetColumnSuggestion miss + schema miss → return empty");
-            WriteLog(log.ToString());
             return new List<string>();
         }
 
         // ===== 1. 关键字 =====
-        log.AppendLine("  [branch] Generic (kw+obj) ctx=" + ctx);
         if (string.IsNullOrEmpty(prefix))
         {
             foreach (var kw in AllKeywords)
@@ -379,40 +328,7 @@ public static class SqlIntelliSenseProvider
             }
         }
 
-        log.AppendLine($"  [result] Generic → {list.Count} (first 3: {string.Join(",", list.Take(3))})");
-        WriteLog(log.ToString());
         return list;
-    }
-
-    /// <summary>
-    /// ★ 2026-10-15 陛下要求: 详细 trace 写到程序运行目录 a3-sql-intellisense.log
-    /// - 文件位置: AppContext.BaseDirectory/a3-sql-intellisense.log
-    /// - 单文件, append 模式
-    /// - 超过 5MB 自动清空重启
-    /// - 线程安全 (lock)
-    /// </summary>
-    private static readonly object _logLock = new();
-    private const int LogMaxBytes = 5 * 1024 * 1024;
-    private static void WriteLog(string content)
-    {
-        try
-        {
-            var dir = AppContext.BaseDirectory;
-            var path = Path.Combine(dir, "a3-sql-intellisense.log");
-            lock (_logLock)
-            {
-                if (File.Exists(path))
-                {
-                    var fi = new FileInfo(path);
-                    if (fi.Length > LogMaxBytes)
-                    {
-                        File.Delete(path);
-                    }
-                }
-                File.AppendAllText(path, content + Environment.NewLine);
-            }
-        }
-        catch { /* 日志失败不影响主流程 */ }
     }
 
     private class ColumnResult

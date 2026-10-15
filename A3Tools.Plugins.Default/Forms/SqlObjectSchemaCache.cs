@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.IO;
 using Microsoft.Data.SqlClient;
 
 namespace A3Tools.Plugins.Default.Forms;
@@ -29,30 +28,6 @@ public static class SqlObjectSchemaCache
         ScalarFunction,              // FN
         StoredProcedure,             // P
         Trigger                      // TR
-    }
-
-    /// <summary>★ 2026-10-15 陛下要求: 详细 trace 写到程序运行目录 a3-sql-intellisense.log</summary>
-    private static readonly object _cacheLogLock = new();
-    private static void CacheLog(string content)
-    {
-        try
-        {
-            var dir = AppContext.BaseDirectory;
-            var path = Path.Combine(dir, "a3-sql-intellisense.log");
-            lock (_cacheLogLock)
-            {
-                if (File.Exists(path))
-                {
-                    var fi = new FileInfo(path);
-                    if (fi.Length > 5 * 1024 * 1024)
-                    {
-                        File.Delete(path);
-                    }
-                }
-                File.AppendAllText(path, $"  [cache {DateTime.Now:HH:mm:ss.fff}] {content}{Environment.NewLine}");
-            }
-        }
-        catch { /* 日志失败不影响主流程 */ }
     }
 
     /// <summary>将 ObjectKind 拼成 SQL Server sys.objects.type 列表</summary>
@@ -325,10 +300,8 @@ public static class SqlObjectSchemaCache
         var key = $"{sd.Server}|{sd.Database}";
         if (!_cache.TryGetValue(key, out var entry))
         {
-            CacheLog($"GetColumnSuggestions cache MISS key='{key}' schema='{schema}' object='{objectName}'");
             return new();
         }
-        CacheLog($"GetColumnSuggestions cache HIT key='{key}' objects={entry.Objects.Count} schema='{schema}' object='{objectName}' prefix='{columnPrefix}'");
 
         var obj = entry.Objects.FirstOrDefault(o =>
             o.Name.Equals(objectName, StringComparison.OrdinalIgnoreCase) &&
@@ -336,10 +309,8 @@ public static class SqlObjectSchemaCache
         if (obj == null)
         {
             var sameName = entry.Objects.Where(o => o.Name.Equals(objectName, StringComparison.OrdinalIgnoreCase)).Take(5).ToList();
-            CacheLog($"GetColumnSuggestions obj NOT FOUND schema='{schema}' object='{objectName}' | same-name in other schemas: [{string.Join(",", sameName.Select(o => o.SchemaName + "." + o.Name))}]");
             return new();
         }
-        CacheLog($"GetColumnSuggestions obj FOUND obj.SchemaName='{obj.SchemaName}' obj.Name='{obj.Name}' ColumnsCsv.Len={obj.Columns?.Length ?? 0}");
 
         // 列名懒加载：cache 没有时同步调 LoadColumnsForObject（限制超时 3秒避免卡 UI）
         // ★ 2026-10-15 v20 陛下反馈修复 Bug B: schema 空时用 obj.SchemaName 加载
@@ -351,19 +322,15 @@ public static class SqlObjectSchemaCache
         if (string.IsNullOrEmpty(colsCsv) && !string.IsNullOrEmpty(obj.SchemaName))
         {
             var effectiveSchema = !string.IsNullOrEmpty(schema) ? schema : obj.SchemaName;
-            CacheLog($"GetColumnSuggestions lazy-load columns effectiveSchema='{effectiveSchema}' object='{objectName}' (original schema='{schema}')");
             var lazy = LoadColumnsForObject(connectionString, effectiveSchema, objectName, timeoutMs: 3000);
             colsCsv = string.Join(",", lazy);
-            CacheLog($"GetColumnSuggestions lazy-load returned {lazy.Count} cols");
         }
         else if (string.IsNullOrEmpty(colsCsv))
         {
             // obj.SchemaName 也为空 (缓存里有这个 obj 但 schema 字段为 null) → 极端情况
-            CacheLog($"GetColumnSuggestions ★ obj.SchemaName is NULL → SKIP lazy-load (obj.Name='{obj.Name}')");
         }
         if (string.IsNullOrEmpty(colsCsv))
         {
-            CacheLog($"GetColumnSuggestions colsCsv empty → return empty");
             return new();
         }
 
@@ -374,7 +341,6 @@ public static class SqlObjectSchemaCache
                 || c.StartsWith(columnPrefix, StringComparison.OrdinalIgnoreCase))
             .Take(50)
             .ToList();
-        CacheLog($"GetColumnSuggestions matched {matches.Count}/{cols.Length} (prefix='{columnPrefix}'), first 5: {string.Join(",", matches.Take(5))}");
         return matches;
     }
 
