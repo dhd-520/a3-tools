@@ -167,73 +167,28 @@ public static class SqlIntelliSenseProvider
         if (ctx == SqlContextKind.AfterColumnKeyword)
         {
             log.AppendLine("  [branch] AfterColumnKeyword");
-            if (!string.IsNullOrEmpty(fullSql))
+            if (!string.IsNullOrEmpty(fullSql) && !string.IsNullOrEmpty(prefix))
             {
-                // ★ 2026-09-24 v2 陛下反馈问题 3 仍未解决修复: 空白位置判定。
-                // 根因: 之前 IsKnownTableOrAlias("S_SCM_SEORDER") 返 true (aliasMap 末段),
-                //       所以未降级 → 仍弹列。
-                // 真正的判定: caret 与 word 之间是否有空白/逗号/末尾 → 决定列上下文还是对象上下文。
-                //   - 有空白: 用户输完表名,准备输列条件 → 弹列 (符合 SSMS 行为)
-                //   - 无空白: 用户还在输 word (可能未输完,可能刚输完想输逗号或下一表)
-                //             → 弹对象 (表/视图/表值函数),不弹列
-                int caret = caretOffset;
-                bool hasSeparatorBetweenWordAndCaret = false;
-                if (caret > 0 && caret <= fullSql.Length)
+                // ★ 2026-10-15 v20 陛下反馈修复 Bug A: 去掉 hasSeparator + no-separator 降级
+                //   旧逻辑 (v9 月): hasSeparator 检测从 caret-1 扫永远 false (因为 caret-1 是 word 末尾字母)
+                //                    → 永远走 no-separator 降级 → 弹 dbo 表对象 (错!)
+                //                    陛下 09:43/09:47/09:50 日志确认: 带/不带 schema 都被打挂
+                //   新逻辑: DetectContext 已经判了 AfterColumnKeyword, 不再二次判断
+                //           只检查 prefix 是否是已知表/别名 (避免 `FROM NonExistTable |` 误弹列)
+                //           aliasMap 里有表 → 走列路径 (即便 0 命中也返空, 不降级)
+                //           aliasMap 空 → 才降级到对象 (用户想输新表名)
+                string lastWord = ExtractLastWordBeforeCaret(fullSql, caretOffset);
+                log.AppendLine($"  [branch] prefix='{prefix}' lastWord='{lastWord}'");
+                bool isKnown = IsKnownTableOrAlias(lastWord, fullSql, caretOffset, connectionString);
+                log.AppendLine($"  [branch] isKnown={isKnown}");
+                if (!isKnown)
                 {
-                    // 从 caret-1 向前扫,遇到 word 首字符就停;中间有空白/逗号则为 true
-                    int scan = caret - 1;
-                    while (scan >= 0)
+                    var aliasMapHas = SqlAliasResolver.Parse(fullSql, caretOffset).Count;
+                    log.AppendLine($"  [branch] aliasMap.Count={aliasMapHas}");
+                    if (aliasMapHas == 0)
                     {
-                        char c = fullSql[scan];
-                        if (char.IsLetterOrDigit(c) || c == '_' || c == '@' || c == '#')
-                            break;  // 到达 word 首字符
-                        if (char.IsWhiteSpace(c) || c == ',' || c == '\t' || c == '\r' || c == '\n')
-                        {
-                            hasSeparatorBetweenWordAndCaret = true;
-                            break;
-                        }
-                        // 其他符号 (. ( 等 → 不是 separator
-                        scan--;
-                    }
-                }
-
-                if (!hasSeparatorBetweenWordAndCaret)
-                {
-                    // ★ 关键场景: `SELECT * FROM S_SCM_SEORDER|` (caret 紧接 R 后,无空格)
-                    // 用户表达:"我没有输入任何空格表明我的表已经输入完成了"
-                    // → 这是对象上下文 (用户还在输 / 准备输逗号 / 准备输下一表),不弹列。
-                    log.AppendLine("  [branch] no-separator → degrade to AfterObjectKeyword");
-                    ctx = SqlContextKind.AfterObjectKeyword;
-                }
-                else if (!string.IsNullOrEmpty(prefix))
-                {
-                    // 有空白 → 才检查 word 是否真在 aliasMap/schema 中(避免 `FROM NonExistingTable ` 误弹列)
-                    // ★ 2026-10-15 陛下反馈修复: SELECT 列表里的 word (如 "G") 不该被当作表名验证
-                    //   区分: caret 是在 SELECT/WHERE/ON 列表里 (列上下文, prefix 是新列名前缀)
-                    //         还是在 FROM/JOIN 后 (对象上下文, prefix 是新表名)
-                    //   用 DetectContext 二分: 如果 SELECT/WHERE/ON 在 FROM 之前出现 → 列上下文
-                    string lastWord = ExtractLastWordBeforeCaret(fullSql, caretOffset);
-                    log.AppendLine($"  [branch] prefix='{prefix}' lastWord='{lastWord}'");
-                    bool isKnown = IsKnownTableOrAlias(lastWord, fullSql, caretOffset, connectionString);
-                    log.AppendLine($"  [branch] isKnown={isKnown}");
-                    if (!isKnown)
-                    {
-                        // ★ 关键: 即使 word 不是已知表/别名, 如果 aliasMap 里有表 → 走列路径
-                        //   例: SELECT G,* FROM S_SCM_ITEM WHERE → aliasMap={"S_SCM_ITEM"} → G 是 SELECT 列表新列
-                        //   例: SELECT Foo FROM S_SCM_ITEM WHERE → aliasMap 有 S_SCM_ITEM → Foo 是列
-                        //   降级到对象会导致: 用户想找列时被弹一坨 dbo.对象, 完全错位
-                        var aliasMapHas = SqlAliasResolver.Parse(fullSql, caretOffset).Count;
-                        log.AppendLine($"  [branch] aliasMap.Count={aliasMapHas}");
-                        if (aliasMapHas > 0)
-                        {
-                            // aliasMap 有表 → 保持列上下文, 让 GetAllColumnsFromAliases 处理 (即便 0 命中也返空)
-                            // 不修改 ctx, 不降级
-                        }
-                        else
-                        {
-                            log.AppendLine("  [branch] aliasMap empty → degrade to AfterObjectKeyword");
-                            ctx = SqlContextKind.AfterObjectKeyword;
-                        }
+                        log.AppendLine("  [branch] aliasMap empty → degrade to AfterObjectKeyword");
+                        ctx = SqlContextKind.AfterObjectKeyword;
                     }
                 }
             }

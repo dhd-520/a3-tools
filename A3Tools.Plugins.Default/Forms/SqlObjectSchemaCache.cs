@@ -342,18 +342,24 @@ public static class SqlObjectSchemaCache
         CacheLog($"GetColumnSuggestions obj FOUND obj.SchemaName='{obj.SchemaName}' obj.Name='{obj.Name}' ColumnsCsv.Len={obj.Columns?.Length ?? 0}");
 
         // 列名懒加载：cache 没有时同步调 LoadColumnsForObject（限制超时 3秒避免卡 UI）
+        // ★ 2026-10-15 v20 陛下反馈修复 Bug B: schema 空时用 obj.SchemaName 加载
+        //   旧逻辑: schema 空时跳过加载 → 永远返空 (陛下 09:47 日志验证)
+        //   新逻辑: schema 空时, 用 obj 缓存里已匹配的 SchemaName 加载
+        //           obj 在 FirstOrDefault 阶段已匹配 (schema 空时匹配所有同名对象), 所以 obj.SchemaName 必非空
+        //           正常输入都不带 schema (陛下 09:54 反馈), 走这条路径才能弹列
         string colsCsv = obj.Columns ?? "";
-        if (string.IsNullOrEmpty(colsCsv) && !string.IsNullOrEmpty(schema))
+        if (string.IsNullOrEmpty(colsCsv) && !string.IsNullOrEmpty(obj.SchemaName))
         {
-            CacheLog($"GetColumnSuggestions lazy-load columns schema='{schema}' object='{objectName}'");
-            var lazy = LoadColumnsForObject(connectionString, schema, objectName, timeoutMs: 3000);
+            var effectiveSchema = !string.IsNullOrEmpty(schema) ? schema : obj.SchemaName;
+            CacheLog($"GetColumnSuggestions lazy-load columns effectiveSchema='{effectiveSchema}' object='{objectName}' (original schema='{schema}')");
+            var lazy = LoadColumnsForObject(connectionString, effectiveSchema, objectName, timeoutMs: 3000);
             colsCsv = string.Join(",", lazy);
             CacheLog($"GetColumnSuggestions lazy-load returned {lazy.Count} cols");
         }
-        else if (string.IsNullOrEmpty(colsCsv) && string.IsNullOrEmpty(schema))
+        else if (string.IsNullOrEmpty(colsCsv))
         {
-            // Bug B: schema 为空时不加载 → 永远返空, 陛下 09:47 WHERE C 场景命中此路径
-            CacheLog($"GetColumnSuggestions ★ schema is NULL → SKIP lazy-load → return empty (obj.SchemaName='{obj.SchemaName}' object='{obj.Name}')");
+            // obj.SchemaName 也为空 (缓存里有这个 obj 但 schema 字段为 null) → 极端情况
+            CacheLog($"GetColumnSuggestions ★ obj.SchemaName is NULL → SKIP lazy-load (obj.Name='{obj.Name}')");
         }
         if (string.IsNullOrEmpty(colsCsv))
         {
