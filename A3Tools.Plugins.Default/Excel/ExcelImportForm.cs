@@ -143,7 +143,7 @@ public partial class ExcelImportForm : Form
             var s1 = GetSample(col.ColumnName, 0);
             var s2 = GetSample(col.ColumnName, 1);
             var s3 = GetSample(col.ColumnName, 2);
-            dgvMapping.Rows.Add(col.ColumnName, col.ColumnName, type, s1, s2, s3);
+            dgvMapping.Rows.Add(true, col.ColumnName, col.ColumnName, type, s1, s2, s3);
         }
     }
 
@@ -236,6 +236,12 @@ public partial class ExcelImportForm : Form
         for (int i = 0; i < dgvMapping.Rows.Count; i++)
         {
             var row = dgvMapping.Rows[i];
+            // ★ 2026-10-15 v2.1 列映射"忽略"功能: 未勾选 "导入" 复选框的列跳过
+            //   例: Excel 有 30 列但只需要 5 列 → 取消勾选 25 列, 只导入 5 列
+            var isImport = row.Cells["colImport"].Value;
+            bool importFlag = isImport is bool b && b;
+            if (!importFlag) continue;
+
             var src = row.Cells["colExcelName"].Value?.ToString() ?? "";
             var tgt = (row.Cells["colTargetName"].Value?.ToString() ?? "").Trim();
             var type = (row.Cells["colType"].Value?.ToString() ?? "NVARCHAR").Trim().ToUpperInvariant();
@@ -282,7 +288,16 @@ public partial class ExcelImportForm : Form
             });
         }
 
-        // 5. 收集 RawRows (按用户选定的列顺序)
+        // ★ 2026-10-15 v2.1 校验: 至少勾选 1 列才能导入
+        if (columns.Count == 0)
+        {
+            MessageBox.Show(this,
+                "没有任何列被勾选导入。\n\n请至少勾选 1 列 (\"导入\" 复选框), 或点 [全选] 按钮。",
+                "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 5. 收集 RawRows (按用户选定的列顺序, 跳过未勾选的列)
         var rawRows = new List<object?[]>(_previewData.Rows.Count);
         foreach (DataRow srcRow in _previewData.Rows)
         {
@@ -311,6 +326,23 @@ public partial class ExcelImportForm : Form
     {
         DialogResult = DialogResult.Cancel;
         Close();
+    }
+
+    // ===== 全选 / 全不选 =====
+    private void BtnSelectAll_Click(object? sender, EventArgs e)
+    {
+        foreach (DataGridViewRow row in dgvMapping.Rows)
+        {
+            row.Cells["colImport"].Value = true;
+        }
+    }
+
+    private void BtnUnselectAll_Click(object? sender, EventArgs e)
+    {
+        foreach (DataGridViewRow row in dgvMapping.Rows)
+        {
+            row.Cells["colImport"].Value = false;
+        }
     }
 
     private void SetStatus(string text)

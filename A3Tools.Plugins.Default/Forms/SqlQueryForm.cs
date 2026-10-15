@@ -688,9 +688,52 @@ public partial class SqlQueryForm : Form
                 }
                 tx.Commit();
                 _tempTables.Add(alias);
-                lblStatus.Text = $"✓ 已导入 #{alias}: {parsedRows.Count} 行 × {request.Columns.Count} 列" +
-                    (nullCount > 0 ? $"（{nullCount} 个 NULL）" : "") +
-                    $"  |  来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}";
+
+                // ★ 2026-10-15 v2.1 成功提示改造 (陛下反馈: 导入后没提示 + 不知道怎么用)
+                //   1. 状态栏绿底大字持久显示
+                //   2. 自动给当前 Tab 编辑器插入 SELECT 模板 (按 F5 直接跑)
+                //   3. 弹教学 MessageBox 说明 #别名 怎么用 (含 JOIN / 聚合示例)
+                var nullHint = nullCount > 0 ? $"（{nullCount} 个 NULL）" : "";
+
+                // 1. 状态栏绿底大字
+                lblStatus.Text = $"✓ 已导入 #{alias}: {parsedRows.Count} 行 × {request.Columns.Count} 列 {nullHint}  |  来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}";
+                lblStatus.ForeColor = Color.White;
+                lblStatus.BackColor = Color.SeaGreen;
+                var statusResetTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+                statusResetTimer.Tick += (_, _) =>
+                {
+                    statusResetTimer.Stop();
+                    statusResetTimer.Dispose();
+                    lblStatus.ForeColor = SystemColors.ControlText;
+                    lblStatus.BackColor = SystemColors.Control;
+                };
+                statusResetTimer.Start();
+
+                // 2. 自动插 SELECT 模板到当前 Tab 编辑器 (空编辑器替换, 有内容追加)
+                var template =
+                    $"SELECT TOP 100 *\nFROM #{alias};  -- 导入成功, 按 F5 执行\n" +
+                    $"-- 示例 JOIN: SELECT a.*, b.* FROM #{alias} a JOIN dbo.S_SCM_ITEM b ON a.列 = b.列;";
+                GetActiveTab()?.InsertSqlTemplate(template);
+
+                // 3. 教学 MessageBox
+                MessageBox.Show(this,
+                    $"✓ 已导入临时表 #{alias}\n\n" +
+                    $"数据: {parsedRows.Count} 行 × {request.Columns.Count} 列{nullHint}\n" +
+                    $"来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}\n\n" +
+                    $"━━━━━━━━━━━━ 使用方法 ━━━━━━━━━━━━\n\n" +
+                    $"#别名 就像一张普通表, SQL 里直接用:\n\n" +
+                    $"  SELECT * FROM #{alias};\n\n" +
+                    $"  SELECT a.*, b.*\n" +
+                    $"  FROM #{alias} a\n" +
+                    $"  JOIN dbo.真实表 b ON a.列 = b.列;\n\n" +
+                    $"  SELECT 分类列, COUNT(*), SUM(数值列)\n" +
+                    $"  FROM #{alias} GROUP BY 分类列;\n\n" +
+                    $"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                    $"已在编辑器插入查询模板, 按 F5 执行!\n" +
+                    $"关闭本窗体时 #{alias} 自动清理。",
+                    "导入成功 + 使用说明",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {

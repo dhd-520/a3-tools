@@ -307,6 +307,38 @@ public partial class SqlQueryTabPage : UserControl
     }
 
     /// <summary>
+    /// ★ 2026-10-15 v2.1: 导入 Excel 后把 SQL 模板插入编辑器
+    /// 空编辑器 → 直接替换; 有内容 → 追加到末尾 (不动用户已有 SQL)
+    /// 插入后光标移到末尾, 按 F5 即可执行
+    /// </summary>
+    public void InsertSqlTemplate(string sql)
+    {
+        rtbEditor.SuppressIntelliSense();
+        _suppressStatusClear = true;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(rtbEditor.Text))
+            {
+                rtbEditor.Text = sql;
+            }
+            else
+            {
+                rtbEditor.AppendText("\n\n" + sql);
+            }
+            rtbEditor.SelectionStart = rtbEditor.TextLength;
+            rtbEditor.ScrollToCaret();
+            rtbEditor.HighlightNow(resetColors: false);
+        }
+        finally
+        {
+            _suppressStatusClear = false;
+            var t2 = new System.Windows.Forms.Timer { Interval = 250 };
+            t2.Tick += (_, _) => { t2.Stop(); t2.Dispose(); rtbEditor.ResumeIntelliSense(); };
+            t2.Start();
+        }
+    }
+
+    /// <summary>
     /// 设置 Tab 标题上的执行状态图标：✓ 成功 / ✗ 失败 / ⏸ 停止 / ⏳ 运行中 / 空=无状态。
     /// 同步触发 TabControl 重绘（Page.Text 变更会自动触发）。
     /// </summary>

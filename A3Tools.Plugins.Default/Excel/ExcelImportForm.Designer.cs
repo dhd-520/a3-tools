@@ -17,9 +17,12 @@ partial class ExcelImportForm
     private System.Windows.Forms.DataGridView dgvPreview = null!;
     private System.Windows.Forms.Button btnImport = null!;
     private System.Windows.Forms.Button btnCancel = null!;
+    private System.Windows.Forms.Button btnSelectAll = null!;
+    private System.Windows.Forms.Button btnUnselectAll = null!;
     private System.Windows.Forms.StatusStrip statusStrip = null!;
     private System.Windows.Forms.ToolStripStatusLabel lblStatus = null!;
 
+    private System.Windows.Forms.DataGridViewCheckBoxColumn colImport = null!;
     private System.Windows.Forms.DataGridViewTextBoxColumn colExcelName = null!;
     private System.Windows.Forms.DataGridViewTextBoxColumn colTargetName = null!;
     private System.Windows.Forms.DataGridViewComboBoxColumn colType = null!;
@@ -53,10 +56,13 @@ partial class ExcelImportForm
         dgvPreview = new System.Windows.Forms.DataGridView();
         btnImport = new System.Windows.Forms.Button();
         btnCancel = new System.Windows.Forms.Button();
+        btnSelectAll = new System.Windows.Forms.Button();
+        btnUnselectAll = new System.Windows.Forms.Button();
         statusStrip = new System.Windows.Forms.StatusStrip();
         lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
-        colExcelName = new System.Windows.Forms.DataGridViewTextBoxColumn();
+        colImport = new System.Windows.Forms.DataGridViewCheckBoxColumn();
+    colExcelName = new System.Windows.Forms.DataGridViewTextBoxColumn();
         colTargetName = new System.Windows.Forms.DataGridViewTextBoxColumn();
         colType = new System.Windows.Forms.DataGridViewComboBoxColumn();
         colSample1 = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -152,8 +158,15 @@ partial class ExcelImportForm
         dgvMapping.BackgroundColor = System.Drawing.SystemColors.Window;
 
         dgvMapping.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-            colExcelName, colTargetName, colType, colSample1, colSample2, colSample3
+            colImport, colExcelName, colTargetName, colType, colSample1, colSample2, colSample3
         });
+
+        colImport.HeaderText = "导入";
+        colImport.Name = "colImport";
+        colImport.Width = 50;
+        colImport.TrueValue = true;
+        colImport.FalseValue = false;
+        colImport.HeaderCell.Style.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
 
         colExcelName.HeaderText = "Excel 列名";
         colExcelName.Name = "colExcelName";
@@ -207,6 +220,26 @@ partial class ExcelImportForm
         dgvPreview.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
         dgvPreview.BackgroundColor = System.Drawing.SystemColors.Control;
 
+        // ===== btnSelectAll =====
+        btnSelectAll.Location = new System.Drawing.Point(409, 488);
+        btnSelectAll.Name = "btnSelectAll";
+        btnSelectAll.Size = new System.Drawing.Size(75, 28);
+        btnSelectAll.TabIndex = 13;
+        btnSelectAll.Text = "全选";
+        btnSelectAll.UseVisualStyleBackColor = true;
+        btnSelectAll.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right;
+        btnSelectAll.Click += BtnSelectAll_Click;
+
+        // ===== btnUnselectAll =====
+        btnUnselectAll.Location = new System.Drawing.Point(489, 488);
+        btnUnselectAll.Name = "btnUnselectAll";
+        btnUnselectAll.Size = new System.Drawing.Size(75, 28);
+        btnUnselectAll.TabIndex = 14;
+        btnUnselectAll.Text = "全不选";
+        btnUnselectAll.UseVisualStyleBackColor = true;
+        btnUnselectAll.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right;
+        btnUnselectAll.Click += BtnUnselectAll_Click;
+
         // ===== btnImport =====
         btnImport.Location = new System.Drawing.Point(569, 488);
         btnImport.Name = "btnImport";
@@ -256,6 +289,8 @@ partial class ExcelImportForm
         Controls.Add(dgvMapping);
         Controls.Add(lblPreview);
         Controls.Add(dgvPreview);
+        Controls.Add(btnSelectAll);
+        Controls.Add(btnUnselectAll);
         Controls.Add(btnImport);
         Controls.Add(btnCancel);
         Controls.Add(statusStrip);
