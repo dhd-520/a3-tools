@@ -226,10 +226,42 @@ public static class SqlIntelliSenseProvider
                     //         non-dotted prefix 维持 v18 行为 (返空, 不降级, 避免误弹函数)
                     if (string.IsNullOrEmpty(prefix) || !prefix.Contains('.'))
                     {
-                        // SQL 里有 FROM 表, 列联想 0 命中 → 返空, 不降级
-                        log.AppendLine("  [result] return empty (aliasMap>0, no col match)");
-                        WriteLog(log.ToString());
-                        return new List<string>();
+                        // ★ 2026-10-15 v22 陛下反馈修复: prefix 匹配对象名前缀时降级到 AfterObjectKeyword
+                        //   场景: SELECT * FROM S_SCM_| (光标紧接表名, 用户正在输表名)
+                        //   旧行为: 返空 → 弹窗不弹 (陛下 14:22 反馈 "直接输表名又不提示了")
+                        //   真根因: DetectContext 返 AfterColumnKeyword (via lastNonKwAtCaret+FROM 机制)
+                        //           → IsKnownTableOrAlias 返 true (SqlAliasResolver 把 FROM S_SCM_ 解析为 aliasMap 项)
+                        //           → GetAllColumnsFromAliases 调 GetColumnSuggestions 找不到对象 (实际表名是 S_SCM_ITEM, 不是 S_SCM_)
+                        //           → v18 fallback 返空
+                        //   修法: v18 fallback 加检查 → prefix 匹配对象名前缀 (例 S_SCM_ 匹配 S_SCM_ITEM)
+                        //         → 降级到 AfterObjectKeyword 弹表名 (弹 dbo.S_SCM_ITEM 等)
+                        //         → 不匹配 → 维持 v18 返空 (避免 WHERE C 等列上下文误弹表)
+                        //   注意: AfterObjectKeyword 块已用 fromKinds 过滤 (只返表/视图/表值函数, 不含存储过程/标量函数)
+                        //         所以即使在列上下文降级, 也不会弹函数/存储过程污染 (v18 原始顾虑已解决)
+                        bool matchesObjects = false;
+                        if (!string.IsNullOrEmpty(prefix) && !string.IsNullOrEmpty(connectionString))
+                        {
+                            var matchingObjs = SqlObjectSchemaCache.GetObjectSuggestions(
+                                connectionString, prefix,
+                                new[] { SqlObjectSchemaCache.ObjectKind.Table,
+                                        SqlObjectSchemaCache.ObjectKind.View,
+                                        SqlObjectSchemaCache.ObjectKind.TableValuedFunction });
+                            matchesObjects = matchingObjs != null && matchingObjs.Count > 0;
+                            log.AppendLine($"  [branch] v22 obj-match check prefix='{prefix}' → {matchesObjects} ({matchingObjs?.Count ?? 0} objs)");
+                        }
+                        if (matchesObjects)
+                        {
+                            // prefix 匹配对象名前缀 → 降级到 AfterObjectKeyword 弹表
+                            log.AppendLine("  [branch] v22 prefix matches objects → degrade to AfterObjectKeyword");
+                            ctx = SqlContextKind.AfterObjectKeyword;
+                        }
+                        else
+                        {
+                            // SQL 里有 FROM 表, 列联想 0 命中, 也没匹配对象 → 返空, 不降级
+                            log.AppendLine("  [result] return empty (aliasMap>0, no col match, no obj match)");
+                            WriteLog(log.ToString());
+                            return new List<string>();
+                        }
                     }
                     // prefix 含 "." → fall through 到下方 priority path (TryGetColumnSuggestion)
                     log.AppendLine("  [branch] prefix contains '.' → fall through to priority path (TryGetColumnSuggestion)");
