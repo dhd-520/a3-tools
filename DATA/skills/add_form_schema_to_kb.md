@@ -10,11 +10,12 @@ description: |
   - 「把这个表单的表结构同步到知识库」/「表单用到的表加到 KB」/「表单引用的表加到 KB」
   - 「表单表结构喂给 AI」/「让 AI 知道这个表单的表结构」/「表单对应的真实表加到 KB」
   - 同时含「表单」+「表结构/字段/列」组合的请求
-  - 任何含 "S_CONTROL" / "VIEWNAME" / "DATANAME" / "CAPTION" / "A3Combo" / "A3Text" / "ComboString" / "DataSelectCode" 的请求
+  - 任何含 "S_CONTROL" / "VIEWNAME" / "DATANAME" / "CAPTION" / "A3Combo" / "A3Text" / "ComboString" / "DataSelectCode" / "CodeRuleGuid" 的请求
 
   **2026-10-15 陛下新增**：处理 S_CONTROL 时支持以下控件元数据提取（与表结构一起入库）：
   - **CONTROLTYPE = A3Combo** → 自动从 `EXTENDS` 解析 `ComboString` 字段，提取下拉选项（value+label 列表）
   - **CONTROLTYPE = A3Text** → 检查 `EXTENDS.DataSelectCode` 字段，非空即为「标准查询文本框」，记录查询代码
+  - **任意 CONTROLTYPE 的 CodeRuleGuid** → 任意控件的 `EXTENDS.CodeRuleGuid` 非空即为「单据编号字段」，记录编码规则 GUID
 
   **绝对不要**用知识库工作流的 add_knowledge_entry 直接存 —— 本 Skill 要先查 S_CONTROL、
   去重 VIEWNAME、用 INFORMATION_SCHEMA 验证 DATANAME 真实存在（过滤关联字段）、
@@ -26,7 +27,7 @@ description: |
   找不到的 DATANAME）会自动过滤掉，不进知识库。
 
 trigger_keywords:
-  加到知识库,加入 KB,同步到 KB,提取表结构到知识库,把表加到 KB,表单表结构,表单用到的表,表单引用的表,表单对应的真实表,喂给 AI,S_CONTROL,VIEWNAME,DATANAME,CAPTION,A3Combo,A3Text,ComboString,DataSelectCode,EXTENDS,下拉选项,标准查询
+  加到知识库,加入 KB,同步到 KB,提取表结构到知识库,把表加到 KB,表单表结构,表单用到的表,表单引用的表,表单对应的真实表,喂给 AI,S_CONTROL,VIEWNAME,DATANAME,CAPTION,A3Combo,A3Text,ComboString,DataSelectCode,CodeRuleGuid,EXTENDS,下拉选项,标准查询,单据编号,编码规则
 
   典型场景：
   - 「把 001 账套里 OBJECTGUID=ABC-123 这个表单用到的表加到知识库」
@@ -224,7 +225,29 @@ standard_query['S_SCM_OLPOLYCOSTDETAIL']['ITEMGUID'] = 'SCM_ITEMSELECT'
 > `IsMultiSelect`（多选）、`IsSpaceSelect`（空格触发）、`QuoteColumn`（引号列）、
 > `IsManualInput`（手工输入）。需要时同样用 `parse_extends` 拿。
 
-### 5.4 解析失败保护（容错优先）
+### 5.4 CodeRuleGuid：单据编号编码规则
+
+⚠️ **2026-10-15 陛下新增**：「单据编号」字段的识别。
+
+**适用条件：任意 CONTROLTYPE**（不限 A3Text/A3Combo，凡是 EXTENDS 里带
+`CodeRuleGuid` 字段就算），常见于 A3Text（文本框）/ A3Label（标签）/ A3Button 等。
+
+从 `parse_extends(EXTENDS)` 字典里取 `CodeRuleGuid` 字段：
+- **不为空**（值通常是 GUID 字符串，例如 `A3B1F2C3-D4E5-6789-ABCD-EF0123456789`）→
+  这是一个「单据编号」字段，记录该编码规则 GUID 供后续 AI 反查
+- 为空 → 不是单据编号字段，不记录
+
+存入结构（按 VIEWNAME + DATANAME 索引）：
+
+```
+code_rules['S_SCM_BILL']['BILLNO'] = 'A3B1F2C3-D4E5-6789-ABCD-EF0123456789'
+```
+
+> 💡 **同源参考字段**（本次不强制提取，陛下后续可能用到）：
+> `CodeRule`（编码规则名称）、`BillNoFormat`（编号格式串）、`IsAutoCode`（是否自动编号）。
+> 需要时同样用 `parse_extends` 拿。
+
+### 5.5 解析失败保护（容错优先）
 
 - `parse_extends` 永远不抛异常（`if not extends_str: return {}`）
 - `parse_combo_string` 用正则，找不到匹配返空列表
@@ -295,6 +318,9 @@ AI 根据推荐结果决定：
 
   ### ITEMGUID（A3Text 标准查询）
   - 查询代码: SCM_ITEMSELECT
+
+  ### BILLNO（单据编号）
+  - 编码规则 GUID: A3B1F2C3-D4E5-6789-ABCD-EF0123456789
   ```
 
 - `source_type` = `A3FormExtract`（如果 schema 支持，否则用 `Manual`）
@@ -332,9 +358,10 @@ AI 根据推荐结果决定：
 - 真实列保留：<Z> 条
 - A3Combo 控件：<N> 个（下拉选项已提取）
 - A3Text 标准查询：<M> 个（已记录查询代码）
+- 单据编号字段：<K> 个（编码规则 GUID 已记录）
 
 📋 已加入知识库的表：
-  ✓ TABLE_001  (<列数> 列, <N1> 个 A3Combo, <M1> 个 A3Text)
+  ✓ TABLE_001  (<列数> 列, <N1> 个 A3Combo, <M1> 个 A3Text, <K1> 个单据编号)
   ✓ TABLE_002  (<列数> 列)
   ...
 
@@ -361,6 +388,9 @@ AI 根据推荐结果决定：
   **名字**，**不要把视图 SQL 一起塞进 KB**（视图是 A3 内部实现细节，跨版本会变）。
 - **关联字段的控件元数据丢弃** — 步骤 4 过滤掉的关联字段，其 CONTROLTYPE/EXTENDS
   也跟着丢弃（不存 KB）。这避免给 AI 喂"幻觉控件"。
+- **CodeRuleGuid 存 GUID 不存规则内容** — 存进 KB 的只是 GUID 字符串，编码规则的
+  具体格式/前缀/流水号规则**不要查 S_BILLRULE 表一起塞**（跨账套/跨版本规则定义
+  可能变；GUID 是稳定锚点，AI 需要时再去查规则表）。
 
 ## 异常分支
 
@@ -373,4 +403,5 @@ AI 根据推荐结果决定：
 | 推荐不到合适 KB               | 提示陛下指定一个 KB，或者建一个新的（requires_confirmation）   |
 | A3Combo 但 ComboString 空     | 正常写入控件说明，选项列表为空（提示"未配置下拉选项"）        |
 | A3Text 但 DataSelectCode 空   | 不算标准查询，不写控件说明段                                   |
+| CodeRuleGuid 空               | 不是单据编号字段，不写控件说明段                               |
 | EXTENDS 整体解析异常          | 静默跳过该条 S_CONTROL 记录，主流程继续                        |
