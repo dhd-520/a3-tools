@@ -1,4 +1,5 @@
 ﻿using A3Tools.Models;
+using A3Tools.Plugins.Default.Excel;
 using A3Tools.Services;
 using A3Tools.Common.Services;
 using Microsoft.Data.SqlClient;
@@ -21,6 +22,11 @@ public partial class SqlQueryForm : Form
     private bool _explorerUserClosed = false; // 用户点击 × 后不再默认打开，需点工具栏重开
     private bool _explorerVisible = false;    // 工具栏 toggle 状态
     private int _explorerWidth = 360;         // Explorer 实际宽度（Show 后从 _explorer.Width 更新）
+
+    // ★ 2026-10-15 Excel 临时表仓库: 跨所有 Tab 共享, 跟随 SqlQueryForm 生命周期
+    //   Tab Page 拿到引用后, Execute() 检测到 ##alias 走 _tempStore + TempTableExecutor
+    //   Form 关闭时不用 Clear() (GC 会回收 ResultTable 引用), 反正 Tab 跟着死
+    private readonly TempTableStore _tempStore = new();
 
     /// <summary>LoadDatabasesAsync 运行中（初始化 / 刷新期间），避免 SelectedIndexChanged 覆盖用户手动选择</summary>
     private bool _loadingDbs = false;
@@ -535,7 +541,7 @@ public partial class SqlQueryForm : Form
             Text = title ?? $"查询{_untitledIndex}",
             Padding = new Padding(2)
         };
-        var tab = new SqlQueryTabPage(this)
+        var tab = new SqlQueryTabPage(this, _tempStore)
         {
             Dock = DockStyle.Fill,
             Page = page   // ★ 重要：让 tab.Page 指向 TabPage，Supply 脚本加载完成后能更新 Tab.Text
@@ -565,6 +571,88 @@ public partial class SqlQueryForm : Form
     }
 
     private void BtnNewTab_Click(object? sender, EventArgs e) => NewTab();
+
+    /// <summary>
+    /// ★ 2026-10-15 导入 Excel 到临时表
+    /// 流程: OpenFileDialog → ExcelImportForm → TempTableValueParser 解析 → ResultTable → _tempStore
+    /// 导入后, SQL 用 ##alias 引用, 不依赖实际物理表
+    /// </summary>
+    private void BtnImportExcel_Click(object? sender, EventArgs e)
+    {
+        // 1. 选文件
+        string? filePath = null;
+        using (var ofd = new OpenFileDialog
+        {
+            Filter = "Excel 文件 (*.xlsx;*.xls)|*.xlsx;*.xls|所有文件 (*.*)|*.*",
+            Title = "选择要导入的 Excel"
+        })
+        {
+            if (ofd.ShowDialog(this) != DialogResult.OK) return;
+            filePath = ofd.FileName;
+        }
+
+        // 2. 弹出导入 UI
+        TempTableImportRequest? request;
+        try
+        {
+            using var form = new ExcelImportForm(filePath);
+            if (form.ShowDialog(this) != DialogResult.OK) return;
+            request = form.Result;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"打开 Excel 失败:\n{ex.Message}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (request is null) return;
+
+        // 3. 校验 alias 没冲突
+        if (_tempStore.TryGet(request.Alias, out _))
+        {
+            var confirm = MessageBox.Show(this,
+                $"别名 ##{request.Alias} 已存在。\n\n点 [是] 覆盖现有临时表, [否] 取消导入。",
+                "别名已存在", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
+        }
+
+        // 4. 解析 RawRows → 实际类型 → ResultTable
+        var columns = new List<A3Tools.Common.DataAccess.ColumnInfo>(request.Columns.Count);
+        foreach (var c in request.Columns)
+        {
+            columns.Add(new A3Tools.Common.DataAccess.ColumnInfo
+            {
+                Name = c.TargetName,
+                TypeName = c.TypeName
+            });
+        }
+        var rows = new List<object?[]>(request.RawRows.Count);
+        int nullCount = 0;
+        foreach (var rawRow in request.RawRows)
+        {
+            var arr = new object?[request.Columns.Count];
+            for (int i = 0; i < request.Columns.Count; i++)
+            {
+                var v = rawRow[i] as string;
+                var parsed = TempTableValueParser.Parse(v, request.Columns[i].TypeName);
+                if (parsed is null) nullCount++;
+                arr[i] = parsed ?? DBNull.Value;
+            }
+            rows.Add(arr);
+        }
+        var table = new A3Tools.Common.DataAccess.ResultTable
+        {
+            Columns = columns,
+            Rows = rows
+        };
+
+        // 5. 入库
+        _tempStore.AddOrReplace(request.Alias, table);
+
+        // 6. 状态栏反馈
+        var nullHint = nullCount > 0 ? $"（{nullCount} 个单元格解析为 NULL）" : "";
+        lblStatus.Text = $"✓ 已导入 ##{request.Alias}: {rows.Count} 行 × {columns.Count} 列 {nullHint}  |  来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}";
+    }
 
     private void BtnCloseCurrent_Click(object? sender, EventArgs e) => CloseActiveTab();
 

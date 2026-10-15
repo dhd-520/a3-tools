@@ -2,6 +2,7 @@ using System.Data;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using A3Tools.Plugins.Default.Excel;
 using Microsoft.Data.SqlClient;
 
 namespace A3Tools.Plugins.Default.Forms;
@@ -26,6 +27,7 @@ public enum ExecStatus
 public partial class SqlQueryTabPage : UserControl
 {
     private readonly SqlQueryForm _parent;
+    private readonly TempTableStore? _tempStore;
     private CancellationTokenSource? _cts;
     private Action<string, long, int, ExecStatus>? _statusReporter;
     private bool _suppressStatusClear;  // SetEditorText 程序性赋值时屏蔽 TextChanged 触发清状态图标
@@ -62,14 +64,15 @@ public partial class SqlQueryTabPage : UserControl
     public event EventHandler? FontSizeChanged;
 
     /// <summary>设计器无参构造（VS 加载设计时使用）。运行时走带参构造。</summary>
-    public SqlQueryTabPage() : this(null!)
+    public SqlQueryTabPage() : this(null!, null)
     {
         if (DesignMode) return;
     }
 
-    public SqlQueryTabPage(SqlQueryForm parent)
+    public SqlQueryTabPage(SqlQueryForm parent, TempTableStore? tempStore = null)
     {
         _parent = parent;
+        _tempStore = tempStore;
         InitializeComponent();
         // 设计器模式下不绑事件（避免找不到对应 Form）
         if (DesignMode) return;
@@ -433,6 +436,14 @@ public partial class SqlQueryTabPage : UserControl
 
         var sw = Stopwatch.StartNew();
 
+        // ★ 2026-10-15 临时表拦截：SQL 含 ##alias 引用 → 走内存查询, 绕过 IDataAccess / SqlConnection
+        //   v1 限制: 只支持 ##alias 单独使用 (无 JOIN / 子查询 / 聚合)
+        if (_tempStore != null && TempTableLocator.ContainsTempTableRef(sql))
+        {
+            await ExecuteViaTempTableAsync(sql, sw);
+            return;
+        }
+
         // 2026-07-09 混合连接：Http 模式走 IDataAccess 路径（同步返回，丢失流式读优化但验证可行性）
         if (_parent.CurrentDataAccess.Mode == A3Tools.Common.DataAccess.DataAccessMode.Http)
         {
@@ -631,6 +642,140 @@ public partial class SqlQueryTabPage : UserControl
             _cts?.Dispose();
             _cts = null;
         }
+    }
+
+    /// <summary>
+    /// 2026-10-15 临时表路径：SQL 含 ##alias 引用时走内存查询, 绕过 SqlConnection / IDataAccess
+    /// 适用 Direct 和 Http 两种模式 (临时表是本地内存, 不走网络)
+    /// v1 限制: 只支持 ##alias 单独查询, 不支持 JOIN / 子查询 / 聚合 (见 TempTableExecutor)
+    /// </summary>
+    private async Task ExecuteViaTempTableAsync(string sql, Stopwatch sw)
+    {
+        try
+        {
+            // 取出 SQL 里引用的 ##alias, 在消息区提示
+            var aliases = TempTableLocator.ExtractAliases(sql);
+            var aliasHint = aliases.Count > 0
+                ? $"临时表: {string.Join(", ", aliases.Select(a => "##" + a))}"
+                : "临时表查询";
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] ⚡ {aliasHint}\n");
+
+            // 走内存执行器
+            var result = TempTableExecutor.Execute(sql, _tempStore!);
+            sw.Stop();
+
+            // 复用现有渲染逻辑: ResultTable → DataTable → CreateResultTab + FinalizeResultTab
+            var dt = new DataTable();
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in result.Columns)
+            {
+                var name = col.Name;
+                if (!usedNames.Add(name))
+                {
+                    int sfx = 2;
+                    string uniq;
+                    do { uniq = $"{name}_{sfx++}"; } while (!usedNames.Add(uniq));
+                    name = uniq;
+                }
+                // ColumnInfo.TypeName 是 SQL Server 类型名 (INT/DECIMAL/DATETIME/NVARCHAR)
+                // 解析成 .NET Type; 失败兜底 object
+                var t = MapSqlTypeNameToClrType(col.TypeName);
+                dt.Columns.Add(name, t);
+            }
+            foreach (var row in result.Rows)
+            {
+                var dr = dt.NewRow();
+                for (int i = 0; i < row.Length && i < dt.Columns.Count; i++)
+                {
+                    var v = row[i];
+                    if (v is null || v is DBNull) { dr[i] = DBNull.Value; continue; }
+                    // 上游 (Excel 导入 + ValueParser) 已是正确类型, 直接装箱
+                    dr[i] = v;
+                }
+                dt.Rows.Add(dr);
+            }
+
+            // 渲染到结果区 (复用 Http 路径的 helper)
+            var (page, dgv) = CreateResultTab(0, 1);
+            dgv.DataSource = dt;
+            FinalizeResultTab(page, dgv, dt, dt.Rows.Count, false);
+
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] ✓ 内存执行完成，影响 {dt.Rows.Count} 行（耗时 {sw.ElapsedMilliseconds}ms）\n");
+            _statusReporter?.Invoke(
+                $"✓ 临时表查询成功，{dt.Rows.Count} 行",
+                sw.ElapsedMilliseconds, dt.Rows.Count, ExecStatus.Success);
+            SetTabStatusIcon(ExecStatus.Success);
+        }
+        catch (NotSupportedException nex)
+        {
+            sw.Stop();
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] ✗ 临时表查询不支持: {nex.Message}\n");
+            _statusReporter?.Invoke($"✗ 语法不支持", sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
+            SetTabStatusIcon(ExecStatus.Failure);
+            tabResultSwitcher.SelectedTab = tabMessages;
+        }
+        catch (InvalidOperationException iex)
+        {
+            sw.Stop();
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] ✗ {iex.Message}\n");
+            _statusReporter?.Invoke($"✗ 临时表错误", sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
+            SetTabStatusIcon(ExecStatus.Failure);
+            tabResultSwitcher.SelectedTab = tabMessages;
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] ✗ 临时表查询异常: {ex.Message}\n");
+            _statusReporter?.Invoke($"✗ {ex.GetType().Name}: {ex.Message}",
+                sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
+            SetTabStatusIcon(ExecStatus.Failure);
+            tabResultSwitcher.SelectedTab = tabMessages;
+        }
+        finally
+        {
+            btnExecute.Enabled = true;
+            btnStop.Enabled = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    /// <summary>
+    /// 2026-10-15 SQL Server 类型名 → .NET CLR Type (临时表路径专用)
+    /// 与 ExecuteViaDataAccessAsync 的 Type.GetType(col.TypeName) 差异: 后者期望
+    /// 传入的是 "System.Int32" 格式, 而 Excel 导入的 ColumnInfo.TypeName 是 "INT" / "DECIMAL" 等
+    /// SQL Server 短名, 所以需要显式映射
+    /// </summary>
+    private static Type MapSqlTypeNameToClrType(string sqlTypeName)
+    {
+        if (string.IsNullOrWhiteSpace(sqlTypeName)) return typeof(object);
+        var t = sqlTypeName.Trim().ToUpperInvariant();
+        return t switch
+        {
+            // ===== 整数族 (统一用 long, 覆盖 Excel 推断的所有整数) =====
+            "INT" or "INTEGER" or "BIGINT" or "SMALLINT" or "TINYINT" => typeof(long),
+
+            // ===== 小数族 =====
+            "DECIMAL" or "NUMERIC" or "MONEY" or "SMALLMONEY"
+                or "FLOAT" or "REAL" => typeof(decimal),
+
+            // ===== 时间族 =====
+            "DATETIME" or "DATETIME2" or "DATE" or "SMALLDATETIME" or "TIMESTAMP"
+                => typeof(DateTime),
+            "TIME" => typeof(TimeSpan),
+
+            // ===== 文本族 =====
+            "NVARCHAR" or "VARCHAR" or "CHAR" or "NCHAR" or "TEXT" or "NTEXT"
+                or "STRING" => typeof(string),
+
+            // ===== 其它 =====
+            "BIT" or "BOOLEAN" => typeof(bool),
+            "BINARY" or "VARBINARY" or "IMAGE" => typeof(byte[]),
+            "UNIQUEIDENTIFIER" => typeof(Guid),
+
+            // ===== 兜底: 未知类型用 object (临时表里原始 value 仍能显示) =====
+            _ => typeof(object)
+        };
     }
 
     /// <summary>

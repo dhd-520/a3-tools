@@ -20,6 +20,7 @@ partial class SqlQueryForm
     private Button btnCloseCurrent;
     private Button btnCloseOthers;
     private Button btnToggleExplorer;
+    private Button btnImportExcel;
 
     private TabControl tabControl;
     private ContextMenuStrip ctxTab;
@@ -56,6 +57,7 @@ partial class SqlQueryForm
         btnCloseCurrent = new Button();
         btnCloseOthers = new Button();
         btnToggleExplorer = new Button();
+        btnImportExcel = new Button();
         tabControl = new TabControl();
         statusStrip = new StatusStrip();
         lblConnInfo = new ToolStripStatusLabel();
@@ -177,6 +179,7 @@ partial class SqlQueryForm
         pnlToolBar.Controls.Add(btnCloseCurrent);
         pnlToolBar.Controls.Add(btnCloseOthers);
         pnlToolBar.Controls.Add(btnToggleExplorer);
+        pnlToolBar.Controls.Add(btnImportExcel);
         pnlToolBar.Dock = DockStyle.Top;
         pnlToolBar.Location = new Point(0, 40);
         pnlToolBar.Name = "pnlToolBar";
@@ -220,6 +223,20 @@ partial class SqlQueryForm
         btnToggleExplorer.TabIndex = 3;
         btnToggleExplorer.Text = "📂 对象资源管理器";
         btnToggleExplorer.Click += BtnToggleExplorer_Click;
+
+        //
+        // btnImportExcel
+        //
+        btnImportExcel.BackColor = Color.FromArgb(0, 122, 204);
+        btnImportExcel.ForeColor = Color.White;
+        btnImportExcel.Location = new Point(636, 4);
+        btnImportExcel.Name = "btnImportExcel";
+        btnImportExcel.Size = new Size(155, 32);
+        btnImportExcel.TabIndex = 4;
+        btnImportExcel.Text = "📥 导入 Excel";
+        btnImportExcel.UseVisualStyleBackColor = false;
+        btnImportExcel.FlatStyle = FlatStyle.Flat;
+        btnImportExcel.Click += BtnImportExcel_Click;
         // 
         // tabControl
         // 
