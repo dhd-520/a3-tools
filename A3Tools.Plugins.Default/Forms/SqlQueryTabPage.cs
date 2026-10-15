@@ -474,10 +474,13 @@ public partial class SqlQueryTabPage : UserControl
 
         try
         {
-            // ★ 2026-10-15 v2: 走 SqlQueryForm 的长会话连接 (SessionConn)
-            //   这样 #temp 临时表 (导入的 Excel) 在该连接上可见 → JOIN / 聚合 / 子查询天然支持
-            //   跨 Tab 共享同一根连接, 整个 Form 生命周期内 #temp 一直存在
-            using var conn = await _parent.GetSessionConnAsync();
+            // ★ 2026-10-15 v2.2 陛下反馈修复: 第二次查询提示"对象无效"
+            //   真根因: 这里原来是 `using var conn = await _parent.GetSessionConnAsync();`
+            //   using 会在查询结束时 Dispose 共享会话连接 → #temp 表随连接销毁
+            //   → 第二次查询拿到全新连接, #Stock 已经没了 → "对象名无效"
+            //   修法: 不 using。会话连接生命周期只归 SqlQueryForm.OnFormClosed 管
+            //   (所有 Tab 共享同一根连接, #temp 跨查询跨 Tab 存活)
+            var conn = await _parent.GetSessionConnAsync();
             AppendMessage($"[{DateTime.Now:HH:mm:ss}] 已连接到 [{conn.Database}]\n");
 
             // ★ 重要：按 GO 切分为多个批（GO 是 SSMS/sqlcmd 的批处理分隔符，不是 T-SQL 关键字）。

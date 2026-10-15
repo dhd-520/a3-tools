@@ -635,21 +635,39 @@ public partial class SqlQueryForm : Form
             if (confirm != DialogResult.Yes) return;
         }
 
-        // 4. 解析 RawRows → 实际类型
-        var parsedRows = new List<object?[]>(request.RawRows.Count);
-        int nullCount = 0;
-        foreach (var rawRow in request.RawRows)
+        // ★ 2026-10-15 v2.2 陛下反馈修复: 导入无 loading + 慢
+        //   1. UseWaitCursor + 状态栏"正在导入..." 即时反馈
+        //   2. 解析 RawRows 丢后台线程 (不卡 UI)
+        //   3. 批量 INSERT (一次 N 行) 代替逐行循环 (万行快两个数量级)
+        UseWaitCursor = true;
+        btnImportExcel.Enabled = false;
+        lblStatus.Text = $"⏳ 正在导入 #{request.Alias}: 解析数据...";
+        lblStatus.ForeColor = Color.DarkBlue;
+        lblStatus.BackColor = Color.LightYellow;
+        statusStrip.Refresh();
+        try
         {
-            var arr = new object?[request.Columns.Count];
-            for (int i = 0; i < request.Columns.Count; i++)
+        // 4. 解析 RawRows → 实际类型 (后台线程, 不卡 UI)
+        var parseResult = await Task.Run(() =>
+        {
+            var rows = new List<object?[]>(request.RawRows.Count);
+            int nulls = 0;
+            foreach (var rawRow in request.RawRows)
             {
-                var v = rawRow[i] as string;
-                var parsed = TempTableValueParser.Parse(v, request.Columns[i].TypeName);
-                if (parsed is null) nullCount++;
-                arr[i] = parsed ?? DBNull.Value;
+                var arr = new object?[request.Columns.Count];
+                for (int i = 0; i < request.Columns.Count; i++)
+                {
+                    var v = rawRow[i] as string;
+                    var parsed = TempTableValueParser.Parse(v, request.Columns[i].TypeName);
+                    if (parsed is null) nulls++;
+                    arr[i] = parsed ?? DBNull.Value;
+                }
+                rows.Add(arr);
             }
-            parsedRows.Add(arr);
-        }
+            return (rows, nulls);
+        });
+        var parsedRows = parseResult.rows;
+        int nullCount = parseResult.nulls;
 
         // 5. 拼接 DDL + INSERT
         var alias = request.Alias;
@@ -660,30 +678,47 @@ public partial class SqlQueryForm : Form
             columnDefs.Add($"[{c.TargetName}] {MapToSqlType(c.TypeName)} NULL");
         }
         var ddl = $"CREATE TABLE {safeName} (\n  {string.Join(",\n  ", columnDefs)}\n)";
-        var insertSql = BuildBatchInsert(safeName, request.Columns);
 
         // 6. Direct 模式: 走长连接
         if (CurrentDataAccess.Mode == A3Tools.Common.DataAccess.DataAccessMode.Direct)
         {
             try
             {
+                lblStatus.Text = $"⏳ 正在导入 #{request.Alias}: 写入数据库...";
+                statusStrip.Refresh();
+
                 var conn = await GetSessionConnAsync();
                 using var tx = conn.BeginTransaction();
                 using (var ddlCmd = new SqlCommand($"IF OBJECT_ID('tempdb..{safeName}') IS NOT NULL DROP TABLE {safeName}; {ddl}", conn, tx))
                 {
                     await ddlCmd.ExecuteNonQueryAsync();
                 }
-                using (var insCmd = new SqlCommand(insertSql, conn, tx))
+
+                // ★ 批量 INSERT: 一次最多 100 行 (SQL Server 参数上限 2100)
+                int colCount = request.Columns.Count;
+                int rowsPerBatch = Math.Max(1, Math.Min(100, 2000 / Math.Max(1, colCount)));
+                var colList = string.Join(",", request.Columns.Select(c => $"[{c.TargetName}]"));
+                using (var insCmd = new SqlCommand("", conn, tx))
                 {
-                    foreach (var row in parsedRows)
+                    for (int start = 0; start < parsedRows.Count; start += rowsPerBatch)
                     {
+                        int end = Math.Min(start + rowsPerBatch, parsedRows.Count);
+                        int batchCount = end - start;
+                        var valueRows = new List<string>(batchCount);
                         insCmd.Parameters.Clear();
-                        for (int i = 0; i < request.Columns.Count; i++)
+                        for (int r = 0; r < batchCount; r++)
                         {
-                            insCmd.Parameters.AddWithValue($"@p{i}", row[i] ?? DBNull.Value);
+                            var paramNames = new string[colCount];
+                            for (int i = 0; i < colCount; i++)
+                            {
+                                paramNames[i] = $"@p{r}_{i}";
+                                insCmd.Parameters.AddWithValue(paramNames[i], parsedRows[start + r][i] ?? DBNull.Value);
+                            }
+                            valueRows.Add("(" + string.Join(",", paramNames) + ")");
                         }
-                        insCmd.CommandText = BuildOneInsert(safeName, request.Columns);
+                        insCmd.CommandText = $"INSERT INTO {safeName} ({colList}) VALUES " + string.Join(",", valueRows);
                         await insCmd.ExecuteNonQueryAsync();
+                        lblStatus.Text = $"⏳ 正在写入 #{alias}: {end}/{parsedRows.Count} 行...";
                     }
                 }
                 tx.Commit();
@@ -751,6 +786,13 @@ public partial class SqlQueryForm : Form
                 "本导入的数据已解析, 但未建到任何 SQL Server 表, 关闭窗口即丢。",
                 "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+        }
+        finally
+        {
+            // ★ v2.2 loading 收尾: 无论成败都恢复光标 + 按钮
+            UseWaitCursor = false;
+            btnImportExcel.Enabled = true;
+        }
     }
 
     /// <summary>
@@ -772,17 +814,6 @@ public partial class SqlQueryForm : Form
             _ => "NVARCHAR(MAX)" // 默认 NVARCHAR(MAX) 兼容所有字符串场景
         };
     }
-
-    /// <summary>拼接 "INSERT INTO #X (a,b) VALUES (@p0,@p1)" 单行模板</summary>
-    private static string BuildOneInsert(string safeName, List<TempTableColumn> columns)
-    {
-        var colList = string.Join(",", columns.Select(c => $"[{c.TargetName}]"));
-        var paramList = string.Join(",", Enumerable.Range(0, columns.Count).Select(i => $"@p{i}"));
-        return $"INSERT INTO {safeName} ({colList}) VALUES ({paramList})";
-    }
-
-    /// <summary>保留接口位 (批量 INSERT 未来用, 当前用单行循环简单稳)</summary>
-    private static string BuildBatchInsert(string safeName, List<TempTableColumn> columns) => "";
 
     /// <summary>
     /// ★ 2026-10-15 v2: 拿会话级 SqlConnection (Direct 模式)
