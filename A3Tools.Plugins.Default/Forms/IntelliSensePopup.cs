@@ -153,8 +153,12 @@ public class IntelliSensePopup : Form
 
         if (!Visible)
         {
-            // TopMost=true 让 popup 总在最上层，避免被 SplitContainer/TabControl 遮挡
-            TopMost = true;
+            // ★ 2026-10-15 陛下反馈修复: 去掉 TopMost=true
+            //   旧行为: 飘在所有程序最上方 (Chrome/Outlook/钉钉都覆盖), 切应用时依然遮挡, 突兀
+            //   新行为: Show(owner) 已关联 owner 窗口 → popup 自动在 owner 之上 (不被 SplitContainer/TabControl 遮挡)
+            //           且不会飘到其他程序上方, 符合 SSMS / VS 的弹窗行为
+            //   预防性设置 TopMost=false, 避免某些 WinForms 版本/主题下默认是 true 飘到最上层
+            TopMost = false;
             Show(owner);  // 关联 owner（owner 关闭时 popup 也跟着关）
         }
         else
