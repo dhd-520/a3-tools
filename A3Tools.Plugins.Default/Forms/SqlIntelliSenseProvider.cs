@@ -217,14 +217,29 @@ public static class SqlIntelliSenseProvider
                 log.AppendLine($"  [branch] fall-through aliasMap.Count={aliasMapCount}");
                 if (aliasMapCount > 0)
                 {
-                    // SQL 里有 FROM 表, 列联想 0 命中 → 返空, 不降级
-                    log.AppendLine("  [result] return empty (aliasMap>0, no col match)");
-                    WriteLog(log.ToString());
-                    return new List<string>();
+                    // ★ 2026-10-15 v21 陛下反馈修复: prefix 含 "." 时 (例 "Where A.") 不能返空!
+                    //   旧行为: 返空 → 弹窗不弹 → 用户看到空白 (陛下 09:59 反馈)
+                    //   真根因: GetAllColumnsFromAliases 对 dotted prefix 处理不当 (prefix="A." 不在 aliasMap key 里)
+                    //           → 全空 → 走到 v18 fallback 这里, 原本应该 fall through 到 priority path (TryGetColumnSuggestion)
+                    //           但 v18 fallback 直接 return empty, 永远到不了 priority path
+                    //   修法: dotted prefix 时 fall through 到 priority path, 它能正确处理 alias. 模式
+                    //         non-dotted prefix 维持 v18 行为 (返空, 不降级, 避免误弹函数)
+                    if (string.IsNullOrEmpty(prefix) || !prefix.Contains('.'))
+                    {
+                        // SQL 里有 FROM 表, 列联想 0 命中 → 返空, 不降级
+                        log.AppendLine("  [result] return empty (aliasMap>0, no col match)");
+                        WriteLog(log.ToString());
+                        return new List<string>();
+                    }
+                    // prefix 含 "." → fall through 到下方 priority path (TryGetColumnSuggestion)
+                    log.AppendLine("  [branch] prefix contains '.' → fall through to priority path (TryGetColumnSuggestion)");
                 }
                 // SQL 里没表 (aliasMap 空) → 用户可能想输新表名, 降级到对象
-                log.AppendLine("  [branch] aliasMap empty → degrade to AfterObjectKeyword");
-                ctx = SqlContextKind.AfterObjectKeyword;
+                else
+                {
+                    log.AppendLine("  [branch] aliasMap empty → degrade to AfterObjectKeyword");
+                    ctx = SqlContextKind.AfterObjectKeyword;
+                }
             }
         }
 
