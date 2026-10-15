@@ -1,4 +1,5 @@
-﻿using A3Tools.Models;
+﻿using System.Data;
+using A3Tools.Models;
 using A3Tools.Plugins.Default.Excel;
 using A3Tools.Services;
 using A3Tools.Common.Services;
@@ -23,10 +24,13 @@ public partial class SqlQueryForm : Form
     private bool _explorerVisible = false;    // 工具栏 toggle 状态
     private int _explorerWidth = 360;         // Explorer 实际宽度（Show 后从 _explorer.Width 更新）
 
-    // ★ 2026-10-15 Excel 临时表仓库: 跨所有 Tab 共享, 跟随 SqlQueryForm 生命周期
-    //   Tab Page 拿到引用后, Execute() 检测到 ##alias 走 _tempStore + TempTableExecutor
-    //   Form 关闭时不用 Clear() (GC 会回收 ResultTable 引用), 反正 Tab 跟着死
-    private readonly TempTableStore _tempStore = new();
+    // ★ 2026-10-15 Direct 模式会话连接 (长连接): #temp 临时表必须挂在该连接上才会话级可见
+    //   所有 Tab 通过 GetSessionConnAsync() 拿这个连接 (而不是 new SqlConnection),
+    //   这样 #Stock / #Price 等多 Tab 共享同一会话, JOIN / 聚合 / 子查询天然支持
+    //   关闭 Form 时 Dispose → #temp 自动随连接销毁
+    private SqlConnection? _sessionConn;
+    private readonly object _sessionConnLock = new();
+    private readonly HashSet<string> _tempTables = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>LoadDatabasesAsync 运行中（初始化 / 刷新期间），避免 SelectedIndexChanged 覆盖用户手动选择</summary>
     private bool _loadingDbs = false;
@@ -445,9 +449,24 @@ public partial class SqlQueryForm : Form
     {
         if (_explorer != null && !_explorer.IsDisposed)
         {
-            try { _explorer.Dispose();_explorer.Close();  } catch { /* may already closed */ }       
+            try { _explorer.Dispose();_explorer.Close();  } catch { /* may already closed */ }
             _explorer = null;
         }
+
+        // ★ 2026-10-15 v2: 关掉 #temp 会话连接 → #Stock / #Price 等临时表随连接销毁
+        if (_sessionConn != null)
+        {
+            try
+            {
+                if (_sessionConn.State == ConnectionState.Open)
+                    _sessionConn.Close();
+                _sessionConn.Dispose();
+            }
+            catch { /* may already disposed */ }
+            _sessionConn = null;
+        }
+        _tempTables.Clear();
+
         base.OnFormClosed(e);
     }
     /// <summary>获取主窗体所在的屏幕 WorkArea（多屏支持）</summary>
@@ -541,7 +560,7 @@ public partial class SqlQueryForm : Form
             Text = title ?? $"查询{_untitledIndex}",
             Padding = new Padding(2)
         };
-        var tab = new SqlQueryTabPage(this, _tempStore)
+        var tab = new SqlQueryTabPage(this)
         {
             Dock = DockStyle.Fill,
             Page = page   // ★ 重要：让 tab.Page 指向 TabPage，Supply 脚本加载完成后能更新 Tab.Text
@@ -573,11 +592,11 @@ public partial class SqlQueryForm : Form
     private void BtnNewTab_Click(object? sender, EventArgs e) => NewTab();
 
     /// <summary>
-    /// ★ 2026-10-15 导入 Excel 到临时表
-    /// 流程: OpenFileDialog → ExcelImportForm → TempTableValueParser 解析 → ResultTable → _tempStore
-    /// 导入后, SQL 用 ##alias 引用, 不依赖实际物理表
+    /// ★ 2026-10-15 v2: 导入 Excel 到 #temp 真实临时表 (Direct 模式走长连接 + CREATE TABLE + 批量 INSERT)
+    /// JOIN / 聚合 / 子查询 天然由 SQL Server 处理
+    /// Http 模式: CREATE TABLE + INSERT 拼到每次 Execute 的 batch 前缀
     /// </summary>
-    private void BtnImportExcel_Click(object? sender, EventArgs e)
+    private async void BtnImportExcel_Click(object? sender, EventArgs e)
     {
         // 1. 选文件
         string? filePath = null;
@@ -607,26 +626,17 @@ public partial class SqlQueryForm : Form
         }
         if (request is null) return;
 
-        // 3. 校验 alias 没冲突
-        if (_tempStore.TryGet(request.Alias, out _))
+        // 3. 确认: 已存在 #temp 提示覆盖
+        if (_tempTables.Contains(request.Alias))
         {
             var confirm = MessageBox.Show(this,
-                $"别名 ##{request.Alias} 已存在。\n\n点 [是] 覆盖现有临时表, [否] 取消导入。",
+                $"别名 #{request.Alias} 已存在。\n\n点 [是] 覆盖现有临时表, [否] 取消导入。",
                 "别名已存在", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes) return;
         }
 
-        // 4. 解析 RawRows → 实际类型 → ResultTable
-        var columns = new List<A3Tools.Common.DataAccess.ColumnInfo>(request.Columns.Count);
-        foreach (var c in request.Columns)
-        {
-            columns.Add(new A3Tools.Common.DataAccess.ColumnInfo
-            {
-                Name = c.TargetName,
-                TypeName = c.TypeName
-            });
-        }
-        var rows = new List<object?[]>(request.RawRows.Count);
+        // 4. 解析 RawRows → 实际类型
+        var parsedRows = new List<object?[]>(request.RawRows.Count);
         int nullCount = 0;
         foreach (var rawRow in request.RawRows)
         {
@@ -638,20 +648,123 @@ public partial class SqlQueryForm : Form
                 if (parsed is null) nullCount++;
                 arr[i] = parsed ?? DBNull.Value;
             }
-            rows.Add(arr);
+            parsedRows.Add(arr);
         }
-        var table = new A3Tools.Common.DataAccess.ResultTable
+
+        // 5. 拼接 DDL + INSERT
+        var alias = request.Alias;
+        var safeName = "#" + alias;
+        var columnDefs = new List<string>(request.Columns.Count);
+        foreach (var c in request.Columns)
         {
-            Columns = columns,
-            Rows = rows
+            columnDefs.Add($"[{c.TargetName}] {MapToSqlType(c.TypeName)} NULL");
+        }
+        var ddl = $"CREATE TABLE {safeName} (\n  {string.Join(",\n  ", columnDefs)}\n)";
+        var insertSql = BuildBatchInsert(safeName, request.Columns);
+
+        // 6. Direct 模式: 走长连接
+        if (CurrentDataAccess.Mode == A3Tools.Common.DataAccess.DataAccessMode.Direct)
+        {
+            try
+            {
+                var conn = await GetSessionConnAsync();
+                using var tx = conn.BeginTransaction();
+                using (var ddlCmd = new SqlCommand($"IF OBJECT_ID('tempdb..{safeName}') IS NOT NULL DROP TABLE {safeName}; {ddl}", conn, tx))
+                {
+                    await ddlCmd.ExecuteNonQueryAsync();
+                }
+                using (var insCmd = new SqlCommand(insertSql, conn, tx))
+                {
+                    foreach (var row in parsedRows)
+                    {
+                        insCmd.Parameters.Clear();
+                        for (int i = 0; i < request.Columns.Count; i++)
+                        {
+                            insCmd.Parameters.AddWithValue($"@p{i}", row[i] ?? DBNull.Value);
+                        }
+                        insCmd.CommandText = BuildOneInsert(safeName, request.Columns);
+                        await insCmd.ExecuteNonQueryAsync();
+                    }
+                }
+                tx.Commit();
+                _tempTables.Add(alias);
+                lblStatus.Text = $"✓ 已导入 #{alias}: {parsedRows.Count} 行 × {request.Columns.Count} 列" +
+                    (nullCount > 0 ? $"（{nullCount} 个 NULL）" : "") +
+                    $"  |  来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"建 #temp 表失败:\n{ex.Message}", "错误",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        else
+        {
+            // Http 模式: 拼接 prefix, 后续 Execute 前置
+            // ★ v2 简化: Http 模式临时表暂未完整支持, 提示用户切直连或后续支持
+            MessageBox.Show(this,
+                "当前账套是 Http 代理模式, #temp 临时表暂未完整支持。\n\n" +
+                "建议: 切到直连账套 或 后续版本补 Http 模式 session 持久化。\n\n" +
+                "本导入的数据已解析, 但未建到任何 SQL Server 表, 关闭窗口即丢。",
+                "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    /// <summary>
+    /// ★ 2026-10-15 SQL Server 短类型名 (Excel 推断) → DDL 类型名
+    /// </summary>
+    private static string MapToSqlType(string excelTypeName)
+    {
+        var t = (excelTypeName ?? "NVARCHAR").Trim().ToUpperInvariant();
+        return t switch
+        {
+            "INT" or "INTEGER" or "BIGINT" or "SMALLINT" or "TINYINT" => "BIGINT",
+            "DECIMAL" or "NUMERIC" or "MONEY" or "SMALLMONEY" => "DECIMAL(28,8)",
+            "FLOAT" or "REAL" => "FLOAT",
+            "DATETIME" or "DATETIME2" or "TIMESTAMP" or "SMALLDATETIME" => "DATETIME",
+            "DATE" => "DATE",
+            "TIME" => "TIME",
+            "BIT" or "BOOLEAN" => "BIT",
+            "UNIQUEIDENTIFIER" => "UNIQUEIDENTIFIER",
+            _ => "NVARCHAR(MAX)" // 默认 NVARCHAR(MAX) 兼容所有字符串场景
         };
+    }
 
-        // 5. 入库
-        _tempStore.AddOrReplace(request.Alias, table);
+    /// <summary>拼接 "INSERT INTO #X (a,b) VALUES (@p0,@p1)" 单行模板</summary>
+    private static string BuildOneInsert(string safeName, List<TempTableColumn> columns)
+    {
+        var colList = string.Join(",", columns.Select(c => $"[{c.TargetName}]"));
+        var paramList = string.Join(",", Enumerable.Range(0, columns.Count).Select(i => $"@p{i}"));
+        return $"INSERT INTO {safeName} ({colList}) VALUES ({paramList})";
+    }
 
-        // 6. 状态栏反馈
-        var nullHint = nullCount > 0 ? $"（{nullCount} 个单元格解析为 NULL）" : "";
-        lblStatus.Text = $"✓ 已导入 ##{request.Alias}: {rows.Count} 行 × {columns.Count} 列 {nullHint}  |  来源: {Path.GetFileName(request.SourceFile)} / {request.SheetName}";
+    /// <summary>保留接口位 (批量 INSERT 未来用, 当前用单行循环简单稳)</summary>
+    private static string BuildBatchInsert(string safeName, List<TempTableColumn> columns) => "";
+
+    /// <summary>
+    /// ★ 2026-10-15 v2: 拿会话级 SqlConnection (Direct 模式)
+    /// 所有 Tab 共享这一根连接 → #temp 跨 Tab 可见 → JOIN / 聚合天然支持
+    /// </summary>
+    public async Task<SqlConnection> GetSessionConnAsync()
+    {
+        lock (_sessionConnLock)
+        {
+            if (_sessionConn != null && _sessionConn.State == ConnectionState.Open)
+                return _sessionConn;
+        }
+        var newConn = new SqlConnection(CurrentConnectionString);
+        await newConn.OpenAsync();
+        lock (_sessionConnLock)
+        {
+            if (_sessionConn != null && _sessionConn.State == ConnectionState.Open)
+            {
+                // 另一个线程刚开了一个, 关掉我的
+                newConn.Dispose();
+                return _sessionConn;
+            }
+            _sessionConn = newConn;
+            return _sessionConn;
+        }
     }
 
     private void BtnCloseCurrent_Click(object? sender, EventArgs e) => CloseActiveTab();

@@ -117,7 +117,7 @@ partial class ExcelImportForm
         lblAlias.Name = "lblAlias";
         lblAlias.Size = new System.Drawing.Size(192, 17);
         lblAlias.TabIndex = 5;
-        lblAlias.Text = "别名 (SQL 用 ##alias 引用):";
+        lblAlias.Text = "别名 (SQL 用 #别名 引用):";
 
         // ===== txtAlias =====
         txtAlias.Location = new System.Drawing.Point(528, 45);
