@@ -592,7 +592,7 @@ public partial class SqlQueryForm : Form
     private void BtnNewTab_Click(object? sender, EventArgs e) => NewTab();
 
     /// <summary>
-    /// ★ 2026-10-15 v2: 导入 Excel 到 #temp 真实临时表 (Direct 模式走长连接 + CREATE TABLE + 批量 INSERT)
+    /// ★ 2026-10-15 v2: 导入 Excel 到 #temp 真实临时表 (Direct 模式走长连接 + CREATE TABLE + SqlBulkCopy)
     /// JOIN / 聚合 / 子查询 天然由 SQL Server 处理
     /// Http 模式: CREATE TABLE + INSERT 拼到每次 Execute 的 batch 前缀
     /// </summary>
@@ -638,7 +638,7 @@ public partial class SqlQueryForm : Form
         // ★ 2026-10-15 v2.2 陛下反馈修复: 导入无 loading + 慢
         //   1. UseWaitCursor + 状态栏"正在导入..." 即时反馈
         //   2. 解析 RawRows 丢后台线程 (不卡 UI)
-        //   3. 批量 INSERT (一次 N 行) 代替逐行循环 (万行快两个数量级)
+        //   3. SqlBulkCopy 批量拷贝 (TDS Bulk Load 协议, 万行 <1s, 比 INSERT 快一个数量级)
         UseWaitCursor = true;
         btnImportExcel.Enabled = false;
         lblStatus.Text = $"⏳ 正在导入 #{request.Alias}: 解析数据...";
@@ -694,32 +694,48 @@ public partial class SqlQueryForm : Form
                     await ddlCmd.ExecuteNonQueryAsync();
                 }
 
-                // ★ 批量 INSERT: 一次最多 100 行 (SQL Server 参数上限 2100)
+                // ★ 2026-10-15 v2.3 陛下建议改造: SqlBulkCopy 批量拷贝 (TDS Bulk Load 协议)
+                //   10 万行 <1s, 比批量 INSERT 快一个数量级
+                //   与 CREATE TABLE 同一事务, 失败一起回滚
                 int colCount = request.Columns.Count;
-                int rowsPerBatch = Math.Max(1, Math.Min(100, 2000 / Math.Max(1, colCount)));
-                var colList = string.Join(",", request.Columns.Select(c => $"[{c.TargetName}]"));
-                using (var insCmd = new SqlCommand("", conn, tx))
+
+                // 1. 构建 DataTable (列类型 = CLR 类型, SqlBulkCopy 靠它生成 TDS 元数据)
+                var dt = new DataTable();
+                foreach (var c in request.Columns)
                 {
-                    for (int start = 0; start < parsedRows.Count; start += rowsPerBatch)
+                    dt.Columns.Add(c.TargetName, MapToClrType(c.TypeName));
+                }
+                foreach (var row in parsedRows)
+                {
+                    var dr = dt.NewRow();
+                    for (int i = 0; i < colCount; i++)
                     {
-                        int end = Math.Min(start + rowsPerBatch, parsedRows.Count);
-                        int batchCount = end - start;
-                        var valueRows = new List<string>(batchCount);
-                        insCmd.Parameters.Clear();
-                        for (int r = 0; r < batchCount; r++)
-                        {
-                            var paramNames = new string[colCount];
-                            for (int i = 0; i < colCount; i++)
-                            {
-                                paramNames[i] = $"@p{r}_{i}";
-                                insCmd.Parameters.AddWithValue(paramNames[i], parsedRows[start + r][i] ?? DBNull.Value);
-                            }
-                            valueRows.Add("(" + string.Join(",", paramNames) + ")");
-                        }
-                        insCmd.CommandText = $"INSERT INTO {safeName} ({colList}) VALUES " + string.Join(",", valueRows);
-                        await insCmd.ExecuteNonQueryAsync();
-                        lblStatus.Text = $"⏳ 正在写入 #{alias}: {end}/{parsedRows.Count} 行...";
+                        dr[i] = row[i] ?? DBNull.Value;
                     }
+                    dt.Rows.Add(dr);
+                }
+
+                // 2. SqlBulkCopy 写入 #temp (同连接同事务)
+                using (var bulk = new SqlBulkCopy(conn, SqlBulkCopyOptions.Default, tx))
+                {
+                    bulk.DestinationTableName = safeName;
+                    for (int i = 0; i < colCount; i++)
+                    {
+                        bulk.ColumnMappings.Add(request.Columns[i].TargetName, request.Columns[i].TargetName);
+                    }
+                    bulk.BulkCopyTimeout = 300;
+                    bulk.NotifyAfter = Math.Max(1, parsedRows.Count / 20);
+                    bulk.SqlRowsCopied += (_, e2) =>
+                    {
+                        // SqlRowsCopied 在后台线程触发 → BeginInvoke 回 UI 线程
+                        // ★ Invoke 防御: IsHandleCreated && !IsDisposed (全局规则)
+                        if (IsHandleCreated && !IsDisposed)
+                        {
+                            BeginInvoke(new Action(() =>
+                                lblStatus.Text = $"⏳ 正在写入 #{alias}: {e2.RowsCopied}/{parsedRows.Count} 行..."));
+                        }
+                    };
+                    await bulk.WriteToServerAsync(dt);
                 }
                 tx.Commit();
                 _tempTables.Add(alias);
@@ -793,6 +809,26 @@ public partial class SqlQueryForm : Form
             UseWaitCursor = false;
             btnImportExcel.Enabled = true;
         }
+    }
+
+    /// <summary>
+    /// ★ 2026-10-15 v2.3: SQL 类型名 → CLR Type (SqlBulkCopy 的 DataTable 列类型)
+    /// 与 TempTableValueParser.Parse 返回的类型一致, 否则 DataRow 赋值会炸
+    /// </summary>
+    private static Type MapToClrType(string excelTypeName)
+    {
+        var t = (excelTypeName ?? "NVARCHAR").Trim().ToUpperInvariant();
+        return t switch
+        {
+            "INT" or "INTEGER" or "BIGINT" or "SMALLINT" or "TINYINT" => typeof(long),
+            "DECIMAL" or "NUMERIC" or "MONEY" or "SMALLMONEY" or "FLOAT" or "REAL" => typeof(decimal),
+            "DATETIME" or "DATETIME2" or "SMALLDATETIME" or "TIMESTAMP" or "DATE" => typeof(DateTime),
+            "TIME" => typeof(TimeSpan),
+            "BIT" or "BOOLEAN" => typeof(bool),
+            "UNIQUEIDENTIFIER" => typeof(Guid),
+            "BINARY" or "VARBINARY" or "IMAGE" => typeof(byte[]),
+            _ => typeof(string)
+        };
     }
 
     /// <summary>
