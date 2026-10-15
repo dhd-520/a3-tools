@@ -476,7 +476,35 @@ public static class SqlIntelliSenseProvider
             { i = segEnd - 1; continue; }
             // * ( . → 跳过（这些不组成 word 头）
             if (firstChar == '*' || firstChar == '(' || firstChar == '.')
-            { i = segEnd - 1; continue; }
+            {
+                // ★ 2026-10-15 陛下反馈修复 v19: SELECT 列表里 * 通配符紧接 word
+                //   例: SELECT C* FROM dbo.S_SCM_ITEM (光标在 * 后)
+                //   旧行为: * 跳过 → 扫到 C → caret 不紧接 C 末尾 (C 后面是 *) → lastNonKwAtCaret=false
+                //          → 下一轮扫到 FROM → 返 AfterObjectKeyword → 弹 dbo.CUSTJFMX 等表对象
+                //   修法: * 紧接 word 时, 把 word 标记为 "已输完的列前缀"
+                //         → 下一轮扫到 FROM → lastNonKwAtCaret=true → 返 AfterColumnKeyword
+                //   影响范围: 只在 * 紧接 word (字母/数字/_/@/#) 且 word 非关键字时触发
+                //             不会影响普通表达式里的 * (a*b 这种)
+                if (firstChar == '*' && segEnd > 0 && caretOffset > segEnd)
+                {
+                    char prev = fullSql[segEnd - 1];
+                    if (char.IsLetterOrDigit(prev) || prev == '_' || prev == '@' || prev == '#')
+                    {
+                        // 排除 FROM C*| 这种真正是 FROM 后的场景: 紧接 caret 后面是空白/FROM/JOIN/...
+                        // 算 caret 位置 (segEnd + 1) 是 *, caretOffset > segEnd 说明 caret 在 * 后
+                        // 这种 SELECT 列表里的 * 通配符 → 当作 word 已输完
+                        if (caretOffset == fullSql.Length ||
+                            char.IsWhiteSpace(fullSql[caretOffset]) ||
+                            fullSql[caretOffset] == ',' ||
+                            char.IsLetterOrDigit(fullSql[caretOffset]))
+                        {
+                            lastNonKwAtCaret = true;
+                        }
+                    }
+                }
+                i = segEnd - 1;
+                continue;
+            }
 
             // 数字开头 → 也走字词扫（可能是 T1 这种混在表名中的数字）
             // 后续 wordStart 循环会倒推字母数字组合
