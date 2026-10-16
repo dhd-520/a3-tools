@@ -17,17 +17,42 @@ namespace A3Tools.Plugins.Default.Excel;
 ///   5. 点 [导入] → 返回 <see cref="TempTableImportRequest"/>
 ///   6. 调用方负责把 RawRows 解析成 ResultTable 加到 <see cref="TempTableStore"/>
 ///
-/// v1 简化:
-///   - 预览只读前 200 行 (DataGridView 性能)
-///   - 真实导入仍按预览这 200 行 (后续可加大)
-///   - 全空行跳过, 重复列名自动加 _N 后缀
+/// v2.4 (2026-10-15) 修 200 行 bug:
+///   - 导入前用 ReadSheet(maxRows: 0) 重读全量, 避免预览 200 行被当成导入数据
+///
+/// v2.5 (2026-10-16 陛下反馈修复):
+///   - 每个 Sheet 独立保存编辑状态 (alias + 列映射 + 类型 + 导入勾选)
+///     切换 Sheet 时自动保存 / 恢复, 不再丢失用户编辑
+///   - 预览仍限 200 行不卡 UI, 导入读全量 (缓存 _fullData, 不再重读)
+///   - 状态栏: "全部 N 行 × M 列  (预览前 200 行, 导入读全部)" 让用户安心
 /// </summary>
 public partial class ExcelImportForm : Form
 {
     private const int PreviewRowLimit = 200;
 
     private string _filePath = "";
-    private DataTable? _previewData;
+    private DataTable? _previewData;       // 预览用, 200 行限制 (UI 性能)
+    private DataTable? _fullData;          // ★ v2.5 导入用, 全量, 缓存避免重读
+
+    /// <summary>★ v2.5 当前显示的 sheet 名, 切换时用于保存/恢复状态</summary>
+    private string _currentSheet = "";
+
+    /// <summary>★ v2.5 每个 sheet 独立保存用户编辑 (alias + 列映射), 切换 Sheet 不再丢失</summary>
+    private readonly Dictionary<string, SheetState> _sheetStates = new(StringComparer.OrdinalIgnoreCase);
+
+    private class ColumnMappingState
+    {
+        public bool Import = true;
+        public string SourceName = "";
+        public string TargetName = "";
+        public string Type = "NVARCHAR";
+    }
+
+    private class SheetState
+    {
+        public string Alias = "";
+        public List<ColumnMappingState> Columns = new();
+    }
 
     /// <summary>用户点 [导入] 确认的结果, 调用方读这个</summary>
     public TempTableImportRequest? Result { get; private set; }
@@ -72,6 +97,12 @@ public partial class ExcelImportForm : Form
             _filePath = path;
             txtFile.Text = path;
 
+            // ★ v2.5 换文件时清空旧 sheet 状态 (不同文件 sheet 名可能撞, 状态会乱)
+            _sheetStates.Clear();
+            _currentSheet = "";
+            _fullData = null;
+            _previewData = null;
+
             var sheets = ExcelImporter.ListSheets(path);
             cmbSheet.Items.Clear();
             foreach (var s in sheets) cmbSheet.Items.Add(s);
@@ -98,14 +129,74 @@ public partial class ExcelImportForm : Form
         var sheetName = cmbSheet.SelectedItem.ToString() ?? "";
         if (string.IsNullOrEmpty(sheetName)) return;
 
-        // 默认 alias = sheet 名 (用户可改)
-        if (string.IsNullOrWhiteSpace(txtAlias.Text) || AliasRegex.IsMatch(txtAlias.Text))
+        // ★ v2.5 陛下反馈修复: 切换 Sheet 时丢失用户编辑 (临时表名 / 字段映射)
+        //   之前直接 txtAlias.Text = safeAlias 覆盖用户编辑, PopulateMappingGrid 重置列映射
+        //   现在按 sheet 名缓存, 切换时 save → switch → restore
+        // 1. 先把当前 sheet 的 UI 状态存到 _sheetStates
+        SaveCurrentSheetState();
+        // 2. 切到新 sheet
+        _currentSheet = sheetName;
+        // 3. 加载新 sheet 的预览 + 全量
+        LoadSheetPreview(sheetName);
+        // 4. 恢复新 sheet 的状态 (如有), 否则用默认 alias
+        if (_sheetStates.ContainsKey(sheetName))
         {
+            TryRestoreSheetState(sheetName);
+        }
+        else
+        {
+            // 首次进入, 默认 alias = sheet 名
             var safeAlias = SanitizeAlias(sheetName);
             if (safeAlias.Length > 0) txtAlias.Text = safeAlias;
         }
+    }
 
-        LoadSheetPreview(sheetName);
+    // ★ v2.5 把当前 sheet 的 UI 状态 (alias + 列映射) 存到 _sheetStates
+    private void SaveCurrentSheetState()
+    {
+        if (string.IsNullOrEmpty(_currentSheet)) return;
+        var state = new SheetState
+        {
+            Alias = txtAlias.Text.Trim()
+        };
+        foreach (DataGridViewRow row in dgvMapping.Rows)
+        {
+            var src = row.Cells["colExcelName"].Value?.ToString() ?? "";
+            var tgt = (row.Cells["colTargetName"].Value?.ToString() ?? "").Trim();
+            var type = (row.Cells["colType"].Value?.ToString() ?? "NVARCHAR").Trim().ToUpperInvariant();
+            var import = row.Cells["colImport"].Value is bool b && b;
+            state.Columns.Add(new ColumnMappingState
+            {
+                Import = import,
+                SourceName = src,
+                TargetName = tgt,
+                Type = type
+            });
+        }
+        _sheetStates[_currentSheet] = state;
+    }
+
+    // ★ v2.5 把 _sheetStates[sheetName] 的状态恢复到 UI (按 SourceName 匹配列)
+    private void TryRestoreSheetState(string sheetName)
+    {
+        if (!_sheetStates.TryGetValue(sheetName, out var state)) return;
+
+        // 恢复 alias (空也恢复 = 清空, 让用户看到上次清空的状态)
+        txtAlias.Text = state.Alias;
+
+        // 恢复每列映射 (按 Excel 原列名匹配 → 用户编辑后的值回来)
+        foreach (DataGridViewRow row in dgvMapping.Rows)
+        {
+            var src = row.Cells["colExcelName"].Value?.ToString() ?? "";
+            var saved = state.Columns.FirstOrDefault(c =>
+                string.Equals(c.SourceName, src, StringComparison.OrdinalIgnoreCase));
+            if (saved is not null)
+            {
+                row.Cells["colImport"].Value = saved.Import;
+                row.Cells["colTargetName"].Value = saved.TargetName;
+                row.Cells["colType"].Value = saved.Type;
+            }
+        }
     }
 
     private static string SanitizeAlias(string name)
@@ -120,13 +211,28 @@ public partial class ExcelImportForm : Form
 
     private void LoadSheetPreview(string sheetName)
     {
+        // ★ v2.5 失败时清掉旧引用, 避免拿到陈旧数据
+        _previewData = null;
+        _fullData = null;
         try
         {
+            // ★ v2.5 陛下反馈: 之前状态栏 "200行X4列(已截断)" 让用户以为导入也被限制
+            //   现在: 预览限 200 行 (UI 性能), 导入读全量 (缓存到 _fullData, 不重读)
             _previewData = ExcelImporter.ReadSheet(_filePath, sheetName, maxRows: PreviewRowLimit);
+            _fullData = ExcelImporter.ReadSheet(_filePath, sheetName, maxRows: 0);
+
             PopulateMappingGrid();
             PopulatePreviewGrid();
-            SetStatus($"Sheet '{sheetName}': {_previewData.Rows.Count} 行 × {_previewData.Columns.Count} 列" +
-                      (_previewData.Rows.Count >= PreviewRowLimit ? " (已截断)" : ""));
+
+            var totalRows = _fullData.Rows.Count;
+            var previewRows = _previewData.Rows.Count;
+            var totalCols = _fullData.Columns.Count;
+            var msg = $"Sheet '{sheetName}': 全部 {totalRows} 行 × {totalCols} 列";
+            if (previewRows < totalRows)
+            {
+                msg += $"  (预览前 {previewRows} 行, 导入读全部)";
+            }
+            SetStatus(msg);
         }
         catch (Exception ex)
         {
@@ -222,8 +328,8 @@ public partial class ExcelImportForm : Form
         }
         var sheetName = cmbSheet.SelectedItem.ToString() ?? "";
 
-        // 3. 验证有数据
-        if (_previewData is null || _previewData.Rows.Count == 0)
+        // 3. 验证有数据 (用 _fullData, 全量, 跟实际导入的数据源一致)
+        if (_fullData is null || _fullData.Rows.Count == 0)
         {
             MessageBox.Show(this, "Sheet 里没有任何数据行, 无法导入", "提示",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -272,11 +378,11 @@ public partial class ExcelImportForm : Form
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            // 找原列索引
+            // 找原列索引 (用 _fullData 的列, 跟 rawRows 数据源一致)
             int origIdx = -1;
-            for (int c = 0; c < _previewData.Columns.Count; c++)
+            for (int c = 0; c < _fullData.Columns.Count; c++)
             {
-                if (_previewData.Columns[c].ColumnName == src) { origIdx = c; break; }
+                if (_fullData.Columns[c].ColumnName == src) { origIdx = c; break; }
             }
             if (origIdx < 0)
             {
@@ -304,9 +410,8 @@ public partial class ExcelImportForm : Form
         }
 
         // 5. 收集 RawRows (按用户选定的列顺序, 跳过未勾选的列)
-        // ★ 2026-10-15 v2.4 陛下反馈修复: 之前从 _previewData 收集 → 导入被静默限制在 200 行以内!
-        //   预览保持 200 行不卡 UI, 但导入必须重读整个 sheet (maxRows: 0 = 不限)
-        var fullData = ExcelImporter.ReadSheet(_filePath, sheetName, maxRows: 0);
+        // ★ v2.5 缓存: 直接用 _fullData (LoadSheetPreview 已读全量, 不重读), 跟 BtnImportAllSheets 走的 BuildAutoRequest 也对得上
+        var fullData = _fullData!; // 上面已 null 检查
         var rawRows = new List<object?[]>(fullData.Rows.Count);
         foreach (DataRow srcRow in fullData.Rows)
         {
