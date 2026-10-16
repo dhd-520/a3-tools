@@ -484,14 +484,31 @@ public partial class ExcelImportForm : Form
             return;
         }
 
-        // 每个 sheet 一个导入请求 (列名 = 表头, 类型自动推断, 别名 = sheet 名去重)
+        // ★ v2.6 陛下反馈修复: 之前 [全部Sheet导入] 完全用 BuildAutoRequest 自动推断, 忽略用户的精细编辑 (alias / 列映射 / 类型 / 勾选)
+        //   现在分两条路:
+        //   1. 先 SaveCurrentSheetState() 把当前 sheet 的 UI 编辑 (用户在精细映射 UI 里改的) 存到 _sheetStates
+        //   2. 遍历每个 sheet: _sheetStates 有用户状态 → BuildRequestFromState (尊重用户编辑); 否则 → BuildAutoRequest (自动推断)
+        SaveCurrentSheetState();
+
         var usedAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var results = new List<TempTableImportRequest>(sheets.Count);
+        var editedCount = 0;
         foreach (var sheetName in sheets)
         {
             try
             {
-                var req = BuildAutoRequest(_filePath, sheetName, usedAliases);
+                TempTableImportRequest? req = null;
+                // ★ 优先用用户编辑状态 (用户在精细映射 UI 里改的 alias / 列映射 / 类型 / 勾选)
+                if (_sheetStates.TryGetValue(sheetName, out var state))
+                {
+                    req = BuildRequestFromState(_filePath, sheetName, state, usedAliases);
+                    if (req is not null) editedCount++;
+                }
+                if (req is null)
+                {
+                    // 用户没编辑过这个 sheet, 走自动推断 (列名 = 表头, 类型 = TypeInferrer)
+                    req = BuildAutoRequest(_filePath, sheetName, usedAliases);
+                }
                 if (req is not null) results.Add(req);
             }
             catch { /* 空 sheet / 坏 sheet 静默跳过 */ }
@@ -504,17 +521,101 @@ public partial class ExcelImportForm : Form
             return;
         }
 
-        // 确认摘要
+        // 确认摘要 (★ 标注哪些用了用户编辑, 哪些自动推断, 让陛下看得清)
         var summary = string.Join("\n", results.Select(r =>
-            $"  #{r.Alias}  ←  {r.SheetName}  ({r.RawRows.Count} 行 × {r.Columns.Count} 列)"));
+        {
+            var tag = (_sheetStates.TryGetValue(r.SheetName, out var s) && s.Columns.Count > 0)
+                ? "✓用户编辑" : "自动";
+            return $"  #{r.Alias}  ←  {r.SheetName}  ({r.RawRows.Count} 行 × {r.Columns.Count} 列) [{tag}]";
+        }));
+        var editHint = editedCount > 0 ? $"\n其中 {editedCount} 个用了您在精细映射里的编辑 (alias / 列名 / 类型 / 勾选)\n" : "";
         var confirm = MessageBox.Show(this,
-            $"将导入 {results.Count} 个 Sheet (列名 = Excel 表头, 类型自动推断):\n\n{summary}\n\n点 [是] 确认导入。",
+            $"将导入 {results.Count} 个 Sheet:{editHint}\n{summary}\n\n点 [是] 确认导入。",
             "全部 Sheet 导入", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         if (confirm != DialogResult.Yes) return;
 
         Results = results;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    /// <summary>
+    /// ★ 2026-10-16 v2.6: 从用户编辑状态 (SheetState) 构建导入请求
+    ///   - alias 用 state.Alias (用户改的, 冲突自动加 _2/_3)
+    ///   - 列用 state.Columns (SourceName + TargetName + Type, 尊重 Import 勾选)
+    ///   - 数据用 ReadSheet 读全量 (不依赖 _fullData 字段, 因为当前 _fullData 可能是别的 sheet)
+    ///   - 用于 [全部 Sheet 导入] 里"用户在精细映射 UI 里编辑过的 sheet"路径
+    /// </summary>
+    private static TempTableImportRequest? BuildRequestFromState(
+        string filePath, string sheetName, SheetState state, HashSet<string> usedAliases)
+    {
+        var data = ExcelImporter.ReadSheet(filePath, sheetName, maxRows: 0); // 全量
+        if (data.Rows.Count == 0) return null;
+
+        // alias: 优先 state.Alias (用户改的), 空就回退到 sheet 名 (跟 BuildAutoRequest 行为一致)
+        var baseAlias = string.IsNullOrWhiteSpace(state.Alias)
+            ? SanitizeAlias(sheetName)
+            : state.Alias.Trim();
+        if (string.IsNullOrEmpty(baseAlias)) baseAlias = "SHEET";
+        var alias = baseAlias;
+        int suffix = 2;
+        while (!usedAliases.Add(alias))
+        {
+            alias = $"{baseAlias}_{suffix++}";
+        }
+
+        // 列: 从 state.Columns 里拿, 按 SourceName 在 data 里找索引
+        //   - Import=false 的列跳过 (v2.1 勾选/忽略功能)
+        //   - 找不到 SourceName 的列跳过 (sheet 列结构变了)
+        //   - TargetName 用户没填就回退到 SourceName
+        //   - Type 用户没填就回退到 NVARCHAR
+        var columns = new List<TempTableColumn>();
+        foreach (var colState in state.Columns)
+        {
+            if (!colState.Import) continue; // ★ 用户取消勾选 → 不导入这列
+
+            int origIdx = -1;
+            for (int c = 0; c < data.Columns.Count; c++)
+            {
+                if (string.Equals(data.Columns[c].ColumnName, colState.SourceName, StringComparison.OrdinalIgnoreCase))
+                { origIdx = c; break; }
+            }
+            if (origIdx < 0) continue; // state 里的列在 sheet 里找不到, 跳过
+
+            var tgt = string.IsNullOrWhiteSpace(colState.TargetName) ? colState.SourceName : colState.TargetName.Trim();
+            var type = string.IsNullOrWhiteSpace(colState.Type) ? "NVARCHAR" : colState.Type.Trim().ToUpperInvariant();
+
+            columns.Add(new TempTableColumn
+            {
+                SourceName = colState.SourceName,
+                TargetName = tgt,
+                TypeName = type,
+                OriginalIndex = origIdx
+            });
+        }
+        if (columns.Count == 0) return null; // 全被忽略 / 全找不到, 跳过这个 sheet
+
+        // 全量 RawRows (按用户选定的列顺序)
+        var rawRows = new List<object?[]>(data.Rows.Count);
+        foreach (DataRow row in data.Rows)
+        {
+            var arr = new object?[columns.Count];
+            for (int i = 0; i < columns.Count; i++)
+            {
+                var v = row[columns[i].OriginalIndex];
+                arr[i] = (v is null || v is DBNull) ? null : v.ToString();
+            }
+            rawRows.Add(arr);
+        }
+
+        return new TempTableImportRequest
+        {
+            Alias = alias,
+            SourceFile = filePath,
+            SheetName = sheetName,
+            Columns = columns,
+            RawRows = rawRows
+        };
     }
 
     /// <summary>
