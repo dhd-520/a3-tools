@@ -324,6 +324,16 @@ public static class SqlObjectSchemaCache
             var effectiveSchema = !string.IsNullOrEmpty(schema) ? schema : obj.SchemaName;
             var lazy = LoadColumnsForObject(connectionString, effectiveSchema, objectName, timeoutMs: 3000);
             colsCsv = string.Join(",", lazy);
+            // ★ 2026-10-16 v2.8 修复: 加载完写回 obj.Columns, 避免每次输入停顿都重拉一次
+            //   旧逻辑: colsCsv 是局部变量, 调完就丢 → 同一对象每个字符停顿都触发 LoadColumnsForObject
+            //   Http 代理模式下 LoadColumnsForObject 走直连 (数据库不对外) → 每次等满 3s 超时
+            //   新逻辑: 首次加载后写回缓存, 后续只走缓存 → 首次卡 3s, 后续 0ms
+            //   注意: DbObject 是 record, Columns 是 init-only, 用 with 表达式 + 写回 list
+            if (!string.IsNullOrEmpty(colsCsv))
+            {
+                var idx = entry.Objects.IndexOf(obj);
+                if (idx >= 0) entry.Objects[idx] = obj with { Columns = colsCsv };
+            }
         }
         else if (string.IsNullOrEmpty(colsCsv))
         {
@@ -359,6 +369,25 @@ public static class SqlObjectSchemaCache
         if (string.IsNullOrEmpty(connectionString) || string.IsNullOrEmpty(schemaName) || string.IsNullOrEmpty(objectName))
             return new List<string>();
 
+        // ★ 2026-10-16 v2.8 修复: Http 代理模式下走 IDataAccess (跟 LoadFromDbViaHttpAsync 对称)
+        //   旧逻辑: 不管什么模式都 new SqlConnection(connectionString) 走直连
+        //           Http 代理模式下数据库不对外 → conn.Open() 等满 3s 超时 → 静默返空
+        //           每次输入停顿都重拉 → "卡半天" 假象
+        //   新逻辑: Http 模式走 _dataAccess.ExecuteQueryAsync (异步) + Task.Run + GetAwaiter().GetResult()
+        //           Task.Run 让 continuation 留在 ThreadPool, 不回 UI sync context → 不死锁
+        //           同样 3000ms timeout, 但 Http 代理是快路径 (走 A3ToolsHub 转发), ~50ms 出结果
+        if (_dataAccess != null && _dataAccess.Mode == A3Tools.Common.DataAccess.DataAccessMode.Http)
+        {
+            try
+            {
+                return Task.Run(() => LoadColumnsForObjectViaHttpAsync(schemaName, objectName, timeoutMs)).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
         try
         {
             using var conn = new SqlConnection(connectionString);
@@ -380,6 +409,30 @@ public static class SqlObjectSchemaCache
             //   - 原 LogLoadFailure 调用已删除
             return new List<string>();
         }
+    }
+
+    /// <summary>
+    /// Http 代理模式下通过 IDataAccess 查列名（对称于 LoadFromDbViaHttpAsync 模式：ExecuteQueryAsync(sql) 无参版）
+    /// </summary>
+    private static async Task<List<string>> LoadColumnsForObjectViaHttpAsync(string schemaName, string objectName, int timeoutMs)
+    {
+        // 注意: IDataAccess.ExecuteQueryAsync 签名 = (string sql, CancellationToken ct), 不支持参数化 Dictionary
+        // schema/obj 都来自缓存的 S_OBJECT (已验证存在的对象), 不接受用户输入 → 字符串拼接安全
+        // 同文件 L535 LoadFromDbViaHttpAsync 用的就是这个模式
+        var safeSchema = schemaName.Replace("'", "''");
+        var safeObj = objectName.Replace("'", "''");
+        var sql = $"SELECT c.name FROM sys.columns c INNER JOIN sys.objects o ON c.object_id = o.object_id INNER JOIN sys.schemas s ON o.schema_id = s.schema_id WHERE s.name = '{safeSchema}' AND o.name = '{safeObj}' ORDER BY c.column_id";
+        var result = await _dataAccess!.ExecuteQueryAsync(sql);
+        if (!result.Success || result.Tables.Count == 0) return new List<string>();
+
+        var cols = new List<string>();
+        foreach (var row in result.Tables[0].Rows)
+        {
+            // ★ ResultTable.Rows 是 List<object?[]>, row 是数组 → 用 .Length 不是 .Count
+            if (row.Length > 0 && row[0] != null)
+                cols.Add(row[0].ToString() ?? "");
+        }
+        return cols;
     }
 
     /// <summary>清掉指定 server 下所有库的缓存</summary>
