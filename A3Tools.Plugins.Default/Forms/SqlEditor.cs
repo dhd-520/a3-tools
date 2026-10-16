@@ -166,10 +166,11 @@ public class SqlEditor : RichTextBox
         };
 
         // ★ 2026-09-24 陛下反馈修复联想闪烁: 防抖 800ms
+        // ★ 2026-10-16 v2.7 陛下嫌慢: 800ms → 500ms (VS 风格, 更跟手)
         // 原因: 之前 Interval=50,每次按键立刻触发,输入过程中持续闪烁。
-        // 新行为: 用户停手 800ms 后才触发联想,连续打字期间 timer 反复 Stop+Start 重置倒计时。
+        // 新行为: 用户停手 500ms 后才触发联想,连续打字期间 timer 反复 Stop+Start 重置倒计时。
         // 与 _highlightTimer(200ms 高亮节流) 独立——高亮仍 200ms(为了接近实时的反馈)。
-        _intelliSenseTimer = new System.Windows.Forms.Timer { Interval = 800 };
+        _intelliSenseTimer = new System.Windows.Forms.Timer { Interval = 500 };
         _intelliSenseTimer.Tick += (_, _) =>
         {
             _intelliSenseTimer.Stop();
