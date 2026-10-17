@@ -112,6 +112,9 @@ public class AppSettings
     /// <summary>刷新账套列表快捷键（如 "F5"，为空表示不启用）</summary>
     public string RefreshHotkey { get; set; } = "F5";
 
+    /// <summary>★ 2026-10-17 v2.10 打开 AI 助理对话框快捷键（如 "Ctrl+Shift+A"，为空表示不启用）</summary>
+    public string AiChatHotkey { get; set; } = string.Empty;
+
     // ===== 网页版自动登录选择器（设置中配置）=====
     // ★ 2026-08-14 11:15 臣在 111 账套实测 ERP 登录页(/h5comerp/#/login):
     //   用户名 placeholder = "请输入登录用户名", 密码 input[type="password"],

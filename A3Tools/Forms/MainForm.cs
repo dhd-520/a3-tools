@@ -1160,6 +1160,10 @@ public partial class MainForm : Form, IToolContext
                 case 8:
                     if (tabControl.SelectedTab == tabLaunch) BtnRefresh_Click(null, EventArgs.Empty);
                     break;
+                case 9:
+                    // ★ 2026-10-17 v2.10 打开 AI 助理对话框
+                    MenuAiChat_Click(this, EventArgs.Empty);
+                    break;
             }
         }));
     }

@@ -38,6 +38,9 @@ public partial class HotkeySettingsForm : Form
     private Label lblRefresh = null!;
     private TextBox txtRefreshHotkey = null!;
     private Button btnClearRefresh = null!;
+    private Label lblAiChat = null!;
+    private TextBox txtAiChatHotkey = null!;
+    private Button btnClearAiChat = null!;
     private Button btnOK = null!;
     private Button btnCancel = null!;
 
@@ -49,6 +52,7 @@ public partial class HotkeySettingsForm : Form
     public string ConnectDBHotkey = string.Empty;
     public string RemoteHotkey = string.Empty;
     public string RefreshHotkey = string.Empty;
+    public string AiChatHotkey = string.Empty;
 
     public HotkeySettingsForm()
     {
@@ -68,6 +72,7 @@ public partial class HotkeySettingsForm : Form
         txtConnectDBHotkey.Text = settings.ConnectDBHotkey;
         txtRemoteHotkey.Text = settings.RemoteHotkey;
         txtRefreshHotkey.Text = settings.RefreshHotkey;
+        txtAiChatHotkey.Text = settings.AiChatHotkey;
     }
 
     private void BtnOK_Click(object? sender, EventArgs e)
@@ -80,6 +85,7 @@ public partial class HotkeySettingsForm : Form
         ConnectDBHotkey = txtConnectDBHotkey.Text;
         RemoteHotkey = txtRemoteHotkey.Text;
         RefreshHotkey = txtRefreshHotkey.Text;
+        AiChatHotkey = txtAiChatHotkey.Text;
 
         var dataService = new DataService();
         var settings = dataService.LoadSettings();
@@ -91,6 +97,7 @@ public partial class HotkeySettingsForm : Form
         settings.ConnectDBHotkey = ConnectDBHotkey;
         settings.RemoteHotkey = RemoteHotkey;
         settings.RefreshHotkey = RefreshHotkey;
+        settings.AiChatHotkey = AiChatHotkey;
         dataService.SaveSettings(settings);
         this.DialogResult = DialogResult.OK;
         this.Close();
@@ -118,6 +125,7 @@ public partial class HotkeySettingsForm : Form
         if (sender == btnClearConnectDB) { txtConnectDBHotkey.Text = ""; return; }
         if (sender == btnClearRemote) { txtRemoteHotkey.Text = ""; return; }
         if (sender == btnClearRefresh) { txtRefreshHotkey.Text = ""; return; }
+        if (sender == btnClearAiChat) { txtAiChatHotkey.Text = ""; return; }
     }
 
     private void BottomBar_Resize(object? sender, EventArgs e)

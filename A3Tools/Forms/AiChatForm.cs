@@ -148,6 +148,9 @@ public partial class AiChatForm : Form
         InitializeComponent();
         // ★ 2026-10-17 v2.9: 独立顶级窗口, 不被 MainForm 隐藏影响, 任务栏可找
         this.ShowInTaskbar = true;
+        // ★ 2026-10-17 v2.10: 支持 ESC 关闭快捷键
+        this.KeyPreview = true;
+        this.KeyDown += AiChatForm_KeyDown;
         // ★ 2026-10-09 账套选择：仿工具箱样式（按钮 + 显示标签 + 清空按钮）
         _mainForm = mainForm;
         btnSelectAccount.Click += BtnSelectAccount_Click;
@@ -1740,6 +1743,16 @@ _ = wv2.EnsureCoreWebView2Async();
     }
 
     // ========== 发送消息 ==========
+
+    // ★ 2026-10-17 v2.10: ESC 关闭窗体 (KeyPreview=true 才能捕获, 控件先收到 KeyDown 之前 Form 收到)
+    private void AiChatForm_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Escape)
+        {
+            e.SuppressKeyPress = true;
+            this.Close();
+        }
+    }
 
     private void TxtInput_KeyDown(object? sender, KeyEventArgs e)
     {

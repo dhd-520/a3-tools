@@ -42,6 +42,10 @@ partial class HotkeySettingsForm
         p8 = new Panel();
         txtRefreshHotkey = new TextBox();
         btnClearRefresh = new Button();
+        lblAiChat = new Label();
+        p9 = new Panel();
+        txtAiChatHotkey = new TextBox();
+        btnClearAiChat = new Button();
         bottomBar = new Panel();
         btnOK = new Button();
         btnCancel = new Button();
@@ -55,6 +59,7 @@ partial class HotkeySettingsForm
         p6.SuspendLayout();
         p7.SuspendLayout();
         p8.SuspendLayout();
+        p9.SuspendLayout();
         bottomBar.SuspendLayout();
         SuspendLayout();
         // 
@@ -114,10 +119,13 @@ partial class HotkeySettingsForm
         gridMain.Controls.Add(p7, 1, 7);
         gridMain.Controls.Add(lblRefresh, 0, 8);
         gridMain.Controls.Add(p8, 1, 8);
+        // ★ 2026-10-17 v2.10 陛下要求加 "打开 AI 助理对话框" 快捷键行
+        gridMain.Controls.Add(lblAiChat, 0, 9);
+        gridMain.Controls.Add(p9, 1, 9);
         gridMain.Location = new Point(0, 90);
         gridMain.Name = "gridMain";
         gridMain.Padding = new Padding(20, 10, 20, 0);
-        gridMain.RowCount = 10;
+        gridMain.RowCount = 11;
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
@@ -127,8 +135,12 @@ partial class HotkeySettingsForm
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+        // ★ 2026-10-17 v2.10 第 9 行 (AI 助理快捷键)
+        gridMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
         gridMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         gridMain.Size = new Size(832, 464);
+        // ★ 2026-10-17 v2.10 加新行后内容超出 464 → gridMain 内部自动出竖向滚动条
+        gridMain.AutoScroll = true;
         gridMain.TabIndex = 1;
         // 
         // lblColFunc
@@ -512,6 +524,51 @@ partial class HotkeySettingsForm
         btnClearRefresh.Text = "清除";
         btnClearRefresh.UseVisualStyleBackColor = false;
         btnClearRefresh.Click += BtnClear_Click;
+        //
+        // lblAiChat (★ 2026-10-17 v2.10)
+        //
+        lblAiChat.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblAiChat.Location = new Point(23, 450);
+        lblAiChat.Name = "lblAiChat";
+        lblAiChat.Size = new Size(190, 46);
+        lblAiChat.TabIndex = 18;
+        lblAiChat.Text = "打开 AI 助理快捷键";
+        lblAiChat.TextAlign = ContentAlignment.MiddleLeft;
+        //
+        // p9 (★ 2026-10-17 v2.10)
+        //
+        p9.Controls.Add(txtAiChatHotkey);
+        p9.Controls.Add(btnClearAiChat);
+        p9.Location = new Point(223, 453);
+        p9.Name = "p9";
+        p9.Size = new Size(586, 44);
+        p9.TabIndex = 19;
+        //
+        // txtAiChatHotkey (★ 2026-10-17 v2.10)
+        //
+        txtAiChatHotkey.BackColor = Color.White;
+        txtAiChatHotkey.BorderStyle = BorderStyle.FixedSingle;
+        txtAiChatHotkey.Font = new Font("Consolas", 12F, FontStyle.Regular, GraphicsUnit.Point);
+        txtAiChatHotkey.Location = new Point(0, 7);
+        txtAiChatHotkey.Name = "txtAiChatHotkey";
+        txtAiChatHotkey.ReadOnly = true;
+        txtAiChatHotkey.Size = new Size(410, 40);
+        txtAiChatHotkey.TabIndex = 0;
+        txtAiChatHotkey.KeyDown += TxtBox_KeyDown;
+        //
+        // btnClearAiChat (★ 2026-10-17 v2.10)
+        //
+        btnClearAiChat.BackColor = Color.FromArgb(245, 245, 245);
+        btnClearAiChat.Cursor = Cursors.Hand;
+        btnClearAiChat.FlatStyle = FlatStyle.Flat;
+        btnClearAiChat.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnClearAiChat.Location = new Point(420, 6);
+        btnClearAiChat.Name = "btnClearAiChat";
+        btnClearAiChat.Size = new Size(151, 38);
+        btnClearAiChat.TabIndex = 1;
+        btnClearAiChat.Text = "清除";
+        btnClearAiChat.UseVisualStyleBackColor = false;
+        btnClearAiChat.Click += BtnClear_Click;
         // 
         // bottomBar
         // 
@@ -593,6 +650,8 @@ partial class HotkeySettingsForm
         p7.PerformLayout();
         p8.ResumeLayout(false);
         p8.PerformLayout();
+        p9.ResumeLayout(false);
+        p9.PerformLayout();
         bottomBar.ResumeLayout(false);
         ResumeLayout(false);
     }
@@ -605,4 +664,5 @@ partial class HotkeySettingsForm
     private Panel p6;
     private Panel p7;
     private Panel p8;
+    private Panel p9;
 }
