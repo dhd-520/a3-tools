@@ -3666,10 +3666,10 @@ public partial class MainForm : Form, IToolContext
             if (_aiChatForm == null || _aiChatForm.IsDisposed)
             {
                 // ★ 2026-10-09 传 this 让 AI 助理能调 GetAllAccounts() 拉账套列表
-                _aiChatForm = new AiChatForm(this)
-                {
-                    Owner = this
-                };
+                // ★ 2026-10-17 v2.9 陛下反馈: 主程序隐藏到托盘时 AI 助理也看不见
+                //   根因: Owner=this → WinForms 默认行为: Owner 隐藏 → owned 一起隐藏
+                //   修法: 不设 Owner, AiChatForm 变独立顶级窗口, ShowInTaskbar=true 让陛下任务栏找
+                _aiChatForm = new AiChatForm(this);
             }
             _aiChatForm.Show();
             _aiChatForm.BringToFront();

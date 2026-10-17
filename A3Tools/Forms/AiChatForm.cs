@@ -146,6 +146,8 @@ public partial class AiChatForm : Form
     public AiChatForm(MainForm? mainForm = null)
     {
         InitializeComponent();
+        // ★ 2026-10-17 v2.9: 独立顶级窗口, 不被 MainForm 隐藏影响, 任务栏可找
+        this.ShowInTaskbar = true;
         // ★ 2026-10-09 账套选择：仿工具箱样式（按钮 + 显示标签 + 清空按钮）
         _mainForm = mainForm;
         btnSelectAccount.Click += BtnSelectAccount_Click;
@@ -1856,6 +1858,12 @@ _ = wv2.EnsureCoreWebView2Async();
             // ★ 2026-10-13 增：Skill 流程可视化 1+2 层回调
             //   - load_skill 进入 Skill 模式 → UI 渲染横幅 + 步骤清单
             //   - 后续每次 tool call → UI 推进一步（⏸️→⏳→✅）
+            // ★ 2026-10-17 v2.9 修陛下反馈「第二次触发 skill 步骤不显示」:
+            //   旧逻辑: CoreWebView2 == null → return (静默吞掉)
+            //           第一次 OK 是因为用户输入到 AI load_skill 间隔长, WebView2 init 已完成
+            //           第二次失败是因为连发消息, init 还没完 → 静默 return
+            //   新逻辑: CoreWebView2 == null 时订阅 CoreWebView2InitializationCompleted
+            //           等初始化完再调 JS (不静默 return, 不丢)
             Action<SkillProgressEvent> onSkillProgress = (ev) =>
             {
                 try
@@ -1863,31 +1871,55 @@ _ = wv2.EnsureCoreWebView2Async();
                     var (bubble, isWv2) = FindBubbleForStream(placeholderAi);
                     if (bubble == null || !isWv2) return;
                     if (bubble is not Microsoft.Web.WebView2.WinForms.WebView2 wv2) return;
-                    if (wv2.CoreWebView2 == null) return;
-                    pnlMessagesScroll.InvokeAsync(() =>
+
+                    void DoUpdate()
                     {
-                        // 1) 步骤标题序列化成 JSON 数组喂 JS
-                        var stepTitlesJson = System.Text.Json.JsonSerializer.Serialize(ev.StepTitles ?? new List<string>());
-                        string skillNameJson = System.Text.Json.JsonSerializer.Serialize(ev.SkillName ?? "");
-                        string skillTitleJson = System.Text.Json.JsonSerializer.Serialize(ev.SkillTitle ?? "");
-                        string phaseJson = System.Text.Json.JsonSerializer.Serialize(ev.Phase ?? "");
-                        int curStep = ev.CurrentStepIndex;
-                        // 2) 调 JS：loaded 阶段全量渲染；progress 阶段只更新勾选；aborted/completed 阶段全勾完成
-                        string script =
-                            "window.updateSkillBanner(" +
-                                skillNameJson + "," +
-                                skillTitleJson + "," +
-                                stepTitlesJson + "," +
-                                curStep + "," +
-                                phaseJson +
-                            ");";
-                        _ = wv2.CoreWebView2.ExecuteScriptAsync(script);
-                        // 3) 同步更新 placeholderAi.Content（刷新历史 / 切会话能看）
-                        if (string.IsNullOrEmpty(placeholderAi.Content))
+                        try
                         {
-                            placeholderAi.Content = $"📋 Skill 流程：{ev.SkillName} ({ev.StepTitles?.Count ?? 0} 步)";
+                            // 重新拿一次, 避免闭包到老的 wv2
+                            var (curBubble, _) = FindBubbleForStream(placeholderAi);
+                            if (curBubble is not Microsoft.Web.WebView2.WinForms.WebView2 curWv2 || curWv2.CoreWebView2 == null) return;
+
+                            // 1) 步骤标题序列化成 JSON 数组喂 JS
+                            var stepTitlesJson = System.Text.Json.JsonSerializer.Serialize(ev.StepTitles ?? new List<string>());
+                            string skillNameJson = System.Text.Json.JsonSerializer.Serialize(ev.SkillName ?? "");
+                            string skillTitleJson = System.Text.Json.JsonSerializer.Serialize(ev.SkillTitle ?? "");
+                            string phaseJson = System.Text.Json.JsonSerializer.Serialize(ev.Phase ?? "");
+                            int curStep = ev.CurrentStepIndex;
+                            // 2) 调 JS：loaded 阶段全量渲染；progress 阶段只更新勾选；aborted/completed 阶段全勾完成
+                            string script =
+                                "window.updateSkillBanner(" +
+                                    skillNameJson + "," +
+                                    skillTitleJson + "," +
+                                    stepTitlesJson + "," +
+                                    curStep + "," +
+                                    phaseJson +
+                                ");";
+                            _ = curWv2.CoreWebView2.ExecuteScriptAsync(script);
+                            // 3) 同步更新 placeholderAi.Content（刷新历史 / 切会话能看）
+                            if (string.IsNullOrEmpty(placeholderAi.Content))
+                            {
+                                placeholderAi.Content = $"📋 Skill 流程：{ev.SkillName} ({ev.StepTitles?.Count ?? 0} 步)";
+                            }
                         }
-                    });
+                        catch { /* 可视化失败不影响主流程 */ }
+                    }
+
+                    if (wv2.CoreWebView2 == null)
+                    {
+                        // 等 WebView2 初始化完再调 JS (一次性订阅, 避免重入)
+                        void OnInit(object? s, Microsoft.Web.WebView2.Core.CoreWebView2InitializationCompletedEventArgs e)
+                        {
+                            wv2.CoreWebView2InitializationCompleted -= OnInit;
+                            if (!e.IsSuccess) return;
+                            pnlMessagesScroll.InvokeAsync(DoUpdate);
+                        }
+                        wv2.CoreWebView2InitializationCompleted += OnInit;
+                    }
+                    else
+                    {
+                        pnlMessagesScroll.InvokeAsync(DoUpdate);
+                    }
                 }
                 catch { /* 可视化失败不影响主流程 */ }
             };
