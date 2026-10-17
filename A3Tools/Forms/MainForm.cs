@@ -1128,6 +1128,10 @@ public partial class MainForm : Form, IToolContext
         // 刷新账套列表
         if (!string.IsNullOrEmpty(settings.RefreshHotkey))
             _hotkeyManager.ReregisterHotkey(8, settings.RefreshHotkey);
+
+        // ★ 2026-10-17 v2.10c 打开 AI 助理对话框 (v2.10 commit 漏改 RegisterAllHotkeys, 导致设置保存但 OS 不注册, 按下无反应)
+        if (!string.IsNullOrEmpty(settings.AiChatHotkey))
+            _hotkeyManager.ReregisterHotkey(9, settings.AiChatHotkey);
     }
 
     private void OnHotkeyPressed(object? sender, int hotkeyId)
