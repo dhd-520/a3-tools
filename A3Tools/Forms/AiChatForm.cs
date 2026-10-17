@@ -505,6 +505,9 @@ public partial class AiChatForm : Form
         //   现在 GetSessions() 只返元数据 + GetSessionTail 只解密最后 10 条 ≈ 5ms
         _currentSession.Messages = _store.GetSessionTail(_currentSession.Id, InitialWindowSize);
         RenderMessages();
+        // ★ 2026-10-17 v2.11 历史会话加载 settle: 150ms 后一次性应用所有 wv2 缓存高度
+        //   加载期 ResizeObserver 只 buffer 高度, 不改 wv2.Height, 避免 50 个 wv2 各自触发 reflow 让上方气泡一直抖
+        StartHistorySettle();
     }
 
     private void SwitchProvider()
@@ -618,6 +621,58 @@ public partial class AiChatForm : Form
             try { _scrollChaseTimer.Stop(); } catch { }
             try { _scrollChaseTimer.Dispose(); } catch { }
             _scrollChaseTimer = null;
+        }
+    }
+
+    /// <summary>
+    /// ★ 2026-10-17 v2.11 历史会话加载 settle:
+    ///   150ms 内 wv2 ResizeObserver 全部 fire, handler 只 buffer 高度不应用
+    ///   150ms 后一次性把所有 buffer 高度写到 wv2.Height + 1 次 reflow → 上方气泡不抖
+    ///   对比修复前: 50 个 wv2 各自触发 1 次 reflow = 50 次 FlowLayoutPanel 重排 = 上方一直抖
+    /// </summary>
+    private void StartHistorySettle()
+    {
+        StopHistorySettle();
+        _isLoadingHistory = true;
+        _pendingHistoryHeights.Clear();
+        try
+        {
+            _historySettleTimer = new System.Windows.Forms.Timer { Interval = 150, Enabled = false };
+            _historySettleTimer.Tick += (_, _) =>
+            {
+                try
+                {
+                    // 一次性应用所有缓存高度
+                    foreach (var kv in _pendingHistoryHeights)
+                    {
+                        try { kv.Key.Height = kv.Value; } catch { /* wv2 已 dispose, 静默 */ }
+                    }
+                    _pendingHistoryHeights.Clear();
+                    _isLoadingHistory = false;
+
+                    // 一次性 reflow
+                    flpMessages.ResumeLayout(true);
+                    pnlMessagesScroll.PerformLayout();
+                    JumpToBottom();
+                }
+                catch { /* 静默失败 */ }
+                finally
+                {
+                    StopHistorySettle();
+                }
+            };
+            _historySettleTimer.Start();
+        }
+        catch { /* Timer 启动失败不影响主流程 */ }
+    }
+
+    private void StopHistorySettle()
+    {
+        if (_historySettleTimer != null)
+        {
+            try { _historySettleTimer.Stop(); } catch { }
+            try { _historySettleTimer.Dispose(); } catch { }
+            _historySettleTimer = null;
         }
     }
 
@@ -1164,6 +1219,22 @@ public partial class AiChatForm : Form
                         //   wheel 事件不走这条路径（上面已 return），不影响
                         //   只跳过 height 同步；其他 wv2 的 height 同步仍正常
                         if (ReferenceEquals(wv2, _streamingWebView2)) return;
+                        // ★ 2026-10-17 v2.11 历史会话加载期: 只 buffer 高度, 不改 wv2.Height 避免 reflow
+                        if (_isLoadingHistory)
+                        {
+                            if (doc.RootElement.TryGetProperty("h", out var hPropHist))
+                            {
+                                int realHh = hPropHist.GetInt32();
+                                if (realHh > 0)
+                                {
+                                    int hBodyH = doc.RootElement.TryGetProperty("h_body", out var hbH) ? hbH.GetInt32() : 0;
+                                    int hVisH = doc.RootElement.TryGetProperty("h_visible", out var hvH) ? hvH.GetInt32() : 0;
+                                    int contentHh = hVisH > 0 ? hVisH : (hBodyH > 0 ? hBodyH : realHh);
+                                    _pendingHistoryHeights[wv2] = contentHh + 10;
+                                }
+                            }
+                            return;
+                        }
                         if (!doc.RootElement.TryGetProperty("h", out var hProp)) return;
                         int realH = hProp.GetInt32();
                         if (realH <= 0) return;
@@ -1653,6 +1724,13 @@ _ = wv2.EnsureCoreWebView2Async();
     //   流式结束 setBubbleBodyOnly 后才做 final height sync
     //   仿 ChatGPT/Claude 网页 chat 行为：气泡不晃，只是不停吐字
     private Microsoft.Web.WebView2.WinForms.WebView2? _streamingWebView2 = null;
+
+    // ★ 2026-10-17 v2.11 历史会话加载期: 缓存 wv2 目标高度不直接应用, 避免 FlowLayoutPanel 反复 reflow 导致上方气泡抖动
+    //   症状: 加载历史时最后几条渲染好了, 之前部分一直抖
+    //   修法: 加载期 ResizeObserver 只 buffer 高度, settle Timer 一次性应用 + 1 次 reflow
+    private bool _isLoadingHistory = false;
+    private readonly Dictionary<Microsoft.Web.WebView2.WinForms.WebView2, int> _pendingHistoryHeights = new();
+    private System.Windows.Forms.Timer? _historySettleTimer = null;
     private void SmartScrollToBottom()
     {
         if (!pnlMessagesScroll.IsHandleCreated) return;
