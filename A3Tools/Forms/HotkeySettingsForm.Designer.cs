@@ -142,6 +142,8 @@ partial class HotkeySettingsForm
         // ★ 2026-10-17 v2.10 加新行后内容超出 464 → gridMain 内部自动出竖向滚动条
         gridMain.AutoScroll = true;
         gridMain.TabIndex = 1;
+        // ★ 2026-10-17 v2.10b gridMain 改 Dock=Fill 占满中间 (titleBar 占顶部 / bottomBar 占底部)
+        gridMain.Dock = DockStyle.Fill;
         // 
         // lblColFunc
         // 
@@ -619,9 +621,13 @@ partial class HotkeySettingsForm
         // HotkeySettingsForm
         // 
         AcceptButton = btnOK;
+        AutoScaleDimensions = new SizeF(7F, 15F);
+        AutoScaleMode = AutoScaleMode.Font;
         BackColor = Color.White;
         CancelButton = btnCancel;
-        ClientSize = new Size(864, 644);
+        ClientSize = new Size(864, 700);
+        // ★ 2026-10-17 v2.10b 加新行后内容可能超出 Form 高度 → Form 自身出竖向滚动条
+        AutoScroll = true;
         Controls.Add(bottomBar);
         Controls.Add(gridMain);
         Controls.Add(lblHint);
