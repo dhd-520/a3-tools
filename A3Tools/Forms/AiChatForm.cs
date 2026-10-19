@@ -2919,11 +2919,29 @@ img { max-width: 100%; }
     try {
       var stream = document.getElementById('tools-stream');
       if (!stream) return;
+      // ★ 2026-10-19 v2.19: 流式期也折叠 (陁下退路: 对话中和对话完成都折叠)
+      //   与 BuildToolCardsHtml (历史会话路径) 输出格式完全一致
+      //   保留展开状态: 如果陁下手动展开了, 新工具追加时保持展开
+      var wasOpen = false;
+      var existing = stream.querySelector('details.tools-block');
+      if (existing && existing.open) wasOpen = true;
       stream.innerHTML = '';
-      for (var i = 0; i < window.__appendedToolBlocks.length; i++) {
+      var n = window.__appendedToolBlocks.length;
+      if (n === 0) return;
+      var details = document.createElement('details');
+      details.className = 'tools-block';
+      if (wasOpen) details.open = true;
+      var summary = document.createElement('summary');
+      summary.textContent = '🔧 工具调用 (' + n + ')';
+      details.appendChild(summary);
+      var content = document.createElement('div');
+      content.className = 'tools-content';
+      for (var i = 0; i < n; i++) {
         var blk = window.__appendedToolBlocks[i];
-        stream.appendChild(renderToolCard(blk.name, blk.summary));
+        content.appendChild(renderToolCard(blk.name, blk.summary));
       }
+      details.appendChild(content);
+      stream.appendChild(details);
     } catch (e) {}
   }
   window.openAppendToolBlock = function(name, summary) {
