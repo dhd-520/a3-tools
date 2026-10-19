@@ -2957,32 +2957,15 @@ img { max-width: 100%; }
       stream.appendChild(details);
       notify();
     } catch (e) {}
-// ★ 2026-10-19 v2.16 修陛下反馈「v2_15 也不折叠了」
-  //   教训:
-  //     - 不要包装已有函数 (会被 HTML 模板后续定义覆盖)
-  //     - 不要依赖 body class attribute 变化 (class 可能从未加到 body 上)
-  //   修法: setInterval 200ms 轮询 + 最简单条件
-  //     - 流式期: 持续取消折叠 timer
-  //     - 流式结束: 1.5秒后自动折叠
-  //     - 不包装任何函数, 不依赖 MutationObserver
-  if (!window.__v216FoldChecker) {
-      window.__v216FoldTimer = null;
-      window.__v216FoldChecker = setInterval(function() {
-          if (document.body.classList.contains('streaming-mode')) {
-              if (window.__v216FoldTimer) {
-                  clearTimeout(window.__v216FoldTimer);
-                  window.__v216FoldTimer = null;
-              }
-              return;
-          }
-          if (!window.__v216FoldTimer) {
-              window.__v216FoldTimer = setTimeout(function() {
-                  window.foldToolStream();
-                  window.__v216FoldTimer = null;
-              }, 1500);
-          }
-      }, 200);
-  }
+  };  // ★ 2026-10-19 v2.17 修陛下反馈「v2.16 误删 foldToolStream 的 }; 导致历史会话加载不出来 + v2.16 setInterval 跟 v2.14 一样有 bug 撤掉」
+  //   紧急诊断: v2.16 删除范围 145892-147949 把 foldToolStream 函数的 }; 一起删了
+  //             -> wv2 加载 HTML 模板时 JS 解析失败 -> setBubbleBodyOnly 等函数不存在
+  //             -> C# 调 setBubbleBodyOnly 失败 -> 历史会话气泡内容渲染不出来
+  //   v2.17 修法:
+  //     1. 补 foldToolStream 的 }; 闭合 (上面那行)
+  //     2. 删除 v2.16 整个 setInterval 块 (流式期前 1.5秒误折叠 bug 跟 v2.14 一样)
+  //     3. 保留 v2.13 C# 触发点 (L2280) 修 if 块限制 - 由 C# 端扩 if 块条件
+
   // ★ 2026-10-13 增：Skill 流程可视化（1+2 层）
   //   C# 端在 load_skill 时调一次（phase='loaded' 渲染横幅 + 步骤清单）
   //   后续每次 tool call 调一次（phase='progress' 推进 ⏸️→⏳→✅）
