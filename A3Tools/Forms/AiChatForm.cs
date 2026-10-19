@@ -2957,47 +2957,38 @@ img { max-width: 100%; }
       stream.appendChild(details);
       notify();
     } catch (e) {}
-  };  // ★ 2026-10-19 v2.14 修陛下反馈「v2.13 foldToolStream 没生效, 工具还是一条一条放到最后没折叠」
-  //   v2.13 根因: 依赖 C# setBubbleBodyOnly 之后调 foldToolStream, 但陛下测试时
-  //             (1) 可能没重启应用 (v2.12 编译的 A3Tools.exe 没 foldToolStream 函数)
-  //             (2) 或者触发点 if (isWv2 && bubble is WebView2 wv2End) 没进 (气泡找不到)
-  //             (3) 或者 RenderMessages() fallback 路径提前 return 绕过 v2.13
-  //   v2.14 修法: 不依赖 C# 触发, JS 端自动检测流式结束 + 1 秒静默期自动折叠
-  //     - openAppendToolBlock 时记录 __lastToolAppendTime (每次重置计时器)
-  //     - appendStreamingText 时记录 __lastStreamChunkTime (流式进行中)
-  //     - 启动一个全局 __autoFoldChecker (200ms tick)
-  //     - 检测条件: 距 __lastToolAppendTime 1秒 + 距 __lastStreamChunkTime 1秒 + 没 streaming-mode class
-  //     - 满足则调 foldToolStream (幂等, 已折叠则跳过)
-  window.__lastToolAppendTime = 0;
-  window.__lastStreamChunkTime = 0;
-  if (!window.__autoFoldChecker) {
-      window.__autoFoldChecker = setInterval(function() {
-          try {
-              var now = Date.now();
-              var stream = document.getElementById('tools-stream');
-              if (!stream) return;
-              if (stream.querySelector('.tools-block')) return;  // 已折叠
-              if (stream.querySelectorAll('.tool-call-card').length === 0) return;  // 无工具
-              if (now - window.__lastToolAppendTime < 1000) return;  // 1秒内还有新工具
-              if (now - window.__lastStreamChunkTime < 1000) return;  // 1秒内还有流式 chunk
-              if (document.body.classList.contains('streaming-mode')) return;  // 流式还没结束
-              // ★ 满足所有条件: 工具流式都已结束, 1秒静默期已过, 自动折叠
-              window.foldToolStream();
-          } catch (e) {}
-      }, 200);
+  };  // ★ 2026-10-19 v2.15 修陛下反馈「v2.14 改过度, 思考过程中也折叠了」
+  //   v2.14 根因: 包装了 appendStreamingText 来更新 __lastStreamChunkTime, 但
+  //             包装位置 (L2963 foldToolStream 之后) 早于 appendStreamingText 定义 (L3059 之后)
+  //             包装时 window.appendStreamingStream === undefined, _origAppendStream = undefined
+  //             后续 HTML 模板 window.appendStreamingStream = function(...) 直接覆盖 v2.14 包装
+  //             -> __lastStreamChunkTime 永远是初始 0, now - 0 远大于 1秒 -> 流式 chunk 条件永远满足
+  //             -> 配合陛下测试时 streaming-mode class 某种原因被移除 -> 触发折叠
+  //   v2.15 修法: 改用 MutationObserver 监听 body.classList 变化
+  //     - 只在 streaming-mode class 刚被移除时折叠 (流式结束的权威标记)
+  //     - 不依赖任何函数包装 (彻底避开时序问题)
+  //     - 500ms 延迟让 setBubbleBodyOnly 内部 RAF 链完成 (避免 foldToolStream 与 notify 抢锁)
+  //     - 流式期 class 还在 -> observer 触发但条件不满足 -> 不折叠 (思考过程保持展开)
+  //     - 流式结束 setBubbleBodyOnly 移除 class -> observer 触发 -> 500ms 后折叠
+  if (window.__v215FoldObserver) {
+      // already initialized, no-op
+  } else {
+      window.__v215FoldObserver = new MutationObserver(function(mutations) {
+          for (var i = 0; i < mutations.length; i++) {
+              var m = mutations[i];
+              if (m.attributeName === 'class') {
+                  if (!document.body.classList.contains('streaming-mode')) {
+                      setTimeout(function() {
+                          if (!document.body.classList.contains('streaming-mode')) {
+                              window.foldToolStream();
+                          }
+                      }, 500);
+                  }
+              }
+          }
+      });
+      window.__v215FoldObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
   }
-  // ★ 包装 openAppendToolBlock: 记录工具追加时间
-  var _origOpenAppend = window.openAppendToolBlock;
-  window.openAppendToolBlock = function(name, summary) {
-      window.__lastToolAppendTime = Date.now();
-      return _origOpenAppend(name, summary);
-  };
-  // ★ 包装 appendStreamingText: 记录流式 chunk 时间
-  var _origAppendStream = window.appendStreamingText;
-  window.appendStreamingText = function(text) {
-      window.__lastStreamChunkTime = Date.now();
-      return _origAppendStream(text);
-  };
 
 
   // ★ 2026-10-13 增：Skill 流程可视化（1+2 层）
