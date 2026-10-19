@@ -2957,40 +2957,32 @@ img { max-width: 100%; }
       stream.appendChild(details);
       notify();
     } catch (e) {}
-  };  // ★ 2026-10-19 v2.15 修陛下反馈「v2.14 改过度, 思考过程中也折叠了」
-  //   v2.14 根因: 包装了 appendStreamingText 来更新 __lastStreamChunkTime, 但
-  //             包装位置 (L2963 foldToolStream 之后) 早于 appendStreamingText 定义 (L3059 之后)
-  //             包装时 window.appendStreamingStream === undefined, _origAppendStream = undefined
-  //             后续 HTML 模板 window.appendStreamingStream = function(...) 直接覆盖 v2.14 包装
-  //             -> __lastStreamChunkTime 永远是初始 0, now - 0 远大于 1秒 -> 流式 chunk 条件永远满足
-  //             -> 配合陛下测试时 streaming-mode class 某种原因被移除 -> 触发折叠
-  //   v2.15 修法: 改用 MutationObserver 监听 body.classList 变化
-  //     - 只在 streaming-mode class 刚被移除时折叠 (流式结束的权威标记)
-  //     - 不依赖任何函数包装 (彻底避开时序问题)
-  //     - 500ms 延迟让 setBubbleBodyOnly 内部 RAF 链完成 (避免 foldToolStream 与 notify 抢锁)
-  //     - 流式期 class 还在 -> observer 触发但条件不满足 -> 不折叠 (思考过程保持展开)
-  //     - 流式结束 setBubbleBodyOnly 移除 class -> observer 触发 -> 500ms 后折叠
-  if (window.__v215FoldObserver) {
-      // already initialized, no-op
-  } else {
-      window.__v215FoldObserver = new MutationObserver(function(mutations) {
-          for (var i = 0; i < mutations.length; i++) {
-              var m = mutations[i];
-              if (m.attributeName === 'class') {
-                  if (!document.body.classList.contains('streaming-mode')) {
-                      setTimeout(function() {
-                          if (!document.body.classList.contains('streaming-mode')) {
-                              window.foldToolStream();
-                          }
-                      }, 500);
-                  }
+// ★ 2026-10-19 v2.16 修陛下反馈「v2_15 也不折叠了」
+  //   教训:
+  //     - 不要包装已有函数 (会被 HTML 模板后续定义覆盖)
+  //     - 不要依赖 body class attribute 变化 (class 可能从未加到 body 上)
+  //   修法: setInterval 200ms 轮询 + 最简单条件
+  //     - 流式期: 持续取消折叠 timer
+  //     - 流式结束: 1.5秒后自动折叠
+  //     - 不包装任何函数, 不依赖 MutationObserver
+  if (!window.__v216FoldChecker) {
+      window.__v216FoldTimer = null;
+      window.__v216FoldChecker = setInterval(function() {
+          if (document.body.classList.contains('streaming-mode')) {
+              if (window.__v216FoldTimer) {
+                  clearTimeout(window.__v216FoldTimer);
+                  window.__v216FoldTimer = null;
               }
+              return;
           }
-      });
-      window.__v215FoldObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+          if (!window.__v216FoldTimer) {
+              window.__v216FoldTimer = setTimeout(function() {
+                  window.foldToolStream();
+                  window.__v216FoldTimer = null;
+              }, 1500);
+          }
+      }, 200);
   }
-
-
   // ★ 2026-10-13 增：Skill 流程可视化（1+2 层）
   //   C# 端在 load_skill 时调一次（phase='loaded' 渲染横幅 + 步骤清单）
   //   后续每次 tool call 调一次（phase='progress' 推进 ⏸️→⏳→✅）
