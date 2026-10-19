@@ -3100,7 +3100,11 @@ img { max-width: 100%; }
       //     notify() 在第 2 帧末尾调 → C# ResizeObserver 拿稳定后高度 → 一次到位
       //     避免 wv2 多次重排 / FlowLayoutPanel 跳变
       try { document.body.classList.remove('streaming-mode'); } catch (e) {}
-      requestAnimationFrame(function() {
+
+        // ★ 2026-10-19 v2.18: 流式结束自动折叠工具调用 (300ms 延輯补链完成)
+        //   不依赖 C# 触发点 (v2.13 if 块不总进) + 不依赖 setInterval/MutationObserver
+        //   setBubbleBodyOnly 是流式结束的唯一信号, 在这里 hook 折叠 = 所有路径都触发
+        setTimeout(function() { window.foldToolStream(); }, 300);      requestAnimationFrame(function() {
         requestAnimationFrame(function() {
           notify();
         });
