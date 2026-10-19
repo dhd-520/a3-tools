@@ -2957,7 +2957,48 @@ img { max-width: 100%; }
       stream.appendChild(details);
       notify();
     } catch (e) {}
+  };  // ★ 2026-10-19 v2.14 修陛下反馈「v2.13 foldToolStream 没生效, 工具还是一条一条放到最后没折叠」
+  //   v2.13 根因: 依赖 C# setBubbleBodyOnly 之后调 foldToolStream, 但陛下测试时
+  //             (1) 可能没重启应用 (v2.12 编译的 A3Tools.exe 没 foldToolStream 函数)
+  //             (2) 或者触发点 if (isWv2 && bubble is WebView2 wv2End) 没进 (气泡找不到)
+  //             (3) 或者 RenderMessages() fallback 路径提前 return 绕过 v2.13
+  //   v2.14 修法: 不依赖 C# 触发, JS 端自动检测流式结束 + 1 秒静默期自动折叠
+  //     - openAppendToolBlock 时记录 __lastToolAppendTime (每次重置计时器)
+  //     - appendStreamingText 时记录 __lastStreamChunkTime (流式进行中)
+  //     - 启动一个全局 __autoFoldChecker (200ms tick)
+  //     - 检测条件: 距 __lastToolAppendTime 1秒 + 距 __lastStreamChunkTime 1秒 + 没 streaming-mode class
+  //     - 满足则调 foldToolStream (幂等, 已折叠则跳过)
+  window.__lastToolAppendTime = 0;
+  window.__lastStreamChunkTime = 0;
+  if (!window.__autoFoldChecker) {
+      window.__autoFoldChecker = setInterval(function() {
+          try {
+              var now = Date.now();
+              var stream = document.getElementById('tools-stream');
+              if (!stream) return;
+              if (stream.querySelector('.tools-block')) return;  // 已折叠
+              if (stream.querySelectorAll('.tool-call-card').length === 0) return;  // 无工具
+              if (now - window.__lastToolAppendTime < 1000) return;  // 1秒内还有新工具
+              if (now - window.__lastStreamChunkTime < 1000) return;  // 1秒内还有流式 chunk
+              if (document.body.classList.contains('streaming-mode')) return;  // 流式还没结束
+              // ★ 满足所有条件: 工具流式都已结束, 1秒静默期已过, 自动折叠
+              window.foldToolStream();
+          } catch (e) {}
+      }, 200);
+  }
+  // ★ 包装 openAppendToolBlock: 记录工具追加时间
+  var _origOpenAppend = window.openAppendToolBlock;
+  window.openAppendToolBlock = function(name, summary) {
+      window.__lastToolAppendTime = Date.now();
+      return _origOpenAppend(name, summary);
   };
+  // ★ 包装 appendStreamingText: 记录流式 chunk 时间
+  var _origAppendStream = window.appendStreamingText;
+  window.appendStreamingText = function(text) {
+      window.__lastStreamChunkTime = Date.now();
+      return _origAppendStream(text);
+  };
+
 
   // ★ 2026-10-13 增：Skill 流程可视化（1+2 层）
   //   C# 端在 load_skill 时调一次（phase='loaded' 渲染横幅 + 步骤清单）
