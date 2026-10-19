@@ -1941,6 +1941,14 @@ _ = wv2.EnsureCoreWebView2Async();
                         string script = "window.openAppendToolBlock(" + nameJson + "," + summaryJson + ");";
                         _ = wv2.CoreWebView2.ExecuteScriptAsync(script);
                     }
+                    // ★ 2026-10-19 v2.12 修陛下反馈「关掉重开历史会话工具调用看不到了」
+                    //   之前 onToolExecuted 只写 placeholderAi.Content 字符串 + JS 端追加卡片
+                    //   placeholderAi.ToolCalls 字段从未被赋值 → 关掉重开从 disk load 时 msg.ToolCalls=null
+                    //   BuildToolCardsHtml(msg.ToolCalls) 返回 empty string → 历史会话渲染空 tools-stream
+                    //   修法: 每次工具完成都同步 toolCallLog 到 placeholderAi.ToolCalls (复制避免引用被后续清空)
+                    //   这样 LocalChatStore.WriteMessagesFile 序列化时会把 ToolCalls 写进 messages/{id}.json
+                    //   历史会话 LoadSelectedSession 时 BuildToolCardsHtml 走折叠详情输出 (v2.12 同时改)
+                    placeholderAi.ToolCalls = new List<ChatToolCallRecord>(toolCallLog);
                     ScrollToBottom();
                 });
                 return true;
@@ -2693,6 +2701,38 @@ img { max-width: 100%; }
   max-height: 400px;
   overflow-y: auto;
 }
+/* ★ 2026-10-19 v2.12 工具调用折叠块: 仿 thinking-block 样式, 默认 collapsed, 点击 summary 展开
+   蓝色主题跟 tool-call-card 背景色 (#f0f7ff) 配套 */
+.tools-block {
+  margin: 0 0 14px 0;
+  border: 1px solid #b6dcfb;
+  border-radius: 8px;
+  background: #f0f7ff;
+  font-size: 20px;
+  line-height: 30px;
+  overflow: hidden;
+}
+.tools-block > summary {
+  padding: 8px 14px;
+  cursor: pointer;
+  color: #0969da;
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+  border-bottom: 1px solid transparent;
+}
+.tools-block > summary::-webkit-details-marker { display: none; }
+.tools-block > summary::before {
+  content: ""▶"";
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 14px;
+  transition: transform 0.15s;
+}
+.tools-block[open] > summary::before { transform: rotate(90deg); }
+.tools-block > summary:hover { background: #e1ecf7; }
+.tools-block[open] > summary { border-bottom-color: #b6dcfb; }
+.tools-content { padding: 10px 14px; }
 /* ★ 2026-10-13 增：Skill 流程可视化横幅（1+2 层）
    需求：AI 调 load_skill 后，在气泡顶部显示 Skill 模式 + 步骤清单
    - skill-banner：横幅本体，橙色背景，醒目提示在走 Skill 流程
@@ -3133,6 +3173,10 @@ img { max-width: 100%; }
     {
         if (toolCalls == null || toolCalls.Count == 0) return string.Empty;
         var sb = new StringBuilder();
+        // ★ 2026-10-19 v2.12 仿 thinking-block 折叠: 工具调用整体包到 <details class="tools-block"> 默认 collapsed
+        //   陛下要求: AI 助力工具部分能像思考模式一样折叠, 默认收起, 可手动展开, 历史会话也要体现
+        //   summary 显示数量 (N) → 陛下一眼看到调了几个工具, 不用展开也知道
+        sb.Append("<details class=\"tools-block\"><summary>🔧 工具调用 (").Append(toolCalls.Count).Append(")</summary><div class=\"tools-content\">");
         foreach (var tc in toolCalls)
         {
             string name = System.Net.WebUtility.HtmlEncode(tc.ToolName ?? string.Empty);
@@ -3143,6 +3187,7 @@ img { max-width: 100%; }
             sb.Append("<div style=\"white-space:pre-wrap;\">").Append(summary).Append("</div>");
             sb.Append("</div>");
         }
+        sb.Append("</div></details>");
         return sb.ToString();
     }
 
