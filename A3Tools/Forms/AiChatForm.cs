@@ -2271,6 +2271,14 @@ _ = wv2.EnsureCoreWebView2Async();
                     string escapedEnd = System.Text.Json.JsonSerializer.Serialize(htmlEnd);
                     string jsEnd = "window.setBubbleBodyOnly(" + escapedEnd + ");";
                     _ = wv2End.CoreWebView2.ExecuteScriptAsync(jsEnd);
+                    // ★ 2026-10-19 v2.13 陛下要求：输出过程中一条一条显示，对话完成时工具部分默认折叠，需要看再手动展开
+                    //   setBubbleBodyOnly 替换 bubble-body 为完整 markdown
+                    //   紧跟 foldToolStream 把 tools-stream 现有卡片包到 details 默认 collapsed
+                    //   流式期 openAppendToolBlock 仍一条一条追加 (不折叠)，陛下能实时看到
+                    //   对话完成瞬间一次性折叠 → 最终聊天框默认收起，需查看手动展开
+                    //   历史会话路径由 BuildToolCardsHtml v2.12 已输出 details，三态视觉一致
+                    _ = wv2End.CoreWebView2.ExecuteScriptAsync("window.foldToolStream();");
+
                 });
             }
         }
@@ -2924,7 +2932,33 @@ img { max-width: 100%; }
       rerenderToolStream();
       notify();  // 高度变化推回 C#
     } catch (e) {}
+  };  // ★ 2026-10-19 v2.13 陛下要求：输出过程中一条一条显示，对话完成时工具部分默认折叠，需要看再手动展开
+  //   流式期 openAppendToolBlock 一条一条追加 tool-card → 保持展开 (不折叠)
+  //   对话完成时 (C# 调 setBubbleBodyOnly 之后) 调 foldToolStream 一次性包到 details 折叠块
+  //   与 BuildToolCardsHtml (历史会话路径) 输出格式完全一致，三态视觉统一
+  window.foldToolStream = function() {
+    try {
+      var stream = document.getElementById('tools-stream');
+      if (!stream) return;
+      if (stream.querySelector('.tools-block')) return;
+      var cards = stream.querySelectorAll('.tool-call-card');
+      if (cards.length === 0) return;
+      var details = document.createElement('details');
+      details.className = 'tools-block';
+      var summaryEl = document.createElement('summary');
+      summaryEl.textContent = '🔧 工具调用 (' + cards.length + ')';
+      details.appendChild(summaryEl);
+      var content = document.createElement('div');
+      content.className = 'tools-content';
+      while (stream.firstChild) {
+        content.appendChild(stream.firstChild);
+      }
+      details.appendChild(content);
+      stream.appendChild(details);
+      notify();
+    } catch (e) {}
   };
+
   // ★ 2026-10-13 增：Skill 流程可视化（1+2 层）
   //   C# 端在 load_skill 时调一次（phase='loaded' 渲染横幅 + 步骤清单）
   //   后续每次 tool call 调一次（phase='progress' 推进 ⏸️→⏳→✅）
