@@ -85,3 +85,158 @@
   3. **任何"原子操作"必须 commit**——之前 Step 5 改 csproj 不 commit 是大坑,Step 5.5 强制 commit
   4. **Gitee release API 行为诡异**: tag 已存在时会"自动创建"一个指向 target_commitish 分支 HEAD 的新 tag object,但实际用的是 A3ToolsRelease 仓库(发布仓库)而非 origin(源码仓库)的 master HEAD——如果发布仓库 master 落后源码仓库 master,tag 指向就错了。Step 8.5 强制验证可破
 - **下次发版**: 直接 `.\scripts\release.ps1 -Version "2.4.6" -ReleaseNotes "...中文..."` 一键搞定
+
+### 2026-10-22 新增「A3密文解密」工具 + WinForms Anchor 括号坑
+
+- **新增工具**: `A3DesDecryptTool`（分类「辅助」），注册在 `A3Tools/Plugins/tools.json`
+- **涉及文件**: `A3Tools.Common/Services/A3DesCrypto.cs`、`A3Tools.Plugins.Default/Forms/A3DesDecryptForm.cs(.Designer.cs)`、`DefaultTools.cs`、`tools.json`
+- **A3 客户端密文算法**（实测推导，非 3DES！）：
+  - 实际是 **DES / CBC / PKCS7**（不是 TripleDES），类为 `A3.Common.Util.A3DESEncrypt`，内部用 `DESCryptoServiceProvider`
+  - Key = `Convert.FromBase64String(A3DESEncrypt.CKey)` → 8 字节，CKey = `jkHuIy9D/9i=`
+  - IV  = `Base64Decode(A3DESEncrypt.CIV)` 后**取前 8 字节**，CIV = `Mi9l/+7Zujhy12se6Yjy111A`（解码后 18 字节）
+  - `GeneralKeyIV()` 方法返回的是**每次随机生成**的新 key/iv，不能用于解密既有密文，别被它误导
+  - 与工具箱自身的 `EncryptionService`（机器名+用户名 SHA256 派生的 AES-256）**完全无关**，两套并存
+- **⚠️ WinForms Anchor 括号坑（重要）**：设计器 4 向 Anchor 的标准写法是 **`((AnchorStyles)(((A|B) | C | D)))` —— 三个左括号**
+  - 手写漏掉第三个 `(` → 括号不配对 → 编译器报 `CS1002 应输入 ;` / `CS1513 应输入 }`
+  - **报错行号会飘到下一行**，且报错列号超出那行实际长度，极易误判成「编码乱码」而白折腾
+  - 教训：先数括号再怀疑编码。排查顺序 = ①行号列号对不上文件内容 → ②先怀疑语法不是编码 → ③再查 BOM
+- **PowerShell 冒烟测试 net7 程序集**：WinPS 5.1（.NET Framework）**加载不了 net7.0 DLL**，`Assembly.LoadFrom` 不报错但 `GetType` 返回 null，别误判成「类型没编进去」。要测就建 net7.0-windows 控制台工程用 `dotnet run`
+- **PowerShell 脚本铁律**（本轮又踩）：脚本文件内**禁止任何非 ASCII 字符**（含注释和路径）——PS 5.1 按 GBK 读，乱码后 `-EA 0` 静默扫不到文件；路径用 `Join-Path` + 动态枚举，输出路径用 `$env:TEMP`
+- **元数据字符串扫描**：类型/命名空间名在元数据里可被 UTF-8 扫到，但**字符串字面量在 `#US` 堆是 UTF-16**，扫不到不等于没编进去
+- **冒烟测试工程**: `D:\Temp\a3smoke`（含正例 2 条 + 反例 4 条，可复用回归）
+
+### 2026-10-24 AI 启动账套「任意组合启动」改造（4 个叠加 bug）
+
+- **需求**：陛下反馈「AI 助理启动 A3 账套时没法根据参数单独启动客户端或开发工具，现在启动就是客户端和H5web端一起启动，开发工具还启动不了」
+- **新增**: `A3Tools.Common/Models/LaunchTargetSpec.cs`（namespace `A3Tools.Models`）
+  - 4 个独立开关：`LaunchDesktop` / `LaunchDevTools` / `LaunchErp` / `LaunchWechatWork`
+  - `TryParse(raw, out spec, out error)`：token **精确匹配**（不是 Contains），支持 `+ , ; / |` 和空白分隔，忽略大小写，支持中文别名（客户端/开发工具/网页/企业微信）
+  - `TryParseTokens(IEnumerable<string>)`：AI 传数组时用
+  - `ToCanonicalString()`：规范化往返（AI 侧校验后交给 MainForm，避免两处解析规则漂移）
+  - `Default` = client+erp（与旧行为一致，不让存量用法突变）
+- **改**: `MainForm._LaunchAccountInternal` 的 `forceTarget`(string) → `forceSpec`(LaunchTargetSpec?)，**四个开关全量覆盖** settings
+- **改**: `MainForm.LaunchAccountByCode(code, target)`；`StartAccountAction` 加 `target` 参数（string/array 都支持，`ReadTargetArgument`）
+- **改**: `AiChatForm` 提示词教模型「只启客户端」「加上开发工具」等场景必须传 target
+- **⚠️ 这次的 4 个真 bug（都是字符串 Contains 判断惹的祸）**：
+  1. **forceTarget 只写 `settings.LaunchWeb`（死字段！）** —— 启动逻辑真正读的是 `LaunchErp` / `LaunchWechatWork` → **AI 无论指定什么，H5web 都跟着启**（陛下反馈的根因）
+  2. `forceTarget.Contains("all")` 被当成客户端判断 → **"all" 不含 "client" → 「全启」反而把客户端关掉**
+  3. `Contains` 是子串匹配，"devtools" 里也含 "dev"，歧义多
+  4. devtools exe 不存在时**静默跳过**（`if (File.Exists(exe2))` 无 else）→ 陛下只看到「没反应」。现已加明确 toast
+- **⚠️ 设置项「部分覆盖」是万恶之源**：只改其中几个开关、其余留旧值 → 行为不可预测。**要么全量覆盖，要么别动**
+- **⚠️ `AppSettings.LaunchWeb` 是历史死字段**（等价 LaunchErp），启动逻辑不读它。以后新增启动开关**必须接到真正被读的字段上**
+- **⚠️ AI 工具参数要有 enum 提示**：schema 里 `@enum = new[] { "client", "devtools", ... }` 让模型知道合法值；非法值**把错误回传给 AI**（`AiActionResult.Fail`）让它自我纠正，而不是静默启动错的东西
+- **⚠️ 编程时不要用 `Contains` 解析命令式字符串**：token 精确匹配 + 显式错误回传，可测性天差地别
+- **单元测试工程**: `D:\Temp\a3launchtest`（38 项全 PASS：单组件/组合/分隔符/中文别名/非法输入/none/Default/规范化往返/数组形式/旧 bug 回归）
+- **部署提示**: 实际运行的实例在 `D:\Work\工具\A3工具箱更新\`（单文件发布），源码 `bin\Debug` 那份的 `DATA\settings.json` 是另一套（AppDirectory 指向 `D:\A3\未升级A3`）。**改完要发布过去才生效**
+- **⚠️ `D:\A3\未升级A3\` 目录下没有 `君则a3集成开发工具.exe`**（只有 `D:\A3\君则A3\` 有），所以设置指向它时开发工具永远起不来
+- **⚠️ A3 进程名大小写不一致**：exe 实际叫 `君则a3集成开发工具.exe`（小写 a），而代码里常量写 `君则A3集成开发工具`（大写 A）—— Windows 不敏感所以能跑，但别照着常量名去猜磁盘文件名
+
+### 2026-10-24 AI 对话框「工具调用显示具体内容」+ execute_sql 安全补洞
+
+- **需求**：陛下要求 AI 助理对话框里调用工具要显示具体内容、可折叠（如 execute_sql 要看到实际执行的 SQL），并检查该工具是不是不能执行 INSERT
+- **★ 关键发现：`ChatToolCallRecord.ArgumentsJson` 字段早就一直在记录工具入参**，只是渲染时只画了 `ToolName` + `Result.Summary`，参数被整个丢掉 → **不用改后端，改渲染即可**
+- **改 `A3Tools/Forms/AiChatForm.cs`（实时流 + 历史回看两条路径都要改，否则视觉不一致）**：
+  - CSS 新增 `.tool-args-block` / `.tool-args-content` / `.tool-args-label` / `.tool-sql` / `.tool-args-json`（仿 thinking-block，默认收起）
+  - JS 新增 `buildToolArgsHtml(argsJson)`：`sql` 字段单独提出来放「实际执行的 SQL：」块，其余参数格式化后放「其他参数：」块
+  - JS `renderToolCard(name, summary, argsJson)` / `openAppendToolBlock(name, summary, argsJson)` / `rerenderToolStream` 全部加 argsJson 透传
+  - C# 新增 `BuildToolArgsHtml(string?)` 静态方法（历史回看路径，与 JS 端输出同款）
+  - C# `onToolExecuted` 把 `toolCallLog.Last().ArgumentsJson` 一并推给前端
+  - **★ 顺手修的显示盲区**：`onToolExecuted` 原来第一行是 `if (!result.Success) return true;` → **失败的工具调用根本没有卡片**，陛下只看到 AI 说「查询失败」，看不到它到底试了什么 SQL。已改成失败也出卡片（`AiActionResult.Fail` 会把错误填进 `Summary`，数据是有的）
+- **★ SQL 安全补洞（反射实测发现的 3 个真绕过）**：
+  - `SELECT * INTO newTbl FROM t` → 建表 = 写操作，但「INTO」不在黑名单、语句以 SELECT 开头 → **直接通过检查**。已把 `INTO` 加入黑名单
+  - `SELECT * FROM OPENROWSET(...)` / `OPENDATASOURCE(...)` → 跨库跨服务器外联（横向移动 + 数据外泄）→ 已加入黑名单（另加 `OPENQUERY`）
+  - `SELECT * FROM sp_executesql` → **这是在执行存储过程而不是查表**（T-SQL 特性：`FROM` 后面跟过程名即调用）→ 已加正则 `\bFROM\s+(?:\[?[\w\-#]+\]?\s*\.\s*)?\[?(?:SP|XP)_[\w\-#]*\]?` 拦截
+  - **结论：execute_sql 本来就【不能】执行 INSERT** —— 双重拦截：黑名单 `\bINSERT\b`（词边界，不误伤 UPDATED_AT）+ 白名单必须以 SELECT/WITH/SHOW/DESCRIBE/DESC/EXPLAIN 开头
+  - `execute_ddl` 也拦 INSERT/UPDATE/DELETE/EXEC/MERGE（只放 CREATE/ALTER/DROP/TRUNCATE），所以**当前没有任何工具能写业务数据**
+- **★ 测试断言写错的自坑**（自己踩的）：断言输出里含 `"code"` 裸引号，实际输出是 `&quot;code&quot;`（HTML 编码后才安全）→ 断言要按编码后的形态写
+- **★ 提取 AI 气泡 HTML/JS 做 node --check 验证**（好办法，值得复用）：
+  - 脚本 `C:\Users\林宝宝\.openclaw\workspace\a3_decrypt\extract_ui_js.ps1`
+  - **⚠️ 结束判定不能用「行尾是 `";`」** —— CSS 里 `content: ""▶"";` 这行也以 `";` 结尾，会误命中导致只截到 4KB。正确做法：**锚定 `</html>`**
+  - C# verbatim 字符串 `@"..."` 里 `""` = 字面量 `"`；取出来要 `.Replace('""','"')` 还原；非插值 verbatim 里 `{` `}` 无需转义
+  - 提取后 `node --check` 验证 JS 语法（exit 0 才算过）—— 比肉眼 review 靠谱
+- **⚠️ 写 JS 嵌在 C# verbatim 字符串里**：JS 里的双引号必须写成 `""`，单引号 `'...'` 可直接用（写 JS 优先用单引号，能少一半转义坑）
+- **测试工程**: `D:\Temp\a3sqltest`（49 项：SQL 安全 41 + 参数渲染 8）
+
+### 2026-10-25 execute_sql 开放 INSERT 权限（UPDATE/DELETE 只回传语句）
+
+- **需求**：陛下要求「AI 调用的 execute_sql 工具开放 Insert 权限，只限制不让更新，更新时给出更新语句就行」
+- **★ 为什么要【重写】而不是打补丁**（旧实现是「整条 SQL 扫黑名单 + 必须以 SELECT 开头」，开放 INSERT 必然踩坑）：
+  1. 旧黑名单含 `INTO` → `INSERT INTO` 本身含 INTO，**光把 INSERT 挪出黑名单会被自己误杀**
+  2. 旧实现扫**整条 SQL** → `SELECT * FROM t WHERE note = 'please DELETE this'` 会被误判成写操作
+  3. 旧多语句检查扫 `;` → `INSERT INTO t(a) VALUES('a;b')` 会被误判成多语句
+- **新方案**：`A3Tools/Services/AiActions/SqlStatementAnalyzer.cs`（新增文件）
+  - **词法遮罩**（3 步，顺序不能错）：去注释 → 字符串字面量内容清空（保留引号）→ 方括号标识符内容清空
+    - 遮罩后 `text`（保留方括号）供 sp_ 检测用；`scan`（方括号也清空）供关键字扫描用
+  - **主语句动词解析**：只认「语句第一个词」；`WITH cte AS (...)` 会用括号配对穿透到 CTE 之后的动词
+  - **按动词分类**：Select / Insert / Update / Delete / Other
+  - **多语句判定**在遮罩后的文本上做 → 字面量/子查询里的分号天然不触发
+- **各类型策略**：
+  | 类型 | 行为 |
+  |---|---|
+  | SELECT/WITH/SHOW/DESCRIBE/EXPLAIN | 直接执行（不弹框，保住 2026-08-27 陛下决定） |
+  | INSERT | **真正执行**（走 `ExecuteNonQueryAsync` 写入通道），弹确认框，单次最多 5000 行 |
+  | UPDATE / DELETE | **不执行**，把语句原样放进 result（`executed=false` + `sql` + `message`），AI 拿给陛下手工跑 |
+  | DDL / EXEC / MERGE / GRANT | 照旧拒绝 |
+- **★ INSERT 走 `ExecuteNonQueryAsync` 而不是 `ExecuteQueryAsync`**：查询通道用 `ExecuteReaderAsync`，INSERT 用它会拿不到影响行数；写入必须走 `ExecuteNonQuery`（Http 代理模式下对应 Hub 的 `nonquery` action，已支持）
+- **★ 确认框改为「按参数判定」**：
+  - `IAiAction` 新增默认接口方法 `bool RequiresConfirmationFor(Dictionary<string,object?> args) => RequiresConfirmation;`（默认实现 → 其它 Action 零改动）
+  - `OpenAiCompatibleBackend.cs:361` 改成 `action.RequiresConfirmationFor(argsDict)`
+  - `ExecuteSqlAction.RequiresConfirmation` 仍是 `false`（保住 8-27「只读查询不弹框」），但覆写 `RequiresConfirmationFor`：只读 → false，INSERT → true
+  - 静态属性 `RequiresConfirmation` 无法区分「同一条工具的只读与写入」→ 必须按参数判定
+- **★ 同步改了 AI 提示词**（`AiChatForm.cs` 3588/3643 行附近）：不改的话提示词还写着「禁止 INSERT」，AI 会不敢用新权限
+  - 同时加了一条硬规则：「需要修改/删除时不要自己换写法绕过，工具会拒绝并把语句原样返回给陛下」
+- **★ 自己踩的回归坑**：重写时把 `SHOW`/`DESCRIBE`/`EXPLAIN` 漏在动词表外 → 这 3 种只读语句全部被拒（比旧实现更严 = 回归）
+  - 教训：重写安全检查时，**旧实现放行的每一种形式都要在新实现里逐条复测**（`DESC` 也一样）
+  - 注意 `DESC` 加进动词表是安全的：只认「语句第一个词」，`ORDER BY x DESC` 的 DESC 不会被误当主动词
+- **★ 测试断言要按语义写**：别断言「首尾空白必须保留」这种实现细节，断言「语义保真」即可
+- **测试工程**: `D:\Temp\a3sqltest` 重写为 89 项全绿（直接引用类型，不再靠反射）
+
+### 2026-10-25 工具参数显示中文变 \uXXXX 转义（已修）
+
+- **陛下反馈**：「AI助理工具显示中文无法查看 能不能显示成正常中文信息」，贴出来的实际内容：
+  `"base_name": "A3 \u5546\u57CE\u8868\u7ED3\u6784"` —— 本该是「A3 商城表结构」
+- **★ 病根：.NET `JsonSerializer` 默认编码器 `JavaScriptEncoder.Default` 会把非 ASCII 全转义成 \uXXXX**
+  - 厂商返回的 tool_call `function.arguments` 本身就是转义串（`OpenAiCompatibleBackend.cs:343` 直接存）
+  - **二次转义点在 C# 历史卡片**：`AiChatForm.BuildToolArgsHtml` 用默认 `JsonSerializerOptions` 重新序列化 → 又转义一遍 → 界面显示成乱码
+  - **JS 实时卡片本来就是好的**（`JSON.parse` 会解码，`JSON.stringify` 不转义非 ASCII）→ 所以陛下看到的是**历史/重开**那条路径
+  - 已用最小复现程序实证：默认编码器输出 `\u5546\u57CE`，换 `UnsafeRelaxedJsonEscaping` 立刻变「商城」
+- **修法**：
+  - 新增 `A3Tools/Services/JsonText.cs`（静态类）：
+    - `DisplayOptions` = `{WriteIndented=true, Encoder=UnsafeRelaxedJsonEscaping}` → 给界面展示
+    - `CompactOptions` = `{WriteIndented=false, Encoder=UnsafeRelaxedJsonEscaping}` → 给存盘/日志
+    - `Relax(json, options)` = 解析成功则用展示选项重序列化；失败则走 `DecodeUnicodeEscapes` 兜底
+    - `DecodeUnicodeEscapes(text)` = 手工扫 `\uXXXX` 还原（支持代理对 `\uD83D\uDE00`）
+  - `AiChatForm.BuildToolArgsHtml` → 用 `JsonText.DisplayOptions`；catch 分支改 `JsonText.DecodeUnicodeEscapes(raw)`
+  - JS 端 `buildToolArgsHtml` 加 `decodeUnicodeEscapes(s)`，catch 分支用它（实时卡片本来就是对的，只是补齐对称性）
+  - `OpenAiCompatibleBackend.cs:390` → 存盘/日志用 `JsonText.Relax(argsJson, JsonText.CompactOptions)`
+    - **只改存储副本，`tc.Function.Arguments` 原串不动** → 发给模型的消息格式不变
+- **XSS 风险不变**：`UnsafeRelaxedJsonEscaping` 不转义 `<>&`，但展示前还有 `WebUtility.HtmlEncode` 兜底 → 已有测试守着（`<script>` / `<img onerror>` 均被编码）
+- **★ 顺带发现陛下数据里的一个错字**：知识库标题 `满赠关聛活动` 里第 4 字是 **U+805B「聛」**，正确应为 **U+8054「联」** → 「满赠关联活动」
+  - `\uXXXX` 是确定性映射 → 说明**知识库里存的原文就是「聛」**，是数据侧的错字（大概率从别处复制时带入），不是编码问题
+  - 已在测试里改成**码点精确比对**（不再手打中文，避免自己敲错）
+- **★ 测试输出别走控制台**：Windows 控制台默认 GBK，中文断言详情全是乱码、还会在某些字上截断 → 二哈把 `Console.SetOut` 到 UTF-8 文件再读
+  - 产物：`D:\Temp\a3sqltest\test-output.txt`
+- **★ 教训：断言别手打中文**。这次 FAIL 是二哈自己把 U+8054「联」当成 U+805B「聛」敲进断言，查码点才定位 → 断言一律用码点或从数据推导
+- **★ 文件锁**：编译时 VS(25180) + 运行中的 A3Tools(22340) 锁着 `bin\Debug` → 按 `dotnet-build-vs-file-lock` 技能：`taskkill /F /IM A3Tools.exe /T` 关掉 App（VS 不能动），再用 `MSBuild.exe` 编译 → exit 0
+
+### 2026-10-25 展开/收起工具区域 → 视图跳到最底部（已修）
+
+- **陛下反馈**：「我展开或收起工具区域 或者某个具体工具执行参数 都会跳到最后，而不是停留在当前位置」
+- **★ 病根链**（`AiChatForm.cs`）：
+  1. 点 `<details>` 的 `summary` → DOM 高度变 → `ResizeObserver` → `_notifyNow()` → postMessage 给 C#
+  2. C# `WebMessageReceived`：`wv2.Height = newH` → `LayoutBubbleRow` + `RelayoutMessages()` → **下方气泡全部位移**
+  3. C#：`if (_userWasAtBottom)` → **强制把滚动值设成新底部** → 💥 视口跳到末尾
+- **★ 修法：区分「用户自己折叠」和「内容自己变高」**
+  - **JS 侧**（`AiChatForm.cs` 内嵌 JS blob）：
+    - capture 阶段 `document.addEventListener('click', ...)` 找 `summary`（向上冒泡找）→ 记 `window.__detailsToggleAt = Date.now()` 和 `window.__detailsToggleY`（summary 的文档 Y）
+    - **★ 用 `click` 不用 `toggle` 事件**：`toggle` 是异步派发的任务，可能晚于 ResizeObserver 回调跑 → 标记来不及置上
+    - `_notifyNow()` 的 payload 带上 `toggle`（`Date.now() - __detailsToggleAt < 1200` 的时间窗）+ `ty`
+      - 时间窗 1.2s 的原因：一次折叠会连着来一串 notify（ResizeObserver + 字体加载 + settle 定时器），
+        全部带 `toggle=true` → C# 统一走锚定；**否则第一个 notify 锚定、后面的又跟滚 → 照样跳**
+  - **C# 侧**：`toggle=true` → **不走跟滚**，改走【滚动锚定】
+    - 折叠点在视口**上方** → 视口内内容整体平移 `delta` → 滚动值 `+= delta` 补偿（看到同一段内容）
+    - 折叠点在视口**内/下方** → 视口内容不动 → 滚动值**原样保持**（陛下要的「停留在当前位置」）
+    - 判定用**屏幕坐标**（`wv2.RectangleToScreen` vs `pnlMessagesScroll.RectangleToScreen`）→ 免坐标系换算
+- **★ 关键：`_oldBubbleH` 必须在改 `wv2.Height` 之前抓**，且 `_oldMax/_oldCur` 也要提前抓（原来的代码在第一次 `wv2.Height = newH` 之后才抓 → 拿到的是旧 max，注释里也承认了）
+- **★ `_lastHeightApply` 字段声明了但根本没被使用** → 高度应用路径**没有节流**，每个 notify 都会立即应用 → 锚定补偿能生效
+- **`_userWasAtBottom` 跟滚逻辑保留不动** → 流式输出时依然自动跟到底，不影响原有体验

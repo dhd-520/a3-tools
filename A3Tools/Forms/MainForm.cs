@@ -1727,9 +1727,13 @@ public partial class MainForm : Form, IToolContext
 
     /// <summary>
     /// ★ 2026-08-26 AI Action 入口：按账套编码启动
+    /// ★ 2026-10-24 陛下需求：支持任意组合启动（客户端 / 开发工具 / ERP网页 / 企业微信）
     /// </summary>
     /// <param name="code">账套编码</param>
-    /// <param name="target">"client" / "devtools" / "web" / null(默认启 client + web，跳过选择弹窗)</param>
+    /// <param name="target">
+    ///   "client" / "devtools" / "erp" / "wechat"，多个用 + 或 , 分隔（如 "client+devtools"）；
+    ///   "all"=全启。null → 用 LaunchTargetSpec.Default（客户端 + ERP网页，与旧行为一致）
+    /// </param>
     public bool LaunchAccountByCode(string code, string? target = null)
     {
         try
@@ -1742,13 +1746,25 @@ public partial class MainForm : Form, IToolContext
                 return false;
             }
 
-            // ★ 2026-08-27 陛下要求：AI 启动时陛下已明确说要启什么，跳过 LaunchOptionsDialog
-            //   target=null → 默认启 client + web（陛下日常组合）
-            //   target="client" / "devtools" / "web" → 只启那个
-            //   target="all" → 全启
-            string actualTarget = target?.ToLower() ?? "client+web";
-            System.Diagnostics.Debug.WriteLine($"[AI Action] LaunchAccountByCode 调用 _LaunchAccountInternal, forceTarget={actualTarget}");
-            _LaunchAccountInternal(account, skipLaunchDialog: true, forceTarget: actualTarget);
+            // ★ 2026-10-24 陛下需求：AI 启动时陛下已明确说要启什么，跳过 LaunchOptionsDialog
+            //   target=null → LaunchTargetSpec.Default（客户端 + ERP网页，陛下日常组合）
+            //   target="client" → 只启客户端
+            //   target="devtools" → 只启开发工具
+            //   target="client+devtools" → 任意组合
+            LaunchTargetSpec spec;
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                spec = LaunchTargetSpec.Default;
+            }
+            else if (!LaunchTargetSpec.TryParse(target, out spec, out var parseError))
+            {
+                System.Diagnostics.Debug.WriteLine($"[AI Action] target 解析失败: {parseError}");
+                ShowToast($"启动目标无法识别：{parseError}");
+                return false;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[AI Action] LaunchAccountByCode 调用 _LaunchAccountInternal, forceSpec={spec.Describe()}");
+            _LaunchAccountInternal(account, skipLaunchDialog: true, forceSpec: spec);
             return true;
         }
         catch (Exception ex)
@@ -1762,8 +1778,12 @@ public partial class MainForm : Form, IToolContext
     /// 共享启动逻辑（LaunchSelectedAccount + LaunchAccountByCode 都走这里）
     /// </summary>
     /// <param name="skipLaunchDialog">true = 跳过 LaunchOptionsDialog 选择（AI 调用时陛下已明确指定）</param>
-    /// <param name="forceTarget">"client" / "devtools" / "web" / "client+web" / "all" - 强制覆盖 settings</param>
-    private void _LaunchAccountInternal(Account account, bool skipLaunchDialog = false, string? forceTarget = null)
+    /// <param name="forceSpec">
+    ///   强制覆盖 settings 的启动组合。★ 2026-10-24 改为强类型：旧实现用
+    ///   <c>forceTarget.Contains("client")</c> 判断，而 "all" 不含 "client" → 全启反而关掉客户端；
+    ///   且旧实现只写 LaunchWeb（死字段），真正控制网页的 LaunchErp/LaunchWechatWork 没被覆盖 → 网页永远跟着启。
+    /// </param>
+    private void _LaunchAccountInternal(Account account, bool skipLaunchDialog = false, LaunchTargetSpec? forceSpec = null)
     {
 
         // ★ 2026-08-01 升级序列化场景:记下账套 Code 给 WaitForClientUpgradeComplete 用
@@ -1790,12 +1810,17 @@ public partial class MainForm : Form, IToolContext
         // ★ 2026-08-27 陛下要求:AI 启动账套时陛下已明确说启什么,跳过 dialog
         bool shouldShowDialog = !skipLaunchDialog && (settings.ShowLaunchOptionsDialog || !_dataService.HasSettings());
 
-        // ★ 2026-08-27 forceTarget 强制覆盖 settings（AI 明确指定启什么）
-        if (forceTarget != null)
+        // ★ 2026-10-24 forceSpec 强制覆盖 settings（AI 明确指定启什么）
+        //   四个开关全量覆盖（不是只覆盖一部分），杜绝「AI 说了 devtools，网页还是跟着启」
+        if (forceSpec != null)
         {
-            settings.LaunchDesktop = forceTarget.Contains("client");
-            settings.LaunchDevTools = forceTarget.Contains("devtools");
-            settings.LaunchWeb = forceTarget.Contains("web") || forceTarget.Contains("all");
+            settings.LaunchDesktop = forceSpec.LaunchDesktop;
+            settings.LaunchDevTools = forceSpec.LaunchDevTools;
+            settings.LaunchErp = forceSpec.LaunchErp;
+            settings.LaunchWechatWork = forceSpec.LaunchWechatWork;
+            settings.LaunchWeb = forceSpec.LaunchErp;   // 兼容旧字段（LaunchWeb 等价 LaunchErp）
+            System.Diagnostics.Debug.WriteLine(
+                $"[AI Action] forceSpec 覆盖 settings: client={settings.LaunchDesktop}, devtools={settings.LaunchDevTools}, erp={settings.LaunchErp}, wechat={settings.LaunchWechatWork}");
         }
 
         if (shouldShowDialog)
@@ -2011,6 +2036,14 @@ public partial class MainForm : Form, IToolContext
                     var devSettings = _dataService.LoadSettings();
                     LaunchDevToolsForAccount(account, appDir, devSettings);
                 }
+            }
+            else
+            {
+                // ★ 2026-10-24 陛下反馈「开发工具启动不了」：旧代码这里直接跳过，
+                //   什么都不提示，陛下只能看到「没反应」。
+                //   现在明确告知缺哪个文件、去哪看。
+                System.Diagnostics.Debug.WriteLine($"[Launch] 开发工具 exe 不存在: {exe2}");
+                ShowToast($"账套【{account.Name}】开发工具未启动：找不到 {Path.GetFileName(exe2)}");
             }
         }
 

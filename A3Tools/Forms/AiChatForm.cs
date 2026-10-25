@@ -1238,6 +1238,12 @@ public partial class AiChatForm : Form
                         if (!doc.RootElement.TryGetProperty("h", out var hProp)) return;
                         int realH = hProp.GetInt32();
                         if (realH <= 0) return;
+                        // ★ 2026-10-25 修陛下反馈「展开/收起工具区域会跳到最底部」
+                        //   toggle=true → 这是用户自己点了 details 折叠 → 不跟滚，改走滚动锚定
+                        //   ty = 折叠点在文档里的 Y（CSS px）→ 用来判断折叠点相对视口的位置
+                        bool _isUserToggle = doc.RootElement.TryGetProperty("toggle", out var tgProp)
+                                            && tgProp.ValueKind == System.Text.Json.JsonValueKind.True;
+                        int _toggleY = doc.RootElement.TryGetProperty("ty", out var tyProp) ? tyProp.GetInt32() : 0;
                         // ★★★ 2026-10-07 陛下反馈「内容总高度有问题」log 诊断确认：
                         //   h_visible=12375, h_body=12367, h_scroll=12374
                         //   → h_visible 比 h_body 多 8px 是最后一个<p>的 margin-bottom 撑出 overflow:hidden
@@ -1257,17 +1263,36 @@ public partial class AiChatForm : Form
                         //   + 10px buffer 吃掉 wrapper 边缘 / 行高舍入
                         int contentH = hVisible > 0 ? hVisible : (hBody > 0 ? hBody : realH);
                         int newH = contentH + 10;
-                        wv2.Height = newH;
-                        // ★ BackColor 跟气泡背景色同色，掩盖 WinForms WebView2 HWND > viewport 的底部空白
-                        try { wv2.BackColor = wv2.DefaultBackgroundColor; } catch { }
-                        // ★★★ 2026-10-07 修陛下反馈「历史会话底部差很多内容」：
-                        //   之前的 SmartScrollToBottom 用 (newMax - curVal) <= 100 判断
-                        //   错：wv2 异步长大后 newMax 暴涨，curVal 还在老位置 → 差值巨大 → 误判"用户不在底部" → 不滚
-                        //   修法：增长 wv2 前先记录用户是否在老底部，涨完再决定是否跟滚
+
+                        // ★★★ 2026-10-25 修陛下反馈「展开/收起工具区域 → 视图跳到最底部」：
+                        //   根因：details 折叠 → 文档高度变 → 走到这里重设 wv2.Height → 下方气泡全部位移
+                        //        → 旧逻辑按「用户原本在底部」跟滚 → 视口直接跳到末尾
+                        //   修法：用户自己折叠时（toggle=true）不走跟滚，改走【滚动锚定】
+                        //        · 折叠点在视口上方 → 视口内容整体平移 delta → 滚动值同步补偿（看到同一段内容）
+                        //        · 折叠点在视口内/下方 → 视口内容不动 → 滚动值原样保持（陛下要的「停留在当前位置」）
                         int _oldMax = pnlMessagesScroll.VerticalScroll.Maximum;
                         int _oldCur = pnlMessagesScroll.VerticalScroll.Value;
                         int _visibleH = pnlMessagesScroll.ClientSize.Height;
                         bool _userWasAtBottom = (_oldMax > 0) && (_oldCur + _visibleH >= _oldMax - 50);
+                        int _oldBubbleH = wv2.Height;
+                        // 折叠点是否在视口上方（用改动前的屏幕坐标判定 → 免坐标系换算）
+                        bool _toggleAboveView = false;
+                        bool _toggleGeomOk = false;
+                        if (_isUserToggle)
+                        {
+                            try
+                            {
+                                Rectangle _bubbleRect = wv2.RectangleToScreen(wv2.ClientRectangle);
+                                Rectangle _viewRect = pnlMessagesScroll.RectangleToScreen(pnlMessagesScroll.ClientRectangle);
+                                _toggleAboveView = (_bubbleRect.Top + _toggleY) <= _viewRect.Top;
+                                _toggleGeomOk = true;
+                            }
+                            catch { }
+                        }
+
+                        wv2.Height = newH;
+                        // ★ BackColor 跟气泡背景色同色，掩盖 WinForms WebView2 HWND > viewport 的底部空白
+                        try { wv2.BackColor = wv2.DefaultBackgroundColor; } catch { }
                         wv2.Height = newH;
                         var row = wv2.Parent as Panel;
                         if (row != null)
@@ -1284,9 +1309,28 @@ public partial class AiChatForm : Form
                             LayoutBubbleRow(row, wv2, avatarInRow, isUser);
                         }
                         RelayoutMessages();
+                        // ★★★ 2026-10-25 用户自己折叠 details → 【滚动锚定】，不跟到底
+                        //   （一次折叠会连着来好几串 notify，JS 侧用 1.2s 时间窗统一带 toggle=true）
+                        if (_isUserToggle)
+                        {
+                            int _newCur = _oldCur;
+                            if (_toggleGeomOk && _toggleAboveView)
+                            {
+                                // 折叠点在视口上方 → 视口内内容整体平移了 delta → 滚动值同步补偿
+                                _newCur = _oldCur + (newH - _oldBubbleH);
+                            }
+                            // 折叠点在视口内/下方 → 视口内容不动 → 滚动值原样保持
+                            if (_newCur < pnlMessagesScroll.VerticalScroll.Minimum) _newCur = pnlMessagesScroll.VerticalScroll.Minimum;
+                            if (_newCur > pnlMessagesScroll.VerticalScroll.Maximum) _newCur = pnlMessagesScroll.VerticalScroll.Maximum;
+                            if (_newCur != pnlMessagesScroll.VerticalScroll.Value)
+                            {
+                                pnlMessagesScroll.VerticalScroll.Value = _newCur;
+                                pnlMessagesScroll.PerformLayout();
+                            }
+                        }
                         // ★★★ 2026-10-07 手动跟滚新底部：wv2 增长后跟滚新底部
                         //   （SmartScrollToBottom 的判断在 wv2 长大后会失准）
-                        if (_userWasAtBottom)
+                        else if (_userWasAtBottom)
                         {
                             int _newMax = pnlMessagesScroll.VerticalScroll.Maximum;
                             int _newCur = _newMax - _visibleH;
@@ -1912,7 +1956,8 @@ _ = wv2.EnsureCoreWebView2Async();
             // 回调：AI 调用了工具后显示中间状态
             Func<AiActionResult, Task<bool>> onToolExecuted = async (result) =>
             {
-                if (!result.Success) return true;
+                // ★ 2026-10-24 陛下需求「调用工具需要显示具体内容」→ 失败的工具调用也必须有卡片
+                //   之前失败直接 return，陛下只看到 AI 说「查询失败」，看不到它到底试了什么 SQL
                 string summary = result.Summary;
                 await pnlMessagesScroll.InvokeAsync(() =>
                 {
@@ -1926,11 +1971,14 @@ _ = wv2.EnsureCoreWebView2Async();
                     //         JS 在 DOM 中 appendChild(jump) 追加一个 tool-call-card div，不重设 innerHTML
                     //         滚动位置 / ResizeObserver 都保留住
                     string toolName = toolCallLog.Last().ToolName;
+                    // ★ 2026-10-24 把实际入参（execute_sql 的 SQL 就在里面）一并推给前端
+                    string argsJson = toolCallLog.Last().ArgumentsJson ?? "{}";
                     // ★ 同时往 placeholderAi.Content 里累加，方便历史回看 / SaveSession 后再加载能恢复
+                    string argsBlock = (string.IsNullOrWhiteSpace(argsJson) || argsJson == "{}") ? "" : $"\n参数：{argsJson}";
                     if (string.IsNullOrEmpty(placeholderAi.Content))
-                        placeholderAi.Content = $"🔧 调用工具：{toolName}\n{summary}";
+                        placeholderAi.Content = $"🔧 调用工具：{toolName}\n{summary}{argsBlock}";
                     else
-                        placeholderAi.Content += $"\n\n🔧 调用工具：{toolName}\n{summary}";
+                        placeholderAi.Content += $"\n\n🔧 调用工具：{toolName}\n{summary}{argsBlock}";
                     var (bubble, isWv2) = FindBubbleForStream(placeholderAi);
                     if (bubble != null && isWv2 && bubble is Microsoft.Web.WebView2.WinForms.WebView2 wv2 && wv2.CoreWebView2 != null)
                     {
@@ -1938,7 +1986,8 @@ _ = wv2.EnsureCoreWebView2Async();
                         //   参数转 JSON 防注入；toolName / summary 转 base64 避免引号 / 换行引起 JS 语法问题
                         string nameJson = System.Text.Json.JsonSerializer.Serialize(toolName);
                         string summaryJson = System.Text.Json.JsonSerializer.Serialize(summary ?? string.Empty);
-                        string script = "window.openAppendToolBlock(" + nameJson + "," + summaryJson + ");";
+                        string argsJsonSerialized = System.Text.Json.JsonSerializer.Serialize(argsJson ?? "{}");
+                        string script = "window.openAppendToolBlock(" + nameJson + "," + summaryJson + "," + argsJsonSerialized + ");";
                         _ = wv2.CoreWebView2.ExecuteScriptAsync(script);
                     }
                     // ★ 2026-10-19 v2.12 修陛下反馈「关掉重开历史会话工具调用看不到了」
@@ -2741,6 +2790,55 @@ img { max-width: 100%; }
 .tools-block > summary:hover { background: #e1ecf7; }
 .tools-block[open] > summary { border-bottom-color: #b6dcfb; }
 .tools-content { padding: 10px 14px; }
+/* ★ 2026-10-24 陛下需求：工具调用要显示「具体内容」— 参数折叠块
+   仿 thinking-block 样式，默认收起，点开 summary 才看到实际参数 / 实际执行的 SQL */
+.tool-args-block {
+  margin: 6px 0 8px 0;
+  border: 1px solid #cfe3f7;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+.tool-args-block > summary {
+  padding: 4px 10px;
+  cursor: pointer;
+  color: #0969da;
+  font-size: 12px;
+  user-select: none;
+  list-style: none;
+}
+.tool-args-block > summary::-webkit-details-marker { display: none; }
+.tool-args-block > summary::before {
+  content: ""▶"";
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.tool-args-block[open] > summary::before { transform: rotate(90deg); }
+.tool-args-block > summary:hover { background: #eaf3fc; }
+.tool-args-content { padding: 6px 10px 8px 10px; }
+.tool-args-label {
+  font-size: 11px;
+  color: #57606a;
+  margin-bottom: 3px;
+  font-weight: 600;
+}
+.tool-sql, .tool-args-json {
+  margin: 0 0 6px 0;
+  padding: 6px 8px;
+  background: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-radius: 4px;
+  font-family: Consolas, Courier New, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #24292f;
+  max-height: 400px;
+  overflow: auto;
+}
 /* ★ 2026-10-13 增：Skill 流程可视化横幅（1+2 层）
    需求：AI 调 load_skill 后，在气泡顶部显示 Skill 模式 + 步骤清单
    - skill-banner：横幅本体，橙色背景，醒目提示在走 Skill 流程
@@ -2865,10 +2963,16 @@ img { max-width: 100%; }
       );
       // 报 viewport 实际 CSS 高度，C# 端用它自校准换算比例
       var vp = Math.ceil(window.innerHeight || document.documentElement.clientHeight || 0);
+      // ★ 2026-10-25：把「用户自己折叠了 details」的信息一并上报
+      //   1.2s 时间窗 → 一次折叠会引发一串 notify（ResizeObserver + 字体加载 + settle），
+      //   全部带上 toggle=true → C# 统一走滚动锚定，不会第一个跳完后面的又跟滚
+      var _tgl = (Date.now() - (window.__detailsToggleAt || 0)) < 1200;
+      var _tgy = window.__detailsToggleY || 0;
       if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage(JSON.stringify({
           h: h, w: w, vp: vp,
-          h_scroll: h_scroll, h_visible: h_visible, h_body: h_body, h_html: h_html
+          h_scroll: h_scroll, h_visible: h_visible, h_body: h_body, h_html: h_html,
+          toggle: _tgl, ty: _tgy
         }));
       }
       _lastNotify = Date.now();
@@ -2901,7 +3005,75 @@ img { max-width: 100%; }
   //   这样中途调多次工具不会被重置，滚动位置 / ResizeObserver 都保持原状
   //   内部存 window.__appendedToolBlocks 数组 → 流式输出重写 #bubble-body 后还能重渲染
   window.__appendedToolBlocks = [];
-  function renderToolCard(name, summary) {
+  // ★ 2026-10-24 陛下需求：工具调用要显示「具体内容」
+  //   execute_sql → 直接亮出实际执行的 SQL；其他工具 → 格式化后的参数 JSON
+  //   参数再包一层 <details>，默认收起，点开才看
+  // ★ 2026-10-25 修陛下反馈「工具调用显示的中文是 \uXXXX 转义，看不了」
+  //   厂商返回的 tool_call arguments 本身带 \uXXXX 转义；JSON.parse 会还原成真中文，
+  //   JSON.stringify 输出也是真中文（JS 不会转义非 ASCII）→ 实时卡片本来就是好的。
+  //   这里再补一个兜底：万一 argsJson 不是合法 JSON（catch 分支），把 \uXXXX 还原出来。
+  // ★ 2026-10-25 修陛下反馈「展开/收起工具区域 → 视图跳到最底部」
+  //   根因：details 折叠 → 文档高度变 → ResizeObserver 通知 C# → C# 重设 wv2.Height
+  //        → 下方气泡全部位移 → C# 按「用户原本在底部」跟滚 → 视口直接跳到末尾
+  //   修法：点击 summary 时打标记 + 记下折叠点在文档里的 Y，C# 收到通知就知道「这是用户自己折叠的」
+  //        → 不跟滚，改成滚动锚定（视口里的内容保持在原地）
+  //   ★ 用 capture 阶段 + click 事件（不用 toggle 事件）：toggle 是异步派发的任务，
+  //     可能晚于 ResizeObserver 回调跑 → 标记会来不及置上
+  window.__detailsToggleAt = 0;
+  window.__detailsToggleY = 0;
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    while (t && t !== document.body && t.tagName !== 'SUMMARY') t = t.parentElement;
+    if (!t || t.tagName !== 'SUMMARY') return;
+    var d = t.parentElement;
+    if (!d || d.tagName !== 'DETAILS') return;
+    try {
+      var r = t.getBoundingClientRect();
+      // 文档坐标（流式期 body 可能内部滚动 → 加上 scrollY）
+      window.__detailsToggleY = Math.round(r.top + (window.scrollY || 0));
+    } catch (err) { window.__detailsToggleY = 0; }
+    window.__detailsToggleAt = Date.now();
+  }, true);
+  function decodeUnicodeEscapes(s) {
+    if (!s || String(s).indexOf('\\u') < 0) return s;
+    return String(s).replace(/\\u([0-9a-fA-F]{4})/g, function (m, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+  }
+  function buildToolArgsHtml(argsJson) {
+    if (!argsJson) return '';
+    var raw = String(argsJson).trim();
+    if (!raw || raw === '{}') return '';
+    var pretty = raw, sqlText = null;
+    try {
+      var obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        if (typeof obj.sql === 'string') sqlText = obj.sql;
+        var rest = {}, hasRest = false;
+        for (var k in obj) {
+          if (Object.prototype.hasOwnProperty.call(obj, k) && k !== 'sql') { rest[k] = obj[k]; hasRest = true; }
+        }
+        pretty = hasRest ? JSON.stringify(rest, null, 2) : '';
+      } else {
+        pretty = JSON.stringify(obj, null, 2);
+      }
+    } catch (e) { pretty = decodeUnicodeEscapes(raw); }
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/""/g, '&quot;');
+    }
+    var html = '<details class=""tool-args-block""><summary>📋 调用参数（点击展开）</summary><div class=""tool-args-content"">';
+    if (sqlText) {
+      html += '<div class=""tool-args-label"">实际执行的 SQL：</div><pre class=""tool-sql"">' + esc(sqlText) + '</pre>';
+    }
+    if (pretty) {
+      html += '<div class=""tool-args-label"">' + (sqlText ? '其他参数：' : '参数：') + '</div><pre class=""tool-args-json"">' + esc(pretty) + '</pre>';
+    }
+    html += '</div></details>';
+    return html;
+  }
+  function renderToolCard(name, summary, argsJson) {
     var card = document.createElement('div');
     card.className = 'tool-call-card';
     card.style.cssText = 'margin:8px 0; padding:8px 12px; background:#f0f7ff; border:1px solid #b6dcfb; border-radius:6px; font-size:13px; line-height:20px; color:#0b3a66;';
@@ -2909,6 +3081,12 @@ img { max-width: 100%; }
     head.style.cssText = 'font-weight:600; color:#0969da; margin-bottom:4px;';
     head.textContent = '🔧 ' + name;
     card.appendChild(head);
+    var argsHtml = buildToolArgsHtml(argsJson);
+    if (argsHtml) {
+      var argsBox = document.createElement('div');
+      argsBox.innerHTML = argsHtml;
+      card.appendChild(argsBox);
+    }
     var body = document.createElement('div');
     body.style.whiteSpace = 'pre-wrap';
     body.textContent = summary || '';
@@ -2938,15 +3116,15 @@ img { max-width: 100%; }
       content.className = 'tools-content';
       for (var i = 0; i < n; i++) {
         var blk = window.__appendedToolBlocks[i];
-        content.appendChild(renderToolCard(blk.name, blk.summary));
+        content.appendChild(renderToolCard(blk.name, blk.summary, blk.argsJson));
       }
       details.appendChild(content);
       stream.appendChild(details);
     } catch (e) {}
   }
-  window.openAppendToolBlock = function(name, summary) {
+  window.openAppendToolBlock = function(name, summary, argsJson) {
     try {
-      window.__appendedToolBlocks.push({name: name, summary: summary || ''});
+      window.__appendedToolBlocks.push({name: name, summary: summary || '', argsJson: argsJson || ''});
       rerenderToolStream();
       notify();  // 高度变化推回 C#
     } catch (e) {}
@@ -3227,6 +3405,78 @@ img { max-width: 100%; }
     }
 
     /// <summary>
+    /// ★ 2026-10-24 陛下需求：工具调用要显示「具体内容」，可折叠
+    ///   execute_sql → 把实际执行的 SQL 单独亮出来（陛下最关心的）
+    ///   其他工具   → 展示格式化后的参数 JSON
+    ///   参数本身再包一层 &lt;details&gt;，默认收起，点开才看
+    ///   与 JS 端 buildToolArgsHtml 同款输出 → 实时流 / 历史回看视觉一致
+    /// <para>★ 2026-10-25 修陛下反馈「显示的中文是 \uXXXX 转义，看不了」：
+    ///   原来用 JsonSerializer 默认编码器重新序列化 → 非 ASCII 全被转义成 \uXXXX。
+    ///   改用 JsonText.DisplayOptions（UnsafeRelaxedJsonEscaping）→ 中文原样显示。
+    ///   外面还有 WebUtility.HtmlEncode 兜底，XSS 风险不变。</para>
+    /// </summary>
+    private static string BuildToolArgsHtml(string? argumentsJson)
+    {
+        string raw = argumentsJson ?? "";
+        if (string.IsNullOrWhiteSpace(raw) || raw.Trim() == "{}") return string.Empty;
+
+        string pretty = raw;
+        string? sqlText = null;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+
+            // 取出 sql 字段单独展示（execute_sql 的核心诉求）
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                root.TryGetProperty("sql", out var sqlEl) &&
+                sqlEl.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                sqlText = sqlEl.GetString();
+            }
+
+            // 其余参数（去掉 sql，避免重复展示）
+            var rest = new Dictionary<string, System.Text.Json.JsonElement>();
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                foreach (var p in root.EnumerateObject())
+                {
+                    if (!p.NameEquals("sql")) rest[p.Name] = p.Value.Clone();
+                }
+            }
+
+            pretty = rest.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(rest, JsonText.DisplayOptions)
+                : string.Empty;
+        }
+        catch
+        {
+            pretty = JsonText.DecodeUnicodeEscapes(raw);   // 不是合法 JSON → 兜底还原 \uXXXX
+        }
+
+        var sb = new StringBuilder();
+        sb.Append("<details class=\"tool-args-block\"><summary>📋 调用参数（点击展开）</summary><div class=\"tool-args-content\">");
+
+        if (!string.IsNullOrWhiteSpace(sqlText))
+        {
+            sb.Append("<div class=\"tool-args-label\">实际执行的 SQL：</div>");
+            sb.Append("<pre class=\"tool-sql\">").Append(System.Net.WebUtility.HtmlEncode(sqlText)).Append("</pre>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(pretty))
+        {
+            sb.Append("<div class=\"tool-args-label\">")
+              .Append(string.IsNullOrWhiteSpace(sqlText) ? "参数：" : "其他参数：")
+              .Append("</div>");
+            sb.Append("<pre class=\"tool-args-json\">").Append(System.Net.WebUtility.HtmlEncode(pretty)).Append("</pre>");
+        }
+
+        sb.Append("</div></details>");
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// ★ 2026-10-09 把 List<ChatToolCallRecord> 渲染成 HTML 卡片字符串（跟 JS renderToolCard 同款样式）
     ///   加载历史消息时由 CreateBubbleRow 调，把 msg.ToolCalls 注入到 #tools-stream 容器里
     ///   跟 openAppendToolBlock 实时追加的卡片样式完全一致 → 关掉重开看起来一样
@@ -3244,9 +3494,12 @@ img { max-width: 100%; }
         {
             string name = System.Net.WebUtility.HtmlEncode(tc.ToolName ?? string.Empty);
             string summary = System.Net.WebUtility.HtmlEncode(tc.Result?.Summary ?? string.Empty);
+            // ★ 2026-10-24 把实际入参（execute_sql 的 SQL）也渲染出来
+            string argsHtml = BuildToolArgsHtml(tc.ArgumentsJson);
             // 跟 JS renderToolCard 完全同款 inline style → 实时 / 历史视觉一致
             sb.Append("<div class=\"tool-call-card\" style=\"margin:8px 0; padding:8px 12px; background:#f0f7ff; border:1px solid #b6dcfb; border-radius:6px; font-size:13px; line-height:20px; color:#0b3a66;\">");
             sb.Append("<div style=\"font-weight:600; color:#0969da; margin-bottom:4px;\">🔧 ").Append(name).Append("</div>");
+            sb.Append(argsHtml);
             sb.Append("<div style=\"white-space:pre-wrap;\">").Append(summary).Append("</div>");
             sb.Append("</div>");
         }
@@ -3404,7 +3657,11 @@ img { max-width: 100%; }
         sb.AppendLine("- get_account_detail: 查账套详情（只读）");
         sb.AppendLine("- list_running_accounts: 列运行中的账套（只读）");
         sb.AppendLine("- get_app_info / get_system_status / check_update / read_log: 系统信息（只读）");
-        sb.AppendLine("- start_account / stop_account: 启动/停止账套（普通确认）");
+        sb.AppendLine("- start_account: 启动账套（普通确认）。★ 支持 target 参数控制启动哪些组件，可任意组合：");
+        sb.AppendLine("    client=客户端(君则A3.exe) | devtools=集成开发工具 | erp=ERP网页版(/h5comerp) | wechat=企业微信网页版(/h5apperp) | all=全启");
+        sb.AppendLine("    多个用 + 连接，如 target=\"client+devtools\"；不传 target = 按上次设置(client+erp)");
+        sb.AppendLine("    ★ 陛下说「只启客户端」「加上开发工具」「不要网页」「只要开发工具」等时，必须传 target 精确控制，不要默认全启");
+        sb.AppendLine("- stop_account: 停止账套（普通确认）");
         sb.AppendLine("- launch_link_db: 启动链接数据库工具（普通确认）");
         sb.AppendLine("- open_data_folder: 打开 DATA 目录（普通确认）");
         sb.AppendLine("- add_account: 新增账套（普通确认）");
@@ -3414,7 +3671,7 @@ img { max-width: 100%; }
         sb.AppendLine("- get_table_schema: 获取指定表的列结构（只读，AI 写 SQL 前必查）");
         // ★ 2026-09-20 陛下需求：给 AI 开放表结构对比工具
         sb.AppendLine("- compare_table_schemas: 对比两个表的列结构差异（A独有/B独有/类型不一致/同名列），用于排查结构漂移或找 JOIN 字段");
-        sb.AppendLine("- execute_sql: 在账套上执行 SELECT 查询（高危：输入 EXECUTE 确认，只允许 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN）");
+        sb.AppendLine("- execute_sql: 在账套上执行 SQL（★ 只读查询 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 直接执行，不弹框；★ INSERT 允许新增数据，会弹框让陛下确认；★ UPDATE/DELETE 不自动执行，工具会把语句原样返回给陛下，由陛下手工执行；★ DDL 请用 execute_ddl）");
         // ★ 2026-09-20 陛下需求：DDL 执行 + 视图定义（让 Skill 能复制表/视图结构）
         sb.AppendLine("- get_view_definition: 获取视图的 CREATE VIEW 定义语句（SQL Server OBJECT_DEFINITION，只读）");
         sb.AppendLine("- execute_ddl: 执行 DDL（CREATE/ALTER/DROP/TRUNCATE，高危必须确认，禁止 INSERT/UPDATE/DELETE/EXEC，支持 dry_run=true 只看不执行）");
@@ -3469,7 +3726,9 @@ img { max-width: 100%; }
         sb.AppendLine("2. 用 get_table_schema 看相关表的列名 / 类型（如果不确定列名）");
         // ★ 2026-09-20 陛下需求：当陛下要求对比两张表时，优先调 compare_table_schemas
         sb.AppendLine("2.5. 如果陛下要求对比两张表结构，调 compare_table_schemas（返回 A独有/B独有/类型不一致/同名列）");
-        sb.AppendLine("3. 用 execute_sql 拼 SQL 查询（必须 SELECT/WITH，禁止 INSERT/UPDATE/DELETE/DROP/CREATE/ALTER/TRUNCATE）");
+        sb.AppendLine("3. 用 execute_sql 拼 SQL 查询（必须 SELECT/WITH，禁止 UPDATE/DELETE/DROP/CREATE/ALTER/TRUNCATE/EXEC）");
+        sb.AppendLine("   ★ 需要【新增数据】时允许用 INSERT INTO 表(列) VALUES(...)，会弹框让陛下确认；单次最多 5000 行，超过请分批");
+        sb.AppendLine("   ★ 需要【修改/删除】已有数据时不要自己换写法绕过，工具会拒绝并把语句原样返回给陛下，请把那条 UPDATE/DELETE 语句原封不动交给陛下手工执行");
         sb.AppendLine("4. 拿到结果后用自然语言组织给陛下（中文表格 / 摘要）");
         sb.AppendLine();
         // ★ 2026-09-20 陛下需求：让 AI 能调用陛下编写的 Skill（多步骤工作流）

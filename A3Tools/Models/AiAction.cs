@@ -73,6 +73,13 @@ public interface IAiAction
     /// <summary>是否需要陛下二次确认（默认 true，写操作 / 进程操作必须确认）</summary>
     bool RequiresConfirmation => true;
 
+    /// <summary>
+    /// ★ 2026-10-25：按实际参数判定是否需要二次确认
+    ///   默认跟随 <see cref="RequiresConfirmation"/>
+    ///   execute_sql 用它区分：只读 SELECT 不弹框（保住 2026-08-27 陛下决定），INSERT 写入弹框
+    /// </summary>
+    bool RequiresConfirmationFor(Dictionary<string, object?> arguments) => RequiresConfirmation;
+
     /// <summary>高危操作：需要陛下输入指定文本确认（null = 普通确认）</summary>
     /// <example>delete_account 返回 "002"，陛下必须输入 002 才放行</example>
     string? ConfirmationPrompt => null;

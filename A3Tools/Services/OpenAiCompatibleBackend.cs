@@ -358,7 +358,8 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                 else
                 {
                     // ★ 2026-08-26 R2-C：危险 Action 需陛下二次确认
-                    bool needConfirm = action.RequiresConfirmation;
+                    // ★ 2026-10-25：改为按参数判定（execute_sql 只读不弹框 / INSERT 写入弹框）
+                    bool needConfirm = action.RequiresConfirmationFor(argsDict);
                     bool allowed = true;
                     if (needConfirm && onToolNeedsConfirm != null)
                     {
@@ -384,15 +385,19 @@ public class OpenAiCompatibleBackend : IAiChatBackend
                     }
                 }
 
+                // ★ 2026-10-25 存一份「可读中文」的入参（厂商原串带 \uXXXX 转义，直接存下来界面/日志全是乱码）
+                //   注意：只改存储副本，tc.Function.Arguments 原串不动 → 发给模型的消息格式不变
+                string readableArgs = JsonText.Relax(argsJson, JsonText.CompactOptions);
+
                 toolCallLog?.Add(new ChatToolCallRecord
                 {
                     ToolName = toolName,
-                    ArgumentsJson = argsJson,
+                    ArgumentsJson = readableArgs,
                     Result = result
                 });
 
                 // ★ 2026-10-06 日志：记录工具调用结果
-                AiAssistantLogger.LogToolCall(loop, toolName, argsJson, result);
+                AiAssistantLogger.LogToolCall(loop, toolName, readableArgs, result);
                 totalToolCallsInSession++;
 
                 // ★ 2026-10-06 Skill 工作流追踪：load_skill 进入 Skill 模式 + 记录 write-tools

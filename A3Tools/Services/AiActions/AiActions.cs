@@ -380,14 +380,22 @@ public class ListRunningAccountsAction : IAiAction
 public class StartAccountAction : IAiAction
 {
     public string Name => "start_account";
-    public string Description => "按账套编码启动 A3 程序（客户端 + 开发工具 + 网页）";
+    public string Description => "按账套编码启动 A3 程序。可指定启动哪些组件的任意组合：客户端(client) / 开发工具(devtools) / ERP网页(erp) / 企业微信网页(wechat)";
     public AiActionPermission Permission => AiActionPermission.Process;
     public object ParametersSchema => new
     {
         type = "object",
         properties = new Dictionary<string, object>
         {
-            ["code"] = new { type = "string", description = "账套编码（如 001）" }
+            ["code"] = new { type = "string", description = "账套编码（如 001）" },
+            ["target"] = new
+            {
+                type = "string",
+                description = "★ 可选：要启动哪些组件，多个用 + 分隔（如 \"client+devtools\"）。" +
+                              "client=客户端(君则A3.exe)，devtools=集成开发工具，erp=ERP网页版(/h5comerp)，wechat=企业微信网页版(/h5apperp)，all=全部启动。" +
+                              "不传=按上次设置(client+erp)。",
+                @enum = new[] { "client", "devtools", "erp", "wechat", "all", "client+devtools", "client+erp", "client+devtools+erp", "client+devtools+erp+wechat" }
+            }
         },
         required = new string[] { "code" }
     };
@@ -397,7 +405,55 @@ public class StartAccountAction : IAiAction
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
         var code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
-        return $"启动账套 [{code}] 的 A3 客户端 / 开发工具 / 网页";
+        var target = ReadTargetArgument(arguments);
+        string what = target == null
+            ? "A3 客户端 / 开发工具 / 网页"
+            : (LaunchTargetSpec.TryParse(target, out var spec, out _) ? spec.Describe() : target);
+        return $"启动账套 [{code}] 的 {what}";
+    }
+
+    /// <summary>
+    /// 读取 target 参数。AI 可能传字符串（"client+devtools"）或数组（["client","devtools"]），两种都支持。
+    /// </summary>
+    private static string? ReadTargetArgument(Dictionary<string, object?> arguments)
+    {
+        if (!arguments.TryGetValue("target", out var raw) || raw == null) return null;
+
+        if (raw is string s)
+            return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        // JsonElement 字符串
+        if (raw is JsonElement je)
+        {
+            if (je.ValueKind == JsonValueKind.String)
+            {
+                var v = je.GetString();
+                return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+            }
+            // JsonElement 数组
+            if (je.ValueKind == JsonValueKind.Array)
+            {
+                var items = je.EnumerateArray()
+                    .Select(x => x.ToString().Trim())
+                    .Where(x => !string.IsNullOrEmpty(x))
+                    .ToList();
+                return items.Count > 0 ? string.Join("+", items) : null;
+            }
+        }
+
+        // 已经是字符串集合
+        if (raw is System.Collections.IEnumerable seq && raw is not string)
+        {
+            var items = seq.Cast<object?>()
+                .Select(x => x?.ToString()?.Trim())
+                .Where(x => !string.IsNullOrEmpty(x))
+                .Select(x => x!)
+                .ToList();
+            return items.Count > 0 ? string.Join("+", items) : null;
+        }
+
+        var t = raw.ToString();
+        return string.IsNullOrWhiteSpace(t) ? null : t.Trim();
     }
 
     public Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -410,15 +466,27 @@ public class StartAccountAction : IAiAction
             string code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
             if (string.IsNullOrEmpty(code)) return Task.FromResult(AiActionResult.Fail("请提供账套编码"));
 
+            // ★ 2026-10-24 陛下需求：AI 可按参数任意组合启动
+            //   target 缺失 → 走默认组合（客户端 + ERP网页，与旧行为一致）
+            //   target 非法 → 把错误回传给 AI，让模型自己纠正后重试，而不是静默启动错的东西
+            string? target = ReadTargetArgument(arguments);
+            string describe = "按上次设置";
+            if (target != null)
+            {
+                if (!LaunchTargetSpec.TryParse(target, out var spec, out var parseError))
+                    return Task.FromResult(AiActionResult.Fail($"target 参数无效：{parseError}"));
+                describe = spec.Describe();
+            }
+
             var tcs = new TaskCompletionSource<AiActionResult>();
             var inst = A3Tools.Forms.MainForm.Instance;
             Action launchAction = () =>
             {
                 try
                 {
-                    bool ok = A3Tools.Forms.MainForm.Instance!.LaunchAccountByCode(code);
+                    bool ok = A3Tools.Forms.MainForm.Instance!.LaunchAccountByCode(code, target);
                     tcs.SetResult(ok
-                        ? AiActionResult.Ok($"账套 [{code}] 启动指令已发出")
+                        ? AiActionResult.Ok($"账套 [{code}] 启动指令已发出（{describe}）")
                         : AiActionResult.Fail($"账套 [{code}] 启动失败（检查 A3 程序目录设置）"));
                 }
                 catch (Exception ex)
@@ -1081,7 +1149,7 @@ public class CompareTableSchemasAction : IAiAction
 public class ExecuteSqlAction : IAiAction
 {
     public string Name => "execute_sql";
-    public string Description => "在指定账套上执行 SELECT 查询（拒绝写操作），返回表格数据";
+    public string Description => "在指定账套上执行 SQL（★ 只读查询 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 直接执行；★ INSERT 允许写入数据（会弹确认框）；★ UPDATE/DELETE 不自动执行，只把语句返回给陛下手动执行；★ DDL 请用 execute_ddl）";
     public AiActionPermission Permission => AiActionPermission.Network;
     public object ParametersSchema => new
     {
@@ -1089,19 +1157,49 @@ public class ExecuteSqlAction : IAiAction
         properties = new Dictionary<string, object>
         {
             ["code"] = new { type = "string", description = "账套编码" },
-            ["sql"] = new { type = "string", description = "SQL 语句，必须是 SELECT/WITH" },
-            ["limit"] = new { type = "integer", description = "最大返回行数，默认 1000，最大 5000" }
+            ["sql"] = new { type = "string", description = "SQL 语句：只读查询用 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN；新增数据用 INSERT INTO 表(列) VALUES(...)，单次最多 5000 行；UPDATE/DELETE 不会执行，只会回传语句给陛下手动跑" },
+            ["limit"] = new { type = "integer", description = "最大行数，默认 1000，最大 5000（查询=最大返回行数，INSERT=单次最大写入行数）" }
         },
         required = new string[] { "code", "sql" }
     };
 
-    public bool RequiresConfirmation => false;  // ★ 2026-08-27 陛下要求：execute_sql 只走只读查询，安全性靠白名单/黑名单保证，不再弹任何确认框
+    // ★ 2026-08-27 陛下要求：execute_sql 只读查询不弹确认框（安全性靠白名单/黑名单保证）
+    // ★ 2026-10-25 陛下开放 INSERT：写入属于写操作 → 走 RequiresConfirmationFor 按 SQL 内容判定要不要弹框
+    public bool RequiresConfirmation => false;
     public string? ConfirmationPrompt => null;
+
+    /// <summary>
+    /// ★ 2026-10-25：按 SQL 内容决定是否弹二次确认
+    ///   - INSERT（写数据）→ 需要陛下确认（确认框会显示完整 SQL）
+    ///   - SELECT/WITH（只读）→ 不弹框（保住 2026-08-27 的决定）
+    /// </summary>
+    public bool RequiresConfirmationFor(Dictionary<string, object?> arguments)
+    {
+        string sql = arguments.TryGetValue("sql", out var s) ? s?.ToString() ?? "" : "";
+        var analysis = SqlStatementAnalyzer.Analyze(sql, ReadLimit(arguments));
+        return analysis.Kind == SqlStatementKind.Insert;
+    }
+
     public string GetImpactDescription(Dictionary<string, object?> arguments)
     {
         var code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
         var sql = arguments.TryGetValue("sql", out var s) ? s?.ToString() ?? "" : "";
+        var analysis = SqlStatementAnalyzer.Analyze(sql, ReadLimit(arguments));
+        if (analysis.Kind == SqlStatementKind.Insert)
+        {
+            string snippet = sql.Length > 120 ? sql.Substring(0, 120) + "..." : sql;
+            return $"在账套 [{code}] 上【写入数据】约 {analysis.InsertRowEstimate} 行（INSERT）：{snippet}";
+        }
         return $"在账套 [{code}] 上执行 SQL：{sql}";
+    }
+
+    /// <summary>读取 limit 参数（默认 1000，上限 5000）</summary>
+    private static int ReadLimit(Dictionary<string, object?> arguments)
+    {
+        int limit = 1000;
+        if (arguments.TryGetValue("limit", out var l) && int.TryParse(l?.ToString(), out var n))
+            limit = Math.Clamp(n, 1, 5000);
+        return limit;
     }
 
     public async Task<AiActionResult> ExecuteAsync(Dictionary<string, object?> arguments, CancellationToken ct = default)
@@ -1110,23 +1208,57 @@ public class ExecuteSqlAction : IAiAction
         {
             string code = arguments.TryGetValue("code", out var c) ? c?.ToString() ?? "" : "";
             string sql = arguments.TryGetValue("sql", out var s) ? s?.ToString() ?? "" : "";
-            int limit = 1000;
-            if (arguments.TryGetValue("limit", out var l) && int.TryParse(l?.ToString(), out var n))
-                limit = Math.Clamp(n, 1, 5000);
+            int limit = ReadLimit(arguments);
 
             if (string.IsNullOrEmpty(code)) return AiActionResult.Fail("请提供账套编码");
             if (string.IsNullOrEmpty(sql)) return AiActionResult.Fail("请提供 SQL");
 
-            var safety = CheckSqlSafety(sql);
-            if (!safety.Safe) return AiActionResult.Fail($"SQL 安全检查未通过：{safety.Reason}");
+            // ★ 2026-10-25 陛下要求：开放 INSERT；UPDATE/DELETE 不执行只回传语句
+            var analysis = SqlStatementAnalyzer.Analyze(sql, limit);
+            if (!analysis.Allowed)
+                return AiActionResult.Fail($"SQL 安全检查未通过：{analysis.Reason}");
 
             var ds = new DataService();
             var account = ds.FindAccount(code);
             if (account == null) return AiActionResult.Fail($"账套 [{code}] 不存在");
 
-            string finalSql = WrapWithLimit(sql, limit);
-
             var dataAccess = DataAccessFactory.Create(account);
+
+            // ── UPDATE / DELETE：陛下要求「不自动执行，但把语句给出来」──
+            if (analysis.Kind == SqlStatementKind.Update || analysis.Kind == SqlStatementKind.Delete)
+            {
+                string verbCn = analysis.Kind == SqlStatementKind.Update ? "更新" : "删除";
+                return AiActionResult.Ok(
+                    $"已生成{verbCn}语句（未执行）",
+                    new
+                    {
+                        code,
+                        executed = false,
+                        kind = analysis.Kind.ToString(),
+                        sql = analysis.Statement,
+                        message = $"execute_sql 不自动执行{verbCn}语句。请将下面这条语句交给陛下，由陛下在数据库客户端手工执行：\n\n{analysis.Statement}"
+                    });
+            }
+
+            // ── INSERT：真正写入 ──
+            if (analysis.Kind == SqlStatementKind.Insert)
+            {
+                int affected = await dataAccess.ExecuteNonQueryAsync(sql, ct);
+                return AiActionResult.Ok(
+                    $"INSERT 成功：写入 {affected} 行",
+                    new
+                    {
+                        code,
+                        executed = true,
+                        kind = "Insert",
+                        affected_rows = affected,
+                        estimated_rows = analysis.InsertRowEstimate,
+                        sql
+                    });
+            }
+
+            // ── SELECT：只读查询 ──
+            string finalSql = WrapWithLimit(sql, limit);
             var queryResult = await dataAccess.ExecuteQueryAsync(finalSql, ct);
 
             if (!queryResult.Success)
@@ -1159,56 +1291,6 @@ public class ExecuteSqlAction : IAiAction
         {
             return AiActionResult.Fail($"执行 SQL 失败：{ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// SQL 安全检查：只允许 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN
-    /// </summary>
-    private static (bool Safe, string Reason) CheckSqlSafety(string sql)
-    {
-        if (string.IsNullOrWhiteSpace(sql)) return (false, "SQL 为空");
-
-        // 去掉注释
-        string cleaned = Regex.Replace(sql, @"--.*?$", "", RegexOptions.Multiline);
-        cleaned = Regex.Replace(cleaned, @"/\*.*?\*/", "", RegexOptions.Singleline);
-        cleaned = cleaned.Trim().TrimEnd(';').Trim();
-
-        string upper = cleaned.ToUpperInvariant();
-
-        // 危险关键字（用词边界匹配，避免误判 UPDATED_AT 等列名）
-        string[] dangerous = {
-            "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
-            "TRUNCATE", "EXEC", "EXECUTE", "MERGE", "GRANT", "REVOKE",
-            "BACKUP", "RESTORE", "SHUTDOWN", "KILL"
-        };
-        foreach (var kw in dangerous)
-        {
-            if (Regex.IsMatch(upper, $@"\b{kw}\b"))
-                return (false, $"包含禁止的关键字 [{kw}]，只允许 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN");
-        }
-
-        // 必须以 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 开头
-        string[] allowedStarts = { "SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN" };
-        bool startsOk = false;
-        foreach (var prefix in allowedStarts)
-        {
-            if (upper.StartsWith(prefix + " ") || upper == prefix)
-            {
-                startsOk = true;
-                break;
-            }
-        }
-        if (!startsOk) return (false, "必须以 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 开头");
-
-        // 拦截多语句
-        if (cleaned.Contains(";"))
-        {
-            var after = cleaned.Substring(cleaned.IndexOf(';') + 1).Trim();
-            if (!string.IsNullOrEmpty(after))
-                return (false, "SQL 不允许多语句（分号后还有内容）");
-        }
-
-        return (true, "");
     }
 
     /// <summary>

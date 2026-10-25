@@ -302,3 +302,20 @@ public class SqlQueryTool
         form.Activate();
     }
 }
+
+/// <summary>
+/// A3 密文解密工具。
+/// 解密 A3 客户端自身的 DES/CBC/PKCS7 密文（Account.info 账套连接串等）。
+/// 与工具箱自身的 EncryptionService（机器密钥 AES）无关，故单独一个窗体。
+/// </summary>
+public class A3DesDecryptTool
+{
+    public string Name => "A3密文解密";
+    public string Description => "解密 A3 的 DES 密文（支持 Account.info 账套连接串批量解析）";
+
+    public void Execute(Account? account, A3Tools.Plugins.IToolContext context)
+    {
+        var form = new A3Tools.Plugins.Default.Forms.A3DesDecryptForm();
+        form.Show();
+    }
+}
