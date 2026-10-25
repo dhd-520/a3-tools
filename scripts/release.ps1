@@ -124,7 +124,17 @@ if (-not $githubToken -and -not $ghCli) {
 #    必须用 [IO.File]::ReadAllText(path, UTF8) 读取,不能用 Get-Content -Raw
 #    (PS 5.1 默认系统编码 GBK,会把 UTF-8 文件当 GBK 解码 -> mojibake)
 #    自动检测: Test-Path $ReleaseNotes 是文件路径就走 UTF-8 读取,不是则视为原始字符串
-if ($ReleaseNotes -and (Test-Path $ReleaseNotes -PathType Leaf)) {
+#
+# ★★ 2026-10-25 修 v2.6.6 发布中断: 直接传「多行正文」时,
+#    Test-Path 会把带换行的字符串当路径 -> 抛「路径中具有非法字符」
+#    -> $ErrorActionPreference=Stop -> 脚本在第 4 步就整个退出(版本号都没 bump)
+#    修法: 只在字符串「像路径」时才做 Test-Path(含换行 => 一定是正文,不是路径)
+#    并且用 try/catch 兜住,绝不让检测逻辑本身变成发布阻断点。
+$notesIsPath = $false
+if ($ReleaseNotes -and $ReleaseNotes -notmatch "[\r\n]") {
+    try { $notesIsPath = Test-Path $ReleaseNotes -PathType Leaf } catch { $notesIsPath = $false }
+}
+if ($notesIsPath) {
     Info ("Loading ReleaseNotes from file (UTF-8): " + $ReleaseNotes)
     $ReleaseNotes = [System.IO.File]::ReadAllText($ReleaseNotes, [System.Text.Encoding]::UTF8)
 }
