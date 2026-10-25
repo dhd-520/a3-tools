@@ -265,12 +265,19 @@ try {
 $tag = "v" + $Version
 Info ("Pushing tag " + $tag + " to A3ToolsRelease only")
 try {
-    & git tag -d $tag 2>$null | Out-Null
+    # ★★ 2026-10-25 修 v2.6.6 实战踩坑：PS 5.1 + $ErrorActionPreference=Stop 下，
+    #    `cmd 2>$null` 里的 native stderr 会被转成 ErrorRecord 并**终止**整个脚本。
+    #    `git tag -d <不存在的tag>` 正好输出 "error: tag 'vX' not found." 到 stderr
+    #    → 直接被当成异常抛出 → 外层 catch 报「tag push failed」→ release 在打 tag 前就死了。
+    #    修法：改用 `2>&1 | Out-Null` 吞掉 stderr（而不是 `2>$null`），并用 try/catch 兜底。
+    #    同样的坑还有下面的 `git fetch`（它把 "From https://..." 写到 stderr）。
+    try { & git tag -d $tag 2>&1 | Out-Null } catch { }
 
     # 8.1) 找 A3ToolsRelease/master 的 tree (init 的空 tree, 只有 README.md)
     #      fetch 一下确保本地有最新 remote refs
-    & git fetch A3ToolsRelease master 2>$null | Out-Null
-    $releaseMasterSha = (& git rev-parse A3ToolsRelease/master 2>$null)
+    try { & git fetch A3ToolsRelease master 2>&1 | Out-Null } catch { }
+    $releaseMasterSha = $null
+    try { $releaseMasterSha = (& git rev-parse A3ToolsRelease/master 2>$null | Select-Object -First 1) } catch { }
     if (-not $releaseMasterSha) {
         Err "A3ToolsRelease/master 不存在 - 请先确认远程仓库已初始化"
         exit 1
@@ -312,13 +319,16 @@ try {
     #       Gitee release API 创建 release 时，如果 tag 已存在会"自动创建"一个指向
     #       target_commitish 分支 HEAD 的 tag——本意是好的，但如果 API 误用了【A3ToolsRelease 仓库】
     #       master 分支的 HEAD（那边 master 仍指向 aafca3d=v2.4.4），创建的 tag 会指向错 commit。
-    #       验证：local tag 指向的 commit 必须 = 当前 HEAD，不一致就 force push 修。
-    $expectedSha = (& git rev-parse HEAD).Trim()
-    $actualSha = (& git rev-parse "$tag^{}" 2>$null)
+    # ★★ 2026-10-25 修正: 本脚本 tag 指向的是【release marker commit】(2026-09-30 起改的，
+    #    为了不泄露源码)，不是源码 HEAD。原来这里拿 HEAD 比对 -> 永远不相等 -> 误报"指向错"并 force push。
+    #    正确基准 = $markerSha（我们刚建的 marker commit），远端再 ls-remote 验一次。
+    $expectedSha = $markerSha
+    $actualSha = $null
+    try { $actualSha = (& git rev-parse "$tag^{}" 2>$null | Select-Object -First 1) } catch { }
     if ($actualSha) {
         $actualSha = $actualSha.Trim()
         if ($expectedSha -ne $actualSha) {
-            Err ("tag " + $tag + " 指向错 commit: " + $actualSha + " (期望 " + $expectedSha + ")")
+            Err ("tag " + $tag + " 指向错 commit: " + $actualSha + " (期望 marker " + $expectedSha + ")")
             Err "force push 修正..."
             & git push $releaseRemote $tag --force
             $actualSha = (& git rev-parse "$tag^{}" 2>$null).Trim()
@@ -329,7 +339,7 @@ try {
                 throw "tag verification failed"
             }
         } else {
-            Ok ("tag 指向正确 -> " + $expectedSha.Substring(0, 7))
+            Ok ("tag 指向正确 (release marker) -> " + $expectedSha.Substring(0, 7))
         }
     }
     Ok "tag pushed to A3ToolsRelease only"
