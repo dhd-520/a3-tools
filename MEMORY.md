@@ -240,3 +240,59 @@
 - **★ 关键：`_oldBubbleH` 必须在改 `wv2.Height` 之前抓**，且 `_oldMax/_oldCur` 也要提前抓（原来的代码在第一次 `wv2.Height = newH` 之后才抓 → 拿到的是旧 max，注释里也承认了）
 - **★ `_lastHeightApply` 字段声明了但根本没被使用** → 高度应用路径**没有节流**，每个 notify 都会立即应用 → 锚定补偿能生效
 - **`_userWasAtBottom` 跟滚逻辑保留不动** → 流式输出时依然自动跟到底，不影响原有体验
+
+### 2026-10-25 v2.6.6 发布（已完成）
+
+**结果**
+- Gitee release: https://gitee.com/wangq80368036/A3ToolsRelease/releases/tag/v2.6.6 （id=1239449）
+- tag `v2.6.6` -> release marker commit `e295f83`（只在 A3ToolsRelease 仓库，源码不泄露）
+- zip `A3Tools_v2.6.6.zip`（81.42 MB）已上传；`RELEASE_NOTES.md` 已内嵌 zip
+- 部署目录 `D:\Work\工具\A3工具箱更新\` 已更新到 **File=2.6.6.0**，`DATA\` 未动
+- commits：`915b9b5` 源码 / `0214ca9` + `ee885e2` + `82ba8ae` 发布脚本修复
+
+**★★ 发布脚本连踩 3 个 PS 5.1 坑（都是「stderr 变终止性异常」或「检测逻辑自己成了阻断点」）**
+
+1. **`Test-Path` 拿多行正文当路径**（`release.ps1:127`）
+   - 包装脚本传 `-ReleaseNotes <文件内容>`（多行字符串）→ `Test-Path` 抛「路径中具有非法字符」
+   - `$ErrorActionPreference = "Stop"` → 脚本在**第 4 步**（版本号 bump 之前）整个退出
+   - 修法：`release.ps1` 改成只在字符串「像路径」（`-notmatch "[\r\n]"`）时才 `Test-Path` + `try/catch`；
+     包装脚本改成**传文件路径**，由 `release.ps1` 内部 `ReadAllText(path, UTF8)` 读
+   - ★ 教训：**检测逻辑本身绝不能成为发布阻断点**
+
+2. **`git tag -d <不存在的tag>` 的 stderr 变终止性异常**（Step 8）
+   - `git tag -d v2.6.6` 输出 `error: tag 'v2.6.6' not found.` 到 stderr
+   - PS 5.1 + `ErrorActionPreference=Stop` → 直接抛 → 外层 catch 报「tag push failed」→ release 中断
+   - 修法：`2>$null` 改成 **`2>&1 | Out-Null`** + `try/catch` 兜底
+     - 同样要修 `git fetch A3ToolsRelease master`（它把 `From https://...` 写 stderr）
+   - ★ **PS 5.1 通则**：`native_cmd 2>$null` 在 `ErrorActionPreference=Stop` 下会把 stderr 变终止异常，
+     一律用 `2>&1 | Out-Null` + try/catch
+
+3. **Step 12 最终验证查错仓库 + 基准错**
+   - 查 `git ls-remote origin refs/tags/<tag>` → 但 tag 只推给 A3ToolsRelease → 返回空 → `.Trim()` 作用在 `$null` → 抛「不能对 Null 值表达式调用方法」
+   - 修法：改查 A3ToolsRelease + `Select-Object -First 1` + try/catch
+
+**★★ tag 校验基准必须用 marker 而不是 HEAD**
+- 2026-09-30 起 tag 指向的是 **release marker commit**（建在 A3ToolsRelease/master 的 tree 上，文件树只有 README.md，**不泄露源码**）
+- Step 8.5 原来拿 `git rev-parse HEAD`（源码 HEAD）比对 → 永远不相等 → 误报「tag 指向错 commit」并 force push
+- 修法：基准改成 `$markerSha`
+
+**★ 发布前必做**
+- **先 commit 源码改动**（`release.ps1` 的 tag 指向 commit，不 commit 就等于发了个空版本）
+- 提交消息用 `git commit -F <UTF-8 文件>`，**不要**用 `-m "中文"`（命令行会被 GBK 污染）
+- 中文 here-string 里有 `$var:` 会被 PS 当变量解析 → 用**单引号** here-string `@'...'@`
+- `publish\RELEASE_NOTES_*.md` 被 gitignore → 说明文件不进 commit（符合设计）
+- 部署前**先关掉运行中的 A3Tools**（exe 被锁写不进去）；VS 不能动
+
+**★ 部署到 `D:\Work\工具\A3工具箱更新\` 的正确姿势**
+- 只覆盖：`A3Tools.exe` / `*.pdb` / `Plugins\*` / `Resources\*` / `RELEASE_NOTES.md`
+- **绝不覆盖 `DATA\`**（账套 accounts.json、会话 ai_chat、知识库 knowledge、skills、logs 都是用户数据）
+- 部署完校验：`(Get-Item A3Tools.exe).VersionInfo.FileVersion` 应等于 `<Version>`
+
+**★ Gitee body 中文验证**
+- `Invoke-RestMethod` 读出来会 mojibake（PS 5.1 字符串解码问题，**不是 Gitee 的锅**）
+- 必须用 `HttpWebRequest` + `GetResponseStream()` 读**原始字节**再 `[Encoding]::UTF8.GetString()`
+
+**★ 已知问题**
+- `github.com` 从国内连接不稳（本次 push 443 超时，重试 3 次仍失败）→ gitee 正常
+  - 影响：github 源仓库 master 落后几个 commit，**不影响 Gitee 发布和用户更新**
+  - 缓解：`release.ps1` 默认 `SkipGitHub=$true`；国内用户走 gitee
