@@ -293,6 +293,7 @@
 - 必须用 `HttpWebRequest` + `GetResponseStream()` 读**原始字节**再 `[Encoding]::UTF8.GetString()`
 
 **★ 已知问题**
-- `github.com` 从国内连接不稳（本次 push 443 超时，重试 3 次仍失败）→ gitee 正常
-  - 影响：github 源仓库 master 落后几个 commit，**不影响 Gitee 发布和用户更新**
+- `github.com` 从国内连接不稳（本次 push 443 超时，重试 3 次 + 后台重试仍失败）→ gitee 正常
+  - 影响：github 源仓库 master 落后（本地/来源 HEAD=`50be8d9`，github 停在 `bcaeb8f`），**不影响 Gitee 发布和用户更新**
   - 缓解：`release.ps1` 默认 `SkipGitHub=$true`；国内用户走 gitee
+  - ★ 补推方式（网络恢复后）：`git push github master`；**不要**重跑整个 `release.ps1`（会再走一遍打包+发版）
