@@ -569,15 +569,25 @@ if ($giteeReleaseId) {
         }
 
         # 2. 验证 tag 指向
-        $expectedSha = (& git rev-parse HEAD).Trim()
-        $tagSha = (& git ls-remote origin "refs/tags/" + $tag).Trim()
-        if ($tagSha -match "\w{40}") {
+        # ★★ 2026-10-25 修：原来查的是 origin，但 tag 只推给 A3ToolsRelease（2026-08-19 拆分）
+        #    → origin 上根本没这个 tag → ls-remote 返回空 → .Trim() 作用在 $null 上抛
+        #    「不能对 Null 值表达式调用方法」→ 整个最终验证挂掉。
+        #    修法：查 A3ToolsRelease，且用 Select-Object -First 1 + try/catch 兜底。
+        #    基准同样从 HEAD 改成 release marker（tag 本来就指向 marker，不是源码 HEAD）。
+        $expectedSha = $null
+        try { $expectedSha = (& git rev-parse "$tag^{}" 2>$null | Select-Object -First 1) } catch { }
+        if ($expectedSha) { $expectedSha = $expectedSha.Trim() }
+        $tagSha = $null
+        try { $tagSha = (& git ls-remote A3ToolsRelease "refs/tags/" + $tag 2>$null | Select-Object -First 1) } catch { }
+        if ($tagSha -and $tagSha -match "(\w{40})") {
             $actualTag = $matches[0]
-            if ($actualTag -eq $expectedSha) {
-                Ok ("tag " + $tag + " 指向正确 -> " + $expectedSha.Substring(0, 7))
+            if ($expectedSha -and $actualTag -eq $expectedSha) {
+                Ok ("tag " + $tag + " 指向正确 (release marker) -> " + $expectedSha.Substring(0, 7))
             } else {
                 Err ("tag 指向错: actual=" + $actualTag + " expected=" + $expectedSha)
             }
+        } else {
+            Warn ("未能从 A3ToolsRelease 读到 tag " + $tag + " 的 sha（不影响已完成的发布）")
         }
 
         # 3. 验证 zip 在 assets 里
