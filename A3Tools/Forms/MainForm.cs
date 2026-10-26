@@ -28,7 +28,6 @@ public partial class MainForm : Form, IToolContext
     private readonly Dictionary<string, AccountStatus> _accountStatuses = new();
     private EdgeDockManager? _edgeDockManager;
     private HotkeyManager? _hotkeyManager;
-    private bool _isInitializing = true;
     private Account? _toolSourceAccount = null;
     private Account? _toolTargetAccount = null;
     private bool _isRootMode = false;
@@ -46,6 +45,12 @@ public partial class MainForm : Form, IToolContext
         nameof(Account.RemoteUser),
     };
     private const string MaskedPlaceholder = "***";
+
+    // ★ 2026-10-26 账套列表列宽管理（逻辑集中在 DgvColumnLayoutManager，便于单测）
+    //   需求：拖动列宽时只影响【相邻列】，总宽恒定、表格始终占满 100%
+    //   病根：列用 AutoSizeMode=Fill → WinForms 会把所有 Fill 列按 FillWeight 重新分配（一拖全动）
+    //   修法：全部列改 None，宽度由 DgvColumnLayoutManager 统一分配
+    private DgvColumnLayoutManager? _dgvColumnLayout;
     private bool _isHiddenToTray = false; // 是否已隐藏到托盘
     private const int WM_SYSCOMMAND = 0x0112;
     private const int SC_MINIMIZE = 0xF020;
@@ -255,7 +260,6 @@ public partial class MainForm : Form, IToolContext
         // 2026-07-08：右上角版本号原本 Designer 里写死 v2.2.0，现在改为动态读 AssemblyVersion
         lblVersion.Text = "v" + A3Tools.Services.UpdateService.CurrentVersion;
         UpdateVersionPosition();
-        _isInitializing = false;
         UpdateRootModeUI();
         // 2026-09-17 启用 AI 功能：根据设置控制「AI 助理 / AI 助理设置 / 知识库管理」三个菜单可见性
         ApplyAiMenuVisibility();
@@ -1180,19 +1184,8 @@ public partial class MainForm : Form, IToolContext
 
     private void RefreshDgvColumns()
     {
-        // 强制刷新 Fill 列的宽度
-        if (this.dgvAccounts == null || this.dgvAccounts.IsDisposed) return;
-
-        foreach (DataGridViewColumn col in this.dgvAccounts.Columns)
-        {
-            if (col.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
-            {
-                // 先设为 None 再设回 Fill，强制重新计算
-                var oldWidth = col.Width;
-                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-            }
-        }
+        // ★ 2026-10-26 列宽统一由 DgvColumnLayoutManager 分配（不再是 Fill 自动重排）
+        _dgvColumnLayout?.ApplyLayout();
     }
 
     private void UpdateVersionPosition()
@@ -1234,8 +1227,9 @@ public partial class MainForm : Form, IToolContext
         this.tabControl.SelectedIndexChanged += TabControl_SelectedIndexChanged;
         this.dgvAccounts.DoubleClick += DgvAccounts_DoubleClick;
         this.dgvAccounts.KeyDown += DgvAccounts_KeyDown;
-        this.dgvAccounts.ColumnWidthChanged += DgvAccounts_ColumnWidthChanged;
         this.dgvAccounts.CellFormatting += DgvAccounts_CellFormatting;
+        // ★ 2026-10-26 列宽管理（只改相邻列 + 总宽恒定 + 始终占满 100%）
+        _dgvColumnLayout = new DgvColumnLayoutManager(this.dgvAccounts, "ColCode");
         this.menuCopyAccount.Click += MenuCopyAccount_Click;
         this.menuHotkeySettings.Click += MenuHotkeySettings_Click;
         this.menuAbout.Click += MenuAbout_Click;
@@ -1270,31 +1264,6 @@ public partial class MainForm : Form, IToolContext
         {
             CopySelectedAccountSilently();
             e.SuppressKeyPress = true;
-        }
-    }
-
-    private void DgvAccounts_ColumnWidthChanged(object? sender, DataGridViewColumnEventArgs e)
-    {
-        // 初始化阶段跳过，避免与 HandleCreated 时的布局冲突
-        if (_isInitializing) return;
-
-        // 用户手动调整列宽后，固定该列为手动模式
-        var column = e.Column;
-        if (column.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
-        {
-            // 使用 Timer 延迟执行，避开布局冲突
-            var timer = new System.Windows.Forms.Timer { Interval = 50 };
-            timer.Tick += (s, args) =>
-            {
-                timer.Stop();
-                timer.Dispose();
-                try
-                {
-                    column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                }
-                catch { }
-            };
-            timer.Start();
         }
     }
 
@@ -1337,21 +1306,37 @@ public partial class MainForm : Form, IToolContext
     private void SetupDataGridViewColumns()
     {
         this.dgvAccounts.AutoGenerateColumns = false;
-        this.dgvAccounts.Columns.Clear();
 
-        var cols = new DataGridViewColumn[]
+        // ★ 2026-10-26 改用 None 模式（自己分配宽度）
+        //   Fill 模式一旦有任何一列宽度变化，WinForms 会把所有 Fill 列按 FillWeight 重新分配
+        //   → 拖一列时其余列全部连坐跳动（实测 col[2] 200px → col[3] 103→79、col[4] 92→70）
+        //   改成 None 后，拖动只影响被拖列，其余列纹丝不动，差值交给相邻列吸收
+        _dgvColumnLayout?.Suspend();
+        try
         {
-            new DataGridViewTextBoxColumn { HeaderText = "代码", DataPropertyName = "Code", Name = "ColCode", Width = 120, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
-            new DataGridViewTextBoxColumn { HeaderText = "账套名称", DataPropertyName = "Name", Name = "ColName", FillWeight = 25, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-            new DataGridViewTextBoxColumn { HeaderText = "账套地址", DataPropertyName = "Server", Name = "ColServer", FillWeight = 30, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-            new DataGridViewTextBoxColumn { HeaderText = "数据库地址", DataPropertyName = "Database", Name = "ColDatabase", FillWeight = 20, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-            new DataGridViewTextBoxColumn { HeaderText = "数据库名称", DataPropertyName = "DatabaseName", Name = "ColDatabaseName", FillWeight = 18, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-            new DataGridViewTextBoxColumn { HeaderText = "DB用户", DataPropertyName = "DbUser", Name = "ColDbUser", FillWeight = 12, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-            new DataGridViewTextBoxColumn { HeaderText = "远程方式", DataPropertyName = "RemoteType", Name = "ColRemoteType", FillWeight = 10, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-            new DataGridViewTextBoxColumn { HeaderText = "远程地址", DataPropertyName = "RemoteAddress", Name = "ColRemoteAddress", FillWeight = 25, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-            new DataGridViewTextBoxColumn { HeaderText = "远程用户", DataPropertyName = "RemoteUser", Name = "ColRemoteUser", FillWeight = 12, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill },
-        };
-        this.dgvAccounts.Columns.AddRange(cols);
+            this.dgvAccounts.Columns.Clear();
+
+            var cols = new DataGridViewColumn[]
+            {
+                new DataGridViewTextBoxColumn { HeaderText = "代码", DataPropertyName = "Code", Name = "ColCode", Width = 120, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "账套名称", DataPropertyName = "Name", Name = "ColName", FillWeight = 25, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "账套地址", DataPropertyName = "Server", Name = "ColServer", FillWeight = 30, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "数据库地址", DataPropertyName = "Database", Name = "ColDatabase", FillWeight = 20, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "数据库名称", DataPropertyName = "DatabaseName", Name = "ColDatabaseName", FillWeight = 18, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "DB用户", DataPropertyName = "DbUser", Name = "ColDbUser", FillWeight = 12, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "远程方式", DataPropertyName = "RemoteType", Name = "ColRemoteType", FillWeight = 10, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "远程地址", DataPropertyName = "RemoteAddress", Name = "ColRemoteAddress", FillWeight = 25, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+                new DataGridViewTextBoxColumn { HeaderText = "远程用户", DataPropertyName = "RemoteUser", Name = "ColRemoteUser", FillWeight = 12, MinimumWidth = 60, AutoSizeMode = DataGridViewAutoSizeColumnMode.None },
+            };
+            this.dgvAccounts.Columns.AddRange(cols);
+        }
+        finally
+        {
+            _dgvColumnLayout?.Resume();
+        }
+
+        // 列重建完成 → 首次按 FillWeight 铺满；用户调过则沿用之前的宽度
+        _dgvColumnLayout?.ColumnsChanged();
     }
 
     private void UpdatePasswordColumns()

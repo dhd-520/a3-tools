@@ -241,6 +241,52 @@
 - **★ `_lastHeightApply` 字段声明了但根本没被使用** → 高度应用路径**没有节流**，每个 notify 都会立即应用 → 锚定补偿能生效
 - **`_userWasAtBottom` 跟滚逻辑保留不动** → 流式输出时依然自动跟到底，不影响原有体验
 
+### 2026-10-26 账套管理列宽：只改临近列 + 总宽恒定占满 100%（v2.6.7）
+
+**需求**（陛下）：首页账套管理拖列宽时，只改临近列，总宽不变、始终占满 100%。
+
+**★★ 病根：`AutoSizeMode = Fill` 是「一拖全动」的元凶（探针实测锤死）**
+- 5 列 Fill，改 `col[2].Width = 200` → `col[3]` 103→79、`col[4]` 92→70 **全被连坐**
+  （WinForms 在任何一列宽度变化后，会把**所有** Fill 列按 FillWeight 重新分配）
+- 全部改 `None` 后改 `col[2].Width` → **只有 col[2] 变，其余纹丝不动** ✅
+- ⇒ 结论：**列改 None，宽度改由自己分配**（别指望 WinForms）
+
+**★★ WinForms 实测出来的两个尺寸事实（别猜，去测）**
+1. **可用宽度 = `dgv.DisplayRectangle.Width - 1`**
+   - `DisplayRectangle` 已扣除垂直滚动条（实测：无滚动条 600，出滚动条 **583**）
+   - 再减 1px：实测总宽正好 = 600 时**水平滚动条会冒出来**，599 才不出
+2. **垂直滚动条出现/消失 → 可用宽度变了（600 ↔ 583）**
+   → 必须监听 `dgv.Controls` 里的 `VScrollBar.VisibleChanged` 重新铺满，否则右边空 17px 或出横向滚动条
+
+**★★ 架构：逻辑与控件定义分离（SOUL.md 规矩）**
+- `A3Tools/Services/DgvColumnWidthAllocator.cs` — 纯算术（无 WinForms 依赖）：`ScaleToFit` / `DistributeByWeight` / `ApplyUserResize`
+- `A3Tools/Services/DgvColumnLayoutManager.cs` — 生产类，持有 DataGridView，负责播种/铺满/拖动补偿/滚动条联动
+- `MainForm.cs` 只做：`new DgvColumnLayoutManager(dgvAccounts, "ColCode")` + 列定义改 None
+- **★ 教训：测试里不要「手抄一份生产逻辑」** —— 二哈第一版测试就是复制品，结果和生产代码漂移（复制品漏了铺满步骤），
+  测了个寂寞还误以为生产代码有 bug。正确做法：**把逻辑抽成生产类，测试直接用生产类**。
+
+**★★ 两个真 bug（都是测试抓出来的）**
+1. **`ApplyUserResize` 正负号写反**：列变宽时邻列该**变窄**，我最初写成变宽
+   - 正确语义：`pending = delta`（>0 = 要从别的列**扣**宽度，<0 = 别的列要**长**）
+2. **空间不足时水位填充提前 `break`** → 未处理的列停在 **0**，突破 MinimumWidth
+   - 修法：`FitCore` 末尾补一道底线：任何列不得 < 自己的 MinimumWidth
+   - 此时总宽会超出可用宽 → 出水平滚动条，这是空间不够时的必然结果（总比把列压成 0 看不见内容强）
+
+**★★ WinForms 写回列宽的两个坑**
+- 在 `ColumnWidthChanged` 里写 `col.Width` → **递归** → 必须有 `_applying` 标志位防重入
+- 列重建（`Columns.Clear()` + `AddRange`）期间也会触发 `ColumnWidthChanged` → 用 `Suspend()/Resume()` 屏蔽
+
+**★ 拖动语义**（陛下要的「只改临近列」）
+- 拖动被拖列 → 该列取新宽，差值由**右侧相邻列**吸收（右邻优先，再往左回退）
+- 邻列到最小宽还不够吸收 → 顺延给再下一列；全部到底 → 把被拖列自己缩回去（**总宽永远恒定**）
+- 窗口缩放时：用户手动调过的列保持**相对比例**跟着缩放；「代码」列（ColCode）默认锁宽，用户手动拖过它后就解锁
+
+**★ 测试工程**：`D:\Temp\a3coltest`（59 项全绿，含直接跑生产类的集成用例 E 段 18 项）
+
+**★ 部署**：`D:\Work\工具\A3工具箱更新\` → File=2.6.7.0，`DATA\` 未动
+- **★ 坑：exe 被锁** —— 部署时 A3Tools 进程又自己跑起来了（PID 11076），`Copy-Item` 报「正由另一进程使用」
+  → **覆盖前必须先 `taskkill /F /IM A3Tools.exe /T`**（VS 不能动，A3Tools 可以）
+
 ### 2026-10-25 v2.6.6 发布（已完成）
 
 **结果**
