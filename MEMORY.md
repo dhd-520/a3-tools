@@ -241,6 +241,38 @@
 - **★ `_lastHeightApply` 字段声明了但根本没被使用** → 高度应用路径**没有节流**，每个 notify 都会立即应用 → 锚定补偿能生效
 - **`_userWasAtBottom` 跟滚逻辑保留不动** → 流式输出时依然自动跟到底，不影响原有体验
 
+### 2026-10-26 自定义工具「关联字段」支持多个，与关联表一一对应（v2.6.8）
+
+**需求**（陛下）：关联表每个可能用不同外键。关联字段改成可填多个（英文分号隔开），与上面的关联表按顺序一一对应；只填 1 个时所有关联表共用。
+
+**★★ 规则（写在 `CustomToolForeignKeyResolver`）**
+- 关联字段留空 → `None`：只复制主表，不复制关联表
+- 只填 **1** 个 → `Shared`：所有关联表共用这一个（**完全兼容旧配置，旧数据零迁移**）
+- 填 **多个** → `PerTable`：必须与关联表**数量一致**，按顺序一一对应
+- 数量不一致 → **非法**（报错，不静默猜）
+
+**★★ 架构：纯逻辑抽出来，可单测**
+- 新增 `A3Tools.Common/Services/CustomToolForeignKeyResolver.cs`（纯算术 + 无 WinForms）
+  - `SplitList(raw)` / `Resolve(relatedTables, foreignKey)` → `ForeignKeyResolution`
+  - `ForeignKeyResolution`：Mode(Shared/PerTable/None) + RelatedTables + ForeignKeys(等长同序) + Error + `GetForeignKey(i)`
+- `CustomToolConfig` 加 `ForeignKeyList` 和 `ForeignKeys`（都是 `[JsonIgnore]`，不落盘）
+- `CustomToolConfigDialog`：保存前校验（数量不匹配 → 弹窗报错，焦点回 `txtForeignKey`）
+- `GenericCopyToolForm`：构造时解析一次存 `_fkResolution`；复制时 `for (int t...)` 按表取各自外键
+  - 同步 `TableCopyService.CopyTableDataByParentGuid` 和 Http `ProxyHelper.CopyTableDataByParentGuidAsync` **两条路都改了**
+  - 状态栏文案：PerTable 模式显示「表=字段」对照（如 `S_A=F1 / S_B=F2`）
+
+**★★ 坑：测试必须走生产序列化器（又踩一次同一个坑的变种）**
+- 二哈第一版 G 段用 `JsonSerializer.Deserialize(list)` **默认选项** → 属性名大小写不匹配（`relatedTables` vs `RelatedTables`）→ 3 个 FAIL
+- 生产 `CustomToolStorage` 用的是 `PropertyNamingPolicy = JsonNamingPolicy.CamelCase` + `WriteIndented`
+- **修法：测试直接用生产的 `CustomToolStorage` 类**（它写 `AppContext.BaseDirectory\DATA\`，即测试输出目录，**不碰真实部署数据**）
+- **★ 教训升级：上次是「手抄生产逻辑」，这次是「绕过生产序列化器」——本质一样：测试用的路径 ≠ 生产路径，就测不准**
+
+**★ 真实数据回归**：直接拿 `D:\Work\工具\A3工具箱更新\DATA\custom-tools.json` 跑一遍 → 5 条配置、1 条有关联表、全部 Shared（旧的单字段）→ 旧配置零影响
+
+**★ 测试工程**：`D:\Temp\a3fktest`（46 项全绿）
+
+**★ 部署**：`D:\Work\工具\A3工具箱更新\` → File=2.6.8.0，`DATA\` 未动
+
 ### 2026-10-26 账套管理列宽：只改临近列 + 总宽恒定占满 100%（v2.6.7）
 
 **需求**（陛下）：首页账套管理拖列宽时，只改临近列，总宽不变、始终占满 100%。

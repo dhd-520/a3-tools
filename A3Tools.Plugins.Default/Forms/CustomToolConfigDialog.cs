@@ -5,7 +5,8 @@ namespace A3Tools.Plugins.Default.Forms;
 
 /// <summary>
 /// 自定义工具配置窗体。
-/// 字段：工具名 / 描述 / 主表 / 复制关键字（主键） / 关联表（分号分隔）/ 关联字段（外键）。
+/// 字段：工具名 / 描述 / 主表 / 复制关键字（主键） / 关联表（分号分隔）/ 关联字段（外键，可分号分隔）。
+/// 关联字段规则：填 1 个 → 所有关联表共用；填多个 → 与关联表按顺序一一对应。
 /// 保存到 DATA\custom-tools.json；编辑现有配置时显示「删除」按钮。
 /// </summary>
 public partial class CustomToolConfigDialog : Form
@@ -86,6 +87,15 @@ public partial class CustomToolConfigDialog : Form
         if (hasRelated != hasFk)
         {
             MessageBox.Show("关联表和关联字段要么都填写，要么都不填写", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 关联字段：只填 1 个 → 所有关联表共用；填多个 → 必须与关联表数量一致、一一对应
+        var fkResolution = CustomToolForeignKeyResolver.Resolve(related, fk);
+        if (!fkResolution.IsValid)
+        {
+            MessageBox.Show(fkResolution.Error!, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            txtForeignKey.Focus();
             return;
         }
 

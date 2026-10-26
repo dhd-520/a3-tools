@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using A3Tools.Services;
 
 namespace A3Tools.Models;
 
@@ -15,7 +16,13 @@ public class CustomToolConfig
     public string MainTable { get; set; } = string.Empty;     // 主表（如 S_REPORT）
     public string PrimaryKey { get; set; } = string.Empty;    // 主键字段（如 CODE）
     public string RelatedTables { get; set; } = string.Empty; // 关联表，英文分号分隔（如 S_REPORTLINKDEFINE;S_REPORTDOUBLECLICK）
-    public string ForeignKey { get; set; } = string.Empty;   // 关联表外键字段（如 REPORTGUID）
+
+    /// <summary>
+    /// 关联表外键字段，英文分号分隔。
+    /// 只填 1 个 → 所有关联表共用这一个（兼容旧配置，旧数据无需迁移）；
+    /// 填多个 → 必须与关联表数量一致，按顺序一一对应（如 S_REPORTLINKDEFINE;S_REPORTDOUBLECLICK → REPORTGUID;DOUBLECLICKGUID）。
+    /// </summary>
+    public string ForeignKey { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     /// <summary>搜索列名，英文分号分隔（如 GUID;CODE;SUBSYSTEMGUID;NAME;NOTES）。空表示用旧行为：主键列 + 存在 NAME 则加上。</summary>
@@ -33,6 +40,19 @@ public class CustomToolConfig
         string.IsNullOrWhiteSpace(RelatedTables)
             ? new List<string>()
             : RelatedTables.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    /// <summary>把 ForeignKey 解析为字段列表（去空白 + 去空项）</summary>
+    [JsonIgnore]
+    public List<string> ForeignKeyList =>
+        CustomToolForeignKeyResolver.SplitList(ForeignKey);
+
+    /// <summary>
+    /// 关联字段与关联表的对应关系（Shared=所有表共用一个 / PerTable=一一对应 / None=不复制关联表）。
+    /// 解析规则见 <see cref="CustomToolForeignKeyResolver"/>。
+    /// </summary>
+    [JsonIgnore]
+    public ForeignKeyResolution ForeignKeys =>
+        CustomToolForeignKeyResolver.Resolve(RelatedTables, ForeignKey);
 
     /// <summary>把 SearchColumns 解析为字符串列表</summary>
     [JsonIgnore]

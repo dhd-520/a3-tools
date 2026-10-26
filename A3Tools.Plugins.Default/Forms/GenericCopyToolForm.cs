@@ -19,6 +19,9 @@ public partial class GenericCopyToolForm : Form
 {
     private readonly IToolContext _context;
     private readonly CustomToolConfig _config;
+
+    /// <summary>关联字段与关联表的对应关系（构造时解析一次，避免重复解析）。</summary>
+    private readonly ForeignKeyResolution _fkResolution;
     private System.Data.DataTable? _searchResults;
     private string _quickFilterText = "";
 
@@ -35,6 +38,7 @@ public partial class GenericCopyToolForm : Form
     {
         _context = context;
         _config = config;
+        _fkResolution = config.ForeignKeys;
         InitializeComponent();
         LoadPresetAccounts();
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
@@ -132,14 +136,35 @@ public partial class GenericCopyToolForm : Form
 
     private string BuildConfigInfoText()
     {
-        var related = _config.RelatedTableList;
+        var fk = _config.ForeignKeys;
+        var related = fk.RelatedTables;
         var relatedDesc = related.Count == 0 ? "（无）" : string.Join(" / ", related);
-        var foreignKey = string.IsNullOrEmpty(_config.ForeignKey) ? "（无）" : _config.ForeignKey;
+        var foreignKey = BuildForeignKeyDesc(fk);
         var searchCols = _config.SearchColumnList;
         var searchDesc = searchCols.Count == 0 ? "全部列" : string.Join(",", searchCols);
         var hiddenCols = _config.HiddenColumnSet;
         var hiddenDesc = hiddenCols.Count == 0 ? string.Empty : $"    隐藏：{string.Join(",", hiddenCols)}";
         return $"主表：{_config.MainTable}    主键：{_config.PrimaryKey}    关联表：{relatedDesc}    关联字段：{foreignKey}    搜索列：{searchDesc}{hiddenDesc}";
+    }
+
+    /// <summary>
+    /// 生成「关联字段」显示文案：
+    /// - Shared：所有关联表共用一个 → 直接显示字段名
+    /// - PerTable：与关联表一一对应 → 显示「表=字段」对照
+    /// </summary>
+    private static string BuildForeignKeyDesc(ForeignKeyResolution fk)
+    {
+        if (fk.Mode == ForeignKeyMatchMode.None) return "（无）";
+        if (fk.Mode == ForeignKeyMatchMode.Shared)
+            return fk.ForeignKeys.Count > 0 && fk.ForeignKeys[0] != null ? fk.ForeignKeys[0]! : "（无）";
+
+        var parts = new List<string>();
+        for (int i = 0; i < fk.RelatedTables.Count; i++)
+        {
+            var field = fk.GetForeignKey(i);
+            parts.Add($"{fk.RelatedTables[i]}={field ?? "（无）"}");
+        }
+        return string.Join(" / ", parts);
     }
 
     private string BuildSearchHintText()
@@ -798,7 +823,14 @@ WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName";
         if (!TestConn(srcConnStr)) { MessageBox.Show("源数据库连接失败！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
         if (!TestConn(tgtConnStr)) { MessageBox.Show("目标数据库连接失败！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
 
-        var relatedTables = _config.RelatedTableList;
+        var fk = _fkResolution;
+        if (!fk.IsValid)
+        {
+            MessageBox.Show(fk.Error!, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var relatedTables = fk.RelatedTables;
         var tag = $"[{_config.Name}]";
         var errors = new List<string>();
         var success = 0;
@@ -824,14 +856,26 @@ WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName";
                         var parentGuid = GetMainRowGuid(srcConn, _config.MainTable, _config.PrimaryKey, key);
                         TableCopyService.CopyTableData(srcConn, tgtConn, _config.MainTable, _config.PrimaryKey, key, chkDeleteFirst.Checked, tag);
 
-                        if (!string.IsNullOrEmpty(parentGuid) && !string.IsNullOrWhiteSpace(_config.ForeignKey))
+                        if (relatedTables.Count > 0)
                         {
-                            foreach (var related in relatedTables)
-                                TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, related, _config.ForeignKey, parentGuid, chkDeleteFirst.Checked, tag);
-                        }
-                        else if (relatedTables.Count > 0)
-                        {
-                            errors.Add($"{key}: 未找到主表 GUID/OBJECTGUID，关联表未复制");
+                            if (string.IsNullOrEmpty(parentGuid))
+                            {
+                                errors.Add($"{key}: 未找到主表 GUID/OBJECTGUID，关联表未复制");
+                            }
+                            else if (!fk.HasForeignKey)
+                            {
+                                errors.Add($"{key}: 未配置关联字段，关联表未复制");
+                            }
+                            else
+                            {
+                                // 每个关联表用各自的外键字段（Shared 模式时全部相同）
+                                for (int t = 0; t < relatedTables.Count; t++)
+                                {
+                                    var parentField = fk.GetForeignKey(t);
+                                    if (string.IsNullOrWhiteSpace(parentField)) continue;
+                                    TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, relatedTables[t], parentField, parentGuid, chkDeleteFirst.Checked, tag);
+                                }
+                            }
                         }
 
                         success++;
@@ -959,7 +1003,15 @@ ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
 
         var srcDA = ProxyHelper.CreateDataAccess(_srcAccount)!;
         var tgtDA = ProxyHelper.CreateDataAccess(_tgtAccount)!;
-        var relatedTables = _config.RelatedTableList;
+
+        var fk = _fkResolution;
+        if (!fk.IsValid)
+        {
+            MessageBox.Show(fk.Error!, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var relatedTables = fk.RelatedTables;
         var tag = $"[{_config.Name}]";
         var errors = new List<string>();
         var success = 0;
@@ -978,14 +1030,26 @@ ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
                     var parentGuid = await GetMainRowGuidHttpAsync(srcDA, _config.MainTable, _config.PrimaryKey, key);
                     await ProxyHelper.CopyTableDataAsync(srcDA, tgtDA, _config.MainTable, _config.PrimaryKey, key, chkDeleteFirst.Checked, tag);
 
-                    if (!string.IsNullOrEmpty(parentGuid) && !string.IsNullOrWhiteSpace(_config.ForeignKey))
+                    if (relatedTables.Count > 0)
                     {
-                        foreach (var related in relatedTables)
-                            await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, related, _config.ForeignKey, parentGuid, chkDeleteFirst.Checked, tag);
-                    }
-                    else if (relatedTables.Count > 0)
-                    {
-                        errors.Add($"{key}: 未找到主表 GUID/OBJECTGUID，关联表未复制");
+                        if (string.IsNullOrEmpty(parentGuid))
+                        {
+                            errors.Add($"{key}: 未找到主表 GUID/OBJECTGUID，关联表未复制");
+                        }
+                        else if (!fk.HasForeignKey)
+                        {
+                            errors.Add($"{key}: 未配置关联字段，关联表未复制");
+                        }
+                        else
+                        {
+                            // 每个关联表用各自的外键字段（Shared 模式时全部相同）
+                            for (int t = 0; t < relatedTables.Count; t++)
+                            {
+                                var parentField = fk.GetForeignKey(t);
+                                if (string.IsNullOrWhiteSpace(parentField)) continue;
+                                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, relatedTables[t], parentField, parentGuid, chkDeleteFirst.Checked, tag);
+                            }
+                        }
                     }
 
                     success++;

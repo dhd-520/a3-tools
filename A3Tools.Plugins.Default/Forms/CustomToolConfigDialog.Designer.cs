@@ -251,7 +251,7 @@ partial class CustomToolConfigDialog
         txtForeignKey.Location = new Point(208, 468);
         txtForeignKey.Margin = new Padding(11, 10, 0, 10);
         txtForeignKey.Name = "txtForeignKey";
-        txtForeignKey.PlaceholderText = "所有关联表共用的外键字段,如:REPORTGUID";
+        txtForeignKey.PlaceholderText = "只填 1 个则所有关联表共用,如:REPORTGUID;填多个则与关联表按顺序一一对应,如:REPORTGUID;DOUBLECLICKGUID";
         txtForeignKey.Size = new Size(802, 38);
         txtForeignKey.TabIndex = 11;
         //
@@ -341,7 +341,7 @@ partial class CustomToolConfigDialog
         lblHint.Padding = new Padding(11, 7, 0, 0);
         lblHint.Size = new Size(683, 26);
         lblHint.TabIndex = 18;
-        lblHint.Text = "提示：关联表/关联字段留空表示只复制主表（按主键全量或选中行）。";
+        lblHint.Text = "提示：关联表/关联字段留空表示只复制主表（按主键全量或选中行）；关联字段只填 1 个则所有关联表共用，填多个则与关联表按顺序一一对应。";
         //
         // lblSearchHint2
         //
