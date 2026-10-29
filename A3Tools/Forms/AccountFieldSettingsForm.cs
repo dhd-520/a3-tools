@@ -39,6 +39,8 @@ public partial class AccountFieldSettingsForm : Form
         this.btnSave.Click += BtnSave_Click;
         this.btnCancel.Click += BtnCancel_Click;
         this.btnReset.Click += BtnReset_Click;
+        this.btnAddField.Click += BtnAddField_Click;
+        this.btnDeleteField.Click += BtnDeleteField_Click;
 
         LoadFromStore();
     }
@@ -64,6 +66,7 @@ public partial class AccountFieldSettingsForm : Form
         {
             int idx = this.dgvFields.Rows.Add(
                 cfg.DisplayName,
+                AccountFieldCatalog.IsBuiltIn(cfg.Field) ? "内置" : "自定义",
                 cfg.ShowInList,
                 cfg.ListWidth,
                 cfg.ListOrder + 1,     // 表格里用 1 基序号（1 = 最前），人看着直观
@@ -219,6 +222,91 @@ public partial class AccountFieldSettingsForm : Form
         this.lblStatus.Text = "已保存";
         this.DialogResult = DialogResult.OK;
         this.Close();
+    }
+
+    /// <summary>
+    /// 新增自定义字段（2026-10-29 陛下：内置字段不能删，自定义字段可增可删）。
+    /// 自定义字段的键形如 "Cust_1751..."，与内置字段不会撞。
+    /// </summary>
+    private void BtnAddField_Click(object? sender, EventArgs e)
+    {
+        string name;
+        using (var dlg = new PromptInputForm("新增自定义字段", "请输入字段名称（例如：门店编号）"))
+        {
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            name = dlg.InputText.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            MessageBox.Show("字段名称不能为空。", "新增字段", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 重名检查（自定义字段之间 + 不能和内置字段同名）
+        bool dup = _editing.Any(c =>
+            string.Equals(c.DisplayName, name, StringComparison.OrdinalIgnoreCase));
+        if (dup)
+        {
+            MessageBox.Show($"已经有叫「{name}」的字段了，换个名字。", "新增字段",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        int maxList = _editing.Count == 0 ? 0 : _editing.Max(c => c.ListOrder) + 1;
+        int maxEditor = _editing.Count == 0 ? 0 : _editing.Max(c => c.EditorOrder) + 1;
+
+        var custom = new AccountFieldConfig
+        {
+            Field = "Cust_" + DateTime.Now.Ticks,
+            CustomName = name,
+            DisplayName = name,
+            ListHeader = name,
+            ShowInList = true,
+            ListWidth = 0,
+            ListOrder = maxList,
+            ShowInEditor = true,
+            EditorOrder = maxEditor,
+            CanShowInList = true,
+            ListWeight = 20,
+            EditorRowAdvance = 45,
+            Required = false,
+        };
+
+        _editing.Add(custom);
+        BindRows();
+        this.lblStatus.Text = $"已新增自定义字段「{name}」，点击保存后生效";
+    }
+
+    /// <summary>
+    /// 删除自定义字段（内置字段不可删）。
+    /// </summary>
+    private void BtnDeleteField_Click(object? sender, EventArgs e)
+    {
+        if (this.dgvFields.CurrentRow == null)
+        {
+            MessageBox.Show("请先选中要删除的字段。", "删除字段", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var cfg = GetConfigOfRow(this.dgvFields.CurrentRow);
+        if (cfg == null) return;
+
+        // 内置字段不能删（删了账套数据就缺字段了）
+        if (AccountFieldCatalog.IsBuiltIn(cfg.Field))
+        {
+            MessageBox.Show($"「{cfg.DisplayName}」是内置字段，不能删除。\n只有你自己新增的自定义字段可以删。",
+                "删除字段", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var dr = MessageBox.Show($"确定删除自定义字段「{cfg.DisplayName}」吗？\n（已录入的值会留在数据里，但不再显示）",
+            "删除字段", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (dr != DialogResult.Yes) return;
+
+        _editing.RemoveAll(c => string.Equals(c.Field, cfg.Field, StringComparison.OrdinalIgnoreCase));
+        BindRows();
+        this.lblStatus.Text = $"已删除自定义字段「{cfg.DisplayName}」，点击保存后生效";
     }
 
     private void BtnCancel_Click(object? sender, EventArgs e)

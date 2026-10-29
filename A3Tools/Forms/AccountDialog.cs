@@ -15,6 +15,12 @@ public partial class AccountDialog : Form
     /// <summary>账套字段显示配置（录入界面的显隐与排序）</summary>
     private readonly AccountFieldStore _fieldStore = new();
 
+    /// <summary>
+    /// 自定义字段的运行时控件（2026-10-29 陛下：支持新增自定义字段）。
+    /// 内置字段的控件在设计器里；自定义字段没有 → 只能运行时创建（唯一例外）。
+    /// </summary>
+    private readonly Dictionary<string, (Label Label, TextBox Input)> _customSlots = new();
+
     /// <summary>是否显示密码明文（Root模式使用）</summary>
     public bool ShowPasswords { get; set; } = false;
 
@@ -89,10 +95,64 @@ public partial class AccountDialog : Form
         // 配置已由 Normalize 兜底：密码不进列表、必填不隐藏、排序号连续
         var config = AccountFieldResolver.Normalize(_fieldStore.Load());
 
+        // ★ 自定义字段：设计器里没有对应控件 → 运行时创建（Label + TextBox）
+        EnsureCustomFieldControls(config, slots);
+
         var layout = new AccountEditorLayout(slots, pnlProxyGroup, startY: 20);
         layout.Apply(config);
 
         ShrinkToContent();
+    }
+
+    /// <summary>
+    /// 为每个自定义字段准备一对「标签 + 输入框」（运行时创建）。
+    /// 已经删掉的字段 → 把旧控件从窗体上摘掉（避免漏在界面里）。
+    /// </summary>
+    private void EnsureCustomFieldControls(
+        List<AccountFieldConfig> config,
+        Dictionary<string, AccountEditorLayout.Slot> slots)
+    {
+        var customs = config.Where(c => !AccountFieldCatalog.IsBuiltIn(c.Field)).ToList();
+
+        // 清理：已经被删除的自定义字段
+        foreach (var key in _customSlots.Keys.ToList())
+        {
+            if (customs.Any(c => c.Field == key)) continue;
+            var old = _customSlots[key];
+            contentPanel.Controls.Remove(old.Label);
+            contentPanel.Controls.Remove(old.Input);
+            old.Label.Dispose();
+            old.Input.Dispose();
+            _customSlots.Remove(key);
+        }
+
+        // 新建：缺少的自定义字段
+        foreach (var c in customs)
+        {
+            if (!_customSlots.TryGetValue(c.Field, out var pair))
+            {
+                var lb = new Label
+                {
+                    Text = c.DisplayName + "：",
+                    Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point),
+                    ForeColor = Color.FromArgb(80, 80, 80),
+                    Size = new Size(210, 35),
+                    Location = new Point(30, 0),
+                    TextAlign = ContentAlignment.MiddleRight,
+                };
+                var tb = new TextBox
+                {
+                    Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point),
+                    Size = new Size(590, 41),
+                    Location = new Point(250, 0),
+                };
+                contentPanel.Controls.Add(lb);
+                contentPanel.Controls.Add(tb);
+                pair = (lb, tb);
+                _customSlots[c.Field] = pair;
+            }
+            slots[c.Field] = new AccountEditorLayout.Slot(pair.Label, pair.Input);
+        }
     }
 
     /// <summary>
@@ -150,6 +210,13 @@ public partial class AccountDialog : Form
         this.txtRemark.Text = account.Remark;
 
         this.txtServerUsername.Text = account.ServerUsername;
+
+        // 自定义字段的值（2026-10-29）
+        foreach (var kv in _customSlots)
+        {
+            if (account.CustomFields != null && account.CustomFields.TryGetValue(kv.Key, out var cv))
+                kv.Value.Input.Text = cv ?? string.Empty;
+        }
 
         // 2026-07-09 代理模式
         if (account.ConnectionMode == DataAccessMode.Http)
@@ -241,6 +308,10 @@ public partial class AccountDialog : Form
             RemotePassword = this.txtRemotePassword.Text,
             Remark = this.txtRemark.Text.Trim(),
             ServerUsername = this.txtServerUsername.Text.Trim(),
+            // 自定义字段的值（2026-10-29）
+            CustomFields = _customSlots.ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.Input.Text.Trim()),
             // 2026-07-09 代理模式
             ConnectionMode = this.rbHttp.Checked ? DataAccessMode.Http : DataAccessMode.Direct,
             HttpEndpoint = BuildHttpEndpoint(this.txtServer.Text.Trim()),

@@ -1330,12 +1330,16 @@ public partial class MainForm : Form, IToolContext
             foreach (var c in listCols)
             {
                 var def = AccountFieldCatalog.Find(c.Field);
+                bool isCustom = def == null;   // 用户新增的自定义字段
+
                 cols.Add(new DataGridViewTextBoxColumn
                 {
-                    HeaderText = def?.ListHeader ?? c.Field,
-                    DataPropertyName = c.Field,
+                    HeaderText = isCustom ? c.DisplayName : (def?.ListHeader ?? c.Field),
+                    // 自定义字段不是 Account 上的属性 → 不做数据绑定（否则绑定报错），
+                    // 值由 CellFormatting 从账套的 CustomFields 里取
+                    DataPropertyName = isCustom ? null : c.Field,
                     Name = AccountColumnName(c.Field),
-                    FillWeight = (float)(def?.ListWeight ?? 10),
+                    FillWeight = (float)(def?.ListWeight ?? 20),
                     MinimumWidth = 60,
                     AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 });
@@ -1565,6 +1569,20 @@ public partial class MainForm : Form, IToolContext
         if (this.dgvAccounts.Columns.Count <= e.ColumnIndex) return;
 
         var col = this.dgvAccounts.Columns[e.ColumnIndex];
+
+        // 自定义字段列（无 DataPropertyName）：值存在账套的 CustomFields 里
+        if (string.IsNullOrEmpty(col.DataPropertyName))
+        {
+            var accCustom = this.dgvAccounts.Rows[e.RowIndex].DataBoundItem as Account;
+            string key = col.Name.StartsWith("Col", StringComparison.Ordinal) ? col.Name.Substring(3) : col.Name;
+            string? customVal = null;
+            if (accCustom?.CustomFields != null && accCustom.CustomFields.TryGetValue(key, out var cv))
+                customVal = cv;
+            e.Value = customVal ?? string.Empty;
+            e.FormattingApplied = true;
+            return;
+        }
+
         if (!_sensitiveColumnNames.Contains(col.DataPropertyName)) return;
 
         // Root 模式：放行，使用默认绑定值

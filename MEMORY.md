@@ -470,6 +470,32 @@
 - **分组面板（Panel）里塞控件 = 该控件永远无法参与字段流重排** —— 以后别把字段控件藏在面板里
 - 改 Designer 时：**emoji 行的字节容易对不上**，整块替换会失败 → 拆成小块、避开含 emoji 的行
 
+### ★★ v2.6.11 陛下再提：「现有字段为内置字段，支持新增字段，自定义字段可删，内置的不能删」
+**实现（内置 = AccountFieldCatalog.All 里的 15 个，其余都是用户新增的）**：
+- 模型：`AccountFieldConfig.CustomName`（**要持久化** → 不能用 JsonIgnore）；`DisplayName` 仍是 JsonIgnore，由解析器填充
+- `AccountFieldCatalog.IsBuiltIn(field)` → 判定内置/自定义（内置不可删）
+- 解析器 `Normalize` 现在**保留自定义字段**（原来不在目录里的字段全被丢掉）；
+  ★ 安全护栏：**只有带 CustomName 的才算自定义字段** → 配置文件里手改出来的陌生字段直接丢弃，
+  免得升级后目录里删掉的字段变成一根莫名其妙的列
+- 值落地：`Account.CustomFields`（`Dictionary<string,string>`）→ 随 accounts.json 一起存（camelCase）
+- 列表显示自定义字段列：DataPropertyName 设 **null**（不是 Account 的属性，绑定会报错），
+  值由 `CellFormatting` 从 `CustomFields` 取（键 = 列名去掉 "Col" 前缀）
+- 录入界面：**设计器里没有自定义字段的控件 → 运行时创建**（Label+TextBox 加进 contentPanel）
+  → 这是「所见即所得」原则的**唯一例外**（用户自定义字段天生没有设计器控件）
+  · 字段被删 → 旧控件从窗体摘掉并 Dispose
+  · `Slot.Note` 机制复用给「随行说明」
+- 设置窗体：新增「类型」列（内置/自定义）+「➕ 新增字段」+「🗑 删除字段」按钮
+  · 新增走 `PromptInputForm`（新写的通用输入框窗体，带 Designer 文件）
+  · 自定义字段键 = `Cust_` + DateTime.Now.Ticks；重名检查（跟内置/自定义都不许重）
+  · 删除内置字段 → 明确提示「内置字段，不能删除」
+- **删掉的字段其历史值会留在 accounts.json 里**（不再显示，但数据没丢）
+
+**教训**：
+- 「用户新增字段」不是加一行表格那么简单 —— 要连**值存储 + 列表显示 + 录入控件**一起打通，
+  否则就是个没用的空壳
+- 绑定 DataGridView 时，列的 DataPropertyName 指向不存在的属性会报错 → 自定义字段列用
+  **DataPropertyName=null + CellFormatting 手动填值**
+
 ### 未发布到 Gitee
-- `v2.6.7` / `v2.6.8` / `v2.6.9` / `v2.6.10` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
-- 等陛下确认后再跑 `release.ps1 -Version 2.6.10`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）
+- `v2.6.7` ~ `v2.6.11` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
+- 等陛下确认后再跑 `release.ps1 -Version 2.6.11`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）

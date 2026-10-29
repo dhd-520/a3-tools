@@ -25,6 +25,14 @@ public class Account
     public string RemotePassword { get; set; } = string.Empty;// 远程密码（加密）
     public string Remark { get; set; } = string.Empty;           // 备注
 
+    /// <summary>
+    /// 用户自定义字段的值（2026-10-29 陛下：支持新增自定义字段）。
+    ///
+    /// 键 = 字段配置里的 Field（自定义字段形如 "Cust_1709..."），值 = 用户填的内容。
+    /// 内置字段不走这里（它们是 <see cref="Account"/> 上的真实属性）。
+    /// </summary>
+    public Dictionary<string, string> CustomFields { get; set; } = new();
+
     // ======== 2026-07-09 新增：代理连接模式 ========
     
     /// <summary>

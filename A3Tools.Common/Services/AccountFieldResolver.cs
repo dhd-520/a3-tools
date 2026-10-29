@@ -26,12 +26,14 @@ public static class AccountFieldResolver
     {
         // 用户存的值按字段名建索引（忽略大小写，容忍手改 JSON）
         var userValues = new Dictionary<string, AccountFieldConfig>(StringComparer.OrdinalIgnoreCase);
+        var storedList = new List<AccountFieldConfig>();
         if (stored != null)
         {
             foreach (var s in stored)
             {
                 if (s == null || string.IsNullOrWhiteSpace(s.Field)) continue;
                 userValues[s.Field] = s;
+                storedList.Add(s);
             }
         }
 
@@ -65,7 +67,7 @@ public static class AccountFieldResolver
                 m.EditorOrder = u.EditorOrder;
             }
 
-            // —— 强制约束（用户改不动的部分）——
+        // —— 强制约束（用户改不动的部分）——
             // 密码类字段禁止进列表：列表会明文显示，泄露风险
             if (!m.CanShowInList) m.ShowInList = false;
             // 必填字段（代码/账套名称）不允许从录入界面隐藏：
@@ -76,6 +78,40 @@ public static class AccountFieldResolver
             if (m.ListWidth > MaxListWidth) m.ListWidth = MaxListWidth;
 
             merged.Add(m);
+        }
+
+        // ★ 自定义字段（2026-10-29 陛下：支持新增字段）
+        //   不在目录里的都是用户自己新增的，原样保留用户的全部设置（名字/显隐/宽度/排序）
+        foreach (var u in storedList)
+        {
+            if (AccountFieldCatalog.IsBuiltIn(u.Field)) continue;   // 内置字段上面已处理
+
+            // ★ 安全护栏：只有明确带 CustomName 的才算是「用户新增的自定义字段」。
+            //   配置文件里手改出来的陌生字段（没有名字）直接丢掉，
+            //   免得升级后目录里删掉的字段变成一根莫名其妙的列。
+            if (string.IsNullOrWhiteSpace(u.CustomName)) continue;
+
+            string name = u.CustomName.Trim();
+            int customWidth = u.ListWidth;
+            if (customWidth < 0) customWidth = 0;
+            if (customWidth > MaxListWidth) customWidth = MaxListWidth;
+
+            merged.Add(new AccountFieldConfig
+            {
+                Field = u.Field,
+                CustomName = name,
+                ShowInList = u.ShowInList,
+                ListWidth = customWidth,
+                ListOrder = u.ListOrder,
+                ShowInEditor = u.ShowInEditor,
+                EditorOrder = u.EditorOrder,
+                DisplayName = name,
+                ListHeader = name,
+                CanShowInList = true,
+                ListWeight = 20,
+                EditorRowAdvance = 45,
+                Required = false,
+            });
         }
 
         // 列表至少要有一列，否则 DataGridView 没有列 → 界面直接崩

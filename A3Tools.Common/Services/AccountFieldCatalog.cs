@@ -55,6 +55,12 @@ public static class AccountFieldCatalog
         return null;
     }
 
+    /// <summary>
+    /// 是否内置字段（2026-10-29 陛下：内置的不能删，只有自定义字段可删）。
+    /// 内置 = 在 <see cref="All"/> 目录里的那些；其余都是用户自己新增的。
+    /// </summary>
+    public static bool IsBuiltIn(string? field) => Find(field) != null;
+
     /// <summary>默认配置的一份深拷贝（每个字段都是新对象，避免改到目录里的默认值）</summary>
     public static List<AccountFieldConfig> CreateDefaults()
     {

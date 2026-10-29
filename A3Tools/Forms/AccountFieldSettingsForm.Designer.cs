@@ -15,6 +15,8 @@ partial class AccountFieldSettingsForm
     // ===== 底部按钮区 =====
     private Panel footerPanel = null!;
     private Label lblStatus = null!;
+    private Button btnAddField = null!;
+    private Button btnDeleteField = null!;
     private Button btnReset = null!;
     private Button btnCancel = null!;
     private Button btnSave = null!;
@@ -34,6 +36,8 @@ partial class AccountFieldSettingsForm
         dgvFields = new DataGridView();
         footerPanel = new Panel();
         lblStatus = new Label();
+        btnAddField = new Button();
+        btnDeleteField = new Button();
         btnReset = new Button();
         btnCancel = new Button();
         btnSave = new Button();
@@ -119,6 +123,17 @@ partial class AccountFieldSettingsForm
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
         });
+        dgvFields.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "ColType",
+            HeaderText = "类型",
+            ReadOnly = true,
+            Width = 70,
+            MinimumWidth = 60,
+            SortMode = DataGridViewColumnSortMode.NotSortable,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+            DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
+        });
         dgvFields.Columns.Add(new DataGridViewCheckBoxColumn
         {
             Name = "ColShowList",
@@ -175,6 +190,8 @@ partial class AccountFieldSettingsForm
         //
         footerPanel.BackColor = Color.FromArgb(245, 245, 245);
         footerPanel.Controls.Add(lblStatus);
+        footerPanel.Controls.Add(btnAddField);
+        footerPanel.Controls.Add(btnDeleteField);
         footerPanel.Controls.Add(btnReset);
         footerPanel.Controls.Add(btnCancel);
         footerPanel.Controls.Add(btnSave);
@@ -194,6 +211,38 @@ partial class AccountFieldSettingsForm
         lblStatus.TabIndex = 0;
         lblStatus.Text = "就绪";
         //
+        // btnAddField
+        //
+        btnAddField.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        btnAddField.BackColor = Color.White;
+        btnAddField.Cursor = Cursors.Hand;
+        btnAddField.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
+        btnAddField.FlatStyle = FlatStyle.Flat;
+        btnAddField.Font = new Font("微软雅黑", 10F);
+        btnAddField.ForeColor = Color.FromArgb(80, 80, 80);
+        btnAddField.Location = new Point(200, 12);
+        btnAddField.Name = "btnAddField";
+        btnAddField.Size = new Size(120, 40);
+        btnAddField.TabIndex = 1;
+        btnAddField.Text = "➕ 新增字段";
+        btnAddField.UseVisualStyleBackColor = false;
+        //
+        // btnDeleteField
+        //
+        btnDeleteField.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        btnDeleteField.BackColor = Color.White;
+        btnDeleteField.Cursor = Cursors.Hand;
+        btnDeleteField.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
+        btnDeleteField.FlatStyle = FlatStyle.Flat;
+        btnDeleteField.Font = new Font("微软雅黑", 10F);
+        btnDeleteField.ForeColor = Color.FromArgb(80, 80, 80);
+        btnDeleteField.Location = new Point(330, 12);
+        btnDeleteField.Name = "btnDeleteField";
+        btnDeleteField.Size = new Size(120, 40);
+        btnDeleteField.TabIndex = 2;
+        btnDeleteField.Text = "🗑 删除字段";
+        btnDeleteField.UseVisualStyleBackColor = false;
+        //
         // btnReset
         //
         btnReset.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -203,10 +252,10 @@ partial class AccountFieldSettingsForm
         btnReset.FlatStyle = FlatStyle.Flat;
         btnReset.Font = new Font("微软雅黑", 10F);
         btnReset.ForeColor = Color.FromArgb(80, 80, 80);
-        btnReset.Location = new Point(404, 12);
+        btnReset.Location = new Point(460, 12);
         btnReset.Name = "btnReset";
-        btnReset.Size = new Size(120, 40);
-        btnReset.TabIndex = 1;
+        btnReset.Size = new Size(110, 40);
+        btnReset.TabIndex = 3;
         btnReset.Text = "↺ 恢复默认";
         btnReset.UseVisualStyleBackColor = false;
         //
@@ -219,10 +268,10 @@ partial class AccountFieldSettingsForm
         btnCancel.FlatStyle = FlatStyle.Flat;
         btnCancel.Font = new Font("微软雅黑", 10F);
         btnCancel.ForeColor = Color.FromArgb(80, 80, 80);
-        btnCancel.Location = new Point(534, 12);
+        btnCancel.Location = new Point(580, 12);
         btnCancel.Name = "btnCancel";
         btnCancel.Size = new Size(110, 40);
-        btnCancel.TabIndex = 2;
+        btnCancel.TabIndex = 4;
         btnCancel.Text = "✖ 取消";
         btnCancel.UseVisualStyleBackColor = false;
         //
@@ -235,10 +284,10 @@ partial class AccountFieldSettingsForm
         btnSave.FlatStyle = FlatStyle.Flat;
         btnSave.Font = new Font("微软雅黑", 10F, FontStyle.Bold);
         btnSave.ForeColor = Color.White;
-        btnSave.Location = new Point(654, 12);
+        btnSave.Location = new Point(700, 12);
         btnSave.Name = "btnSave";
         btnSave.Size = new Size(110, 40);
-        btnSave.TabIndex = 3;
+        btnSave.TabIndex = 5;
         btnSave.Text = "💾 保存";
         btnSave.UseVisualStyleBackColor = false;
         //

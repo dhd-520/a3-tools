@@ -20,6 +20,12 @@ public class AccountFieldConfig
     /// <summary>Account 上的属性名（如 Code / Name / RemoteType），主键</summary>
     public string Field { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 用户自定义字段的名字（2026-10-29 陛下：支持新增字段）。
+    /// 仅自定义字段有值；内置字段为空（名字来自 <c>AccountFieldCatalog</c>）。
+    /// </summary>
+    public string CustomName { get; set; } = string.Empty;
+
     /// <summary>是否在「账套管理」列表中显示</summary>
     public bool ShowInList { get; set; } = true;
 
