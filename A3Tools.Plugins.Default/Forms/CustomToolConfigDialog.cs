@@ -27,7 +27,8 @@ public partial class CustomToolConfigDialog : Form
         this.KeyDown += (s, e) =>
         {
             if (e.KeyCode == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); e.SuppressKeyPress = true; }
-            else if (e.KeyCode == Keys.Enter && !txtRelatedTables.ContainsFocus && !txtDescription.ContainsFocus)
+            else if (e.KeyCode == Keys.Enter && !txtRelatedTables.ContainsFocus && !txtDescription.ContainsFocus
+                     && !txtSecondaryTables.ContainsFocus && !txtSecondaryForeignKey.ContainsFocus)
             { BtnSave_Click(this, EventArgs.Empty); e.SuppressKeyPress = true; }
         };
 
@@ -39,6 +40,9 @@ public partial class CustomToolConfigDialog : Form
             txtPrimaryKey.Text = existing.PrimaryKey;
             txtRelatedTables.Text = existing.RelatedTables;
             txtForeignKey.Text = existing.ForeignKey;
+            txtSecondaryTables.Text = existing.SecondaryRelatedTables;
+            txtSecondaryForeignKey.Text = existing.SecondaryForeignKey;
+            txtSecondaryParentKey.Text = existing.SecondaryParentKey;
             txtSearchColumns.Text = existing.SearchColumns;
             txtColumnDisplayNames.Text = existing.ColumnDisplayNames;
             txtHiddenColumns.Text = existing.HiddenColumns;
@@ -99,6 +103,18 @@ public partial class CustomToolConfigDialog : Form
             return;
         }
 
+        // 二级关联表/字段：分组与数量必须对得上
+        var secTables = txtSecondaryTables.Text.Trim();
+        var secFields = txtSecondaryForeignKey.Text.Trim();
+        var secParentKey = txtSecondaryParentKey.Text.Trim();
+        var secResolution = CustomToolSecondaryLinkResolver.Resolve(related, fk, secTables, secFields);
+        if (!secResolution.IsValid)
+        {
+            MessageBox.Show(secResolution.Error!, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            txtSecondaryTables.Focus();
+            return;
+        }
+
         // 搜索列设置校验
         var searchCols = txtSearchColumns.Text.Trim();
         var displayNames = txtColumnDisplayNames.Text.Trim();
@@ -143,6 +159,9 @@ public partial class CustomToolConfigDialog : Form
         config.PrimaryKey = pk;
         config.RelatedTables = related;
         config.ForeignKey = fk;
+        config.SecondaryRelatedTables = secTables;
+        config.SecondaryForeignKey = secFields;
+        config.SecondaryParentKey = secParentKey;
         config.SearchColumns = searchCols;
         config.ColumnDisplayNames = displayNames;
         config.HiddenColumns = hiddenCols;

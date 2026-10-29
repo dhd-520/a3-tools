@@ -5,6 +5,7 @@ partial class CustomToolConfigDialog
     private System.ComponentModel.IContainer components = null;
 
     private TableLayoutPanel mainLayout;
+    private Panel scrollPanel;
     private Label lblName;
     private TextBox txtName;
     private Label lblDescription;
@@ -17,6 +18,12 @@ partial class CustomToolConfigDialog
     private TextBox txtRelatedTables;
     private Label lblForeignKey;
     private TextBox txtForeignKey;
+    private Label lblSecondaryTables;
+    private TextBox txtSecondaryTables;
+    private Label lblSecondaryForeignKey;
+    private TextBox txtSecondaryForeignKey;
+    private Label lblSecondaryParentKey;
+    private TextBox txtSecondaryParentKey;
     private Label lblSearchColumns;
     private TextBox txtSearchColumns;
     private Label lblColumnDisplayNames;
@@ -24,6 +31,7 @@ partial class CustomToolConfigDialog
     private Label lblHiddenColumns;
     private TextBox txtHiddenColumns;
     private Label lblHint;
+    private Label lblSecondaryHint;
     private Label lblSearchHint2;
     private Panel pnlButtons;
     private Button btnSave;
@@ -41,6 +49,7 @@ partial class CustomToolConfigDialog
     private void InitializeComponent()
     {
         mainLayout = new TableLayoutPanel();
+        scrollPanel = new Panel();
         lblName = new Label();
         txtName = new TextBox();
         lblDescription = new Label();
@@ -53,6 +62,13 @@ partial class CustomToolConfigDialog
         txtRelatedTables = new TextBox();
         lblForeignKey = new Label();
         txtForeignKey = new TextBox();
+        lblSecondaryTables = new Label();
+        txtSecondaryTables = new TextBox();
+        lblSecondaryForeignKey = new Label();
+        txtSecondaryForeignKey = new TextBox();
+        lblSecondaryParentKey = new Label();
+        txtSecondaryParentKey = new TextBox();
+        lblSecondaryHint = new Label();
         lblSearchColumns = new Label();
         txtSearchColumns = new TextBox();
         lblColumnDisplayNames = new Label();
@@ -65,6 +81,7 @@ partial class CustomToolConfigDialog
         btnCancel = new Button();
         btnSave = new Button();
         mainLayout.SuspendLayout();
+        scrollPanel.SuspendLayout();
         pnlButtons.SuspendLayout();
         SuspendLayout();
         //
@@ -85,25 +102,35 @@ partial class CustomToolConfigDialog
         mainLayout.Controls.Add(txtRelatedTables, 1, 4);
         mainLayout.Controls.Add(lblForeignKey, 0, 5);
         mainLayout.Controls.Add(txtForeignKey, 1, 5);
-        mainLayout.Controls.Add(lblSearchColumns, 0, 6);
-        mainLayout.Controls.Add(txtSearchColumns, 1, 6);
-        mainLayout.Controls.Add(lblColumnDisplayNames, 0, 7);
-        mainLayout.Controls.Add(txtColumnDisplayNames, 1, 7);
-        mainLayout.Controls.Add(lblHiddenColumns, 0, 8);
-        mainLayout.Controls.Add(txtHiddenColumns, 1, 8);
-        mainLayout.Controls.Add(lblHint, 1, 9);
-        mainLayout.Controls.Add(lblSearchHint2, 1, 10);
-        mainLayout.Controls.Add(pnlButtons, 0, 11);
-        mainLayout.Dock = DockStyle.Fill;
+        mainLayout.Controls.Add(lblSecondaryTables, 0, 6);
+        mainLayout.Controls.Add(txtSecondaryTables, 1, 6);
+        mainLayout.Controls.Add(lblSecondaryForeignKey, 0, 7);
+        mainLayout.Controls.Add(txtSecondaryForeignKey, 1, 7);
+        mainLayout.Controls.Add(lblSecondaryParentKey, 0, 8);
+        mainLayout.Controls.Add(txtSecondaryParentKey, 1, 8);
+        mainLayout.Controls.Add(lblSearchColumns, 0, 9);
+        mainLayout.Controls.Add(txtSearchColumns, 1, 9);
+        mainLayout.Controls.Add(lblColumnDisplayNames, 0, 10);
+        mainLayout.Controls.Add(txtColumnDisplayNames, 1, 10);
+        mainLayout.Controls.Add(lblHiddenColumns, 0, 11);
+        mainLayout.Controls.Add(txtHiddenColumns, 1, 11);
+        mainLayout.Controls.Add(lblHint, 1, 12);
+        mainLayout.Controls.Add(lblSecondaryHint, 1, 13);
+        mainLayout.Controls.Add(lblSearchHint2, 1, 14);
+        mainLayout.AutoSize = true;
+        mainLayout.Dock = DockStyle.Top;
         mainLayout.Location = new Point(0, 0);
         mainLayout.Margin = new Padding(6, 5, 6, 5);
         mainLayout.Name = "mainLayout";
         mainLayout.Padding = new Padding(30, 26, 30, 13);
-        mainLayout.RowCount = 12;
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 59F));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 99F));
+        mainLayout.RowCount = 15;
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 59F));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 59F));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 59F));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 59F));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 95F));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 59F));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 95F));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 95F));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 59F));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 95F));
@@ -111,9 +138,10 @@ partial class CustomToolConfigDialog
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 79F));
-        mainLayout.Size = new Size(1040, 875);
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        mainLayout.Size = new Size(1040, 995);
         mainLayout.TabIndex = 0;
+        // ★ 内容超高时靠窗体滚动条承载，按钮固定在底部（不跟着滚）
         //
         // lblName
         //
@@ -255,6 +283,79 @@ partial class CustomToolConfigDialog
         txtForeignKey.Size = new Size(802, 38);
         txtForeignKey.TabIndex = 11;
         //
+        // lblSecondaryTables
+        //
+        lblSecondaryTables.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        lblSecondaryTables.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSecondaryTables.Location = new Point(36, 527);
+        lblSecondaryTables.Margin = new Padding(6, 0, 6, 0);
+        lblSecondaryTables.Name = "lblSecondaryTables";
+        lblSecondaryTables.Size = new Size(155, 38);
+        lblSecondaryTables.TabIndex = 12;
+        lblSecondaryTables.Text = "二级关联表:";
+        lblSecondaryTables.TextAlign = ContentAlignment.MiddleRight;
+        //
+        // txtSecondaryTables
+        //
+        txtSecondaryTables.Dock = DockStyle.Fill;
+        txtSecondaryTables.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtSecondaryTables.Location = new Point(208, 527);
+        txtSecondaryTables.Margin = new Padding(11, 10, 0, 10);
+        txtSecondaryTables.Multiline = true;
+        txtSecondaryTables.Name = "txtSecondaryTables";
+        txtSecondaryTables.PlaceholderText = "分号=组(第N组对应第N个关联表),逗号=组内多个,如:S_PRINTSCHEMEDATA,S_PRINTSCHEMEDATA2;S_PRINTSCHEMEDATA3";
+        txtSecondaryTables.ScrollBars = ScrollBars.Vertical;
+        txtSecondaryTables.Size = new Size(802, 79);
+        txtSecondaryTables.TabIndex = 13;
+        //
+        // lblSecondaryForeignKey
+        //
+        lblSecondaryForeignKey.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        lblSecondaryForeignKey.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSecondaryForeignKey.Location = new Point(36, 622);
+        lblSecondaryForeignKey.Margin = new Padding(6, 0, 6, 0);
+        lblSecondaryForeignKey.Name = "lblSecondaryForeignKey";
+        lblSecondaryForeignKey.Size = new Size(155, 38);
+        lblSecondaryForeignKey.TabIndex = 14;
+        lblSecondaryForeignKey.Text = "二级关联字段:";
+        lblSecondaryForeignKey.TextAlign = ContentAlignment.MiddleRight;
+        //
+        // txtSecondaryForeignKey
+        //
+        txtSecondaryForeignKey.Dock = DockStyle.Fill;
+        txtSecondaryForeignKey.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtSecondaryForeignKey.Location = new Point(208, 622);
+        txtSecondaryForeignKey.Margin = new Padding(11, 10, 0, 10);
+        txtSecondaryForeignKey.Multiline = true;
+        txtSecondaryForeignKey.Name = "txtSecondaryForeignKey";
+        txtSecondaryForeignKey.PlaceholderText = "分组同上,值为二级表里指向一级表主键的外键列,如:GUID,GUID2;GUID3;GUID5";
+        txtSecondaryForeignKey.ScrollBars = ScrollBars.Vertical;
+        txtSecondaryForeignKey.Size = new Size(802, 79);
+        txtSecondaryForeignKey.TabIndex = 15;
+        //
+        // lblSecondaryParentKey
+        //
+        lblSecondaryParentKey.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        lblSecondaryParentKey.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSecondaryParentKey.Location = new Point(36, 717);
+        lblSecondaryParentKey.Margin = new Padding(6, 0, 6, 0);
+        lblSecondaryParentKey.Name = "lblSecondaryParentKey";
+        lblSecondaryParentKey.Size = new Size(155, 38);
+        lblSecondaryParentKey.TabIndex = 16;
+        lblSecondaryParentKey.Text = "二级关联父键:";
+        lblSecondaryParentKey.TextAlign = ContentAlignment.MiddleRight;
+        //
+        // txtSecondaryParentKey
+        //
+        txtSecondaryParentKey.Dock = DockStyle.Fill;
+        txtSecondaryParentKey.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        txtSecondaryParentKey.Location = new Point(208, 717);
+        txtSecondaryParentKey.Margin = new Padding(11, 10, 0, 10);
+        txtSecondaryParentKey.Name = "txtSecondaryParentKey";
+        txtSecondaryParentKey.PlaceholderText = "可选:一级表主键列名,分号分隔与关联表对应;留空=自动探测(数据库主键→GUID→CODE)";
+        txtSecondaryParentKey.Size = new Size(802, 38);
+        txtSecondaryParentKey.TabIndex = 17;
+        //
         // lblSearchColumns
         //
         lblSearchColumns.Anchor = AnchorStyles.Left | AnchorStyles.Right;
@@ -343,6 +444,19 @@ partial class CustomToolConfigDialog
         lblHint.TabIndex = 18;
         lblHint.Text = "提示：关联表/关联字段留空表示只复制主表（按主键全量或选中行）；关联字段只填 1 个则所有关联表共用，填多个则与关联表按顺序一一对应。";
         //
+        // lblSecondaryHint
+        //
+        lblSecondaryHint.AutoSize = true;
+        lblSecondaryHint.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        lblSecondaryHint.ForeColor = Color.Gray;
+        lblSecondaryHint.Location = new Point(203, 819);
+        lblSecondaryHint.Margin = new Padding(6, 0, 6, 0);
+        lblSecondaryHint.Name = "lblSecondaryHint";
+        lblSecondaryHint.Padding = new Padding(11, 5, 0, 0);
+        lblSecondaryHint.Size = new Size(800, 26);
+        lblSecondaryHint.TabIndex = 20;
+        lblSecondaryHint.Text = "提示：二级关联表留空 = 不复制二级表（推荐）。填写时「分号」分组（组数必须与关联表数量一致，按顺序对应），「逗号」分组内多个表；组内表数必须与二级关联字段个数一致。";
+        //
         // lblSearchHint2
         //
         lblSearchHint2.AutoSize = true;
@@ -356,17 +470,30 @@ partial class CustomToolConfigDialog
         lblSearchHint2.TabIndex = 19;
         lblSearchHint2.Text = "提示：搜索列名/列显示名称留空 = 保留旧行为（显示主表所有列）；搜索结果中 PrimaryKey 始终显示。";
         //
+        // scrollPanel
+        //
+        // ★ 内容超高时靠这个面板的滚动条承载；
+        //   按钮区在窗体上单独 Dock=Bottom → 按钮永远钉在可视区底部，不会被滚走。
+        scrollPanel.AutoScroll = true;
+        scrollPanel.Controls.Add(mainLayout);
+        scrollPanel.Dock = DockStyle.Fill;
+        scrollPanel.Location = new Point(0, 0);
+        scrollPanel.Margin = new Padding(6, 5, 6, 5);
+        scrollPanel.Name = "scrollPanel";
+        scrollPanel.Size = new Size(1040, 770);
+        scrollPanel.TabIndex = 0;
+        //
         // pnlButtons
         //
-        mainLayout.SetColumnSpan(pnlButtons, 2);
+        // ★ 按钮固定在窗体底部（不随内容滚动）
         pnlButtons.Controls.Add(btnCancel);
         pnlButtons.Controls.Add(btnSave);
-        pnlButtons.Dock = DockStyle.Fill;
-        pnlButtons.Location = new Point(36, 851);
+        pnlButtons.Dock = DockStyle.Bottom;
+        pnlButtons.Location = new Point(0, 770);
         pnlButtons.Margin = new Padding(6, 5, 6, 5);
         pnlButtons.Name = "pnlButtons";
-        pnlButtons.Size = new Size(968, 69);
-        pnlButtons.TabIndex = 20;
+        pnlButtons.Size = new Size(1040, 60);
+        pnlButtons.TabIndex = 1;
         //
         // btnCancel
         //
@@ -403,11 +530,17 @@ partial class CustomToolConfigDialog
         // CustomToolConfigDialog
         //
         AcceptButton = btnSave;
-        AutoScaleDimensions = new SizeF(13F, 28F);
+        // ★ 微软雅黑 10pt 的正确缩放基准是 (14F, 30F)。
+        //   原来写 (13F, 28F) 但窗体没设字体（继承 Microsoft YaHei UI 9pt）→ 窗体被额外放大 ~8%。
+        //   现在窗体显式设 微软雅黑 10pt，与各控件一致，缩放系数 = 1。
+        AutoScaleDimensions = new SizeF(14F, 30F);
         AutoScaleMode = AutoScaleMode.Font;
         CancelButton = btnCancel;
-        ClientSize = new Size(1040, 880);
-        Controls.Add(mainLayout);
+        ClientSize = new Size(1040, 830);
+        // ★ 先加 Fill 区再加 Bottom 区 → 底部按钮区先占位，内容区自动让开
+        Controls.Add(scrollPanel);
+        Controls.Add(pnlButtons);
+        Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         Margin = new Padding(6, 5, 6, 5);
         MaximizeBox = false;
@@ -417,6 +550,8 @@ partial class CustomToolConfigDialog
         Text = "新建自定义工具";
         mainLayout.ResumeLayout(false);
         mainLayout.PerformLayout();
+        scrollPanel.ResumeLayout(false);
+        scrollPanel.PerformLayout();
         pnlButtons.ResumeLayout(false);
         ResumeLayout(false);
     }

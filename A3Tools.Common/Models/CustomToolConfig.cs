@@ -34,6 +34,26 @@ public class CustomToolConfig
     /// <summary>隐藏列，英文分号分隔（如 GUID;SUBSYSTEMGUID）。即便在 SearchColumns 中出现也会强制隐藏；但 PrimaryKey 不受此影响（永远显示）。</summary>
     public string HiddenColumns { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 二级关联表：**分号 = 组边界**（第 N 组对应第 N 个一级关联表），**逗号 = 组内多个表**。
+    /// 例：<c>S_PRINTSCHEMEDATA,S_PRINTSCHEMEDATA2;S_PRINTSCHEMEDATA3</c>
+    /// → 第 1 个一级关联表下挂 2 张二级表，第 2 个一级关联表下挂 1 张。
+    /// 留空 = 不复制二级表（旧配置完全兼容，无需迁移）。
+    /// </summary>
+    public string SecondaryRelatedTables { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 二级关联字段：分组规则与 <see cref="SecondaryRelatedTables"/> 完全一致。
+    /// 值 = 二级表里指向一级关联表主键的外键列名（平行于一级关联字段）。
+    /// </summary>
+    public string SecondaryForeignKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 二级关联指向的「一级关联表主键列名」，英文分号分隔（与一级关联表按顺序一一对应）。
+    /// 留空 = 自动探测（先查数据库定义的 PRIMARY KEY，再退 GUID / OBJECTGUID / CODE）。
+    /// </summary>
+    public string SecondaryParentKey { get; set; } = string.Empty;
+
     /// <summary>把 RelatedTables 解析为字符串列表（去空白 + 去空）</summary>
     [JsonIgnore]
     public List<string> RelatedTableList =>
@@ -53,6 +73,19 @@ public class CustomToolConfig
     [JsonIgnore]
     public ForeignKeyResolution ForeignKeys =>
         CustomToolForeignKeyResolver.Resolve(RelatedTables, ForeignKey);
+
+    /// <summary>
+    /// 二级关联表与二级关联字段的分组对应关系（每组挂在哪个一级关联表下）。
+    /// 解析规则见 <see cref="CustomToolSecondaryLinkResolver"/>。
+    /// </summary>
+    [JsonIgnore]
+    public SecondaryLinkResolution SecondaryLinks =>
+        CustomToolSecondaryLinkResolver.Resolve(RelatedTables, ForeignKey, SecondaryRelatedTables, SecondaryForeignKey);
+
+    /// <summary>把 SecondaryParentKey 解析为字符串列表（去空白 + 去空项）。</summary>
+    [JsonIgnore]
+    public List<string> SecondaryParentKeyList =>
+        CustomToolForeignKeyResolver.SplitList(SecondaryParentKey);
 
     /// <summary>把 SearchColumns 解析为字符串列表</summary>
     [JsonIgnore]

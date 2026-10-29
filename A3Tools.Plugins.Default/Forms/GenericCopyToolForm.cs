@@ -22,6 +22,9 @@ public partial class GenericCopyToolForm : Form
 
     /// <summary>关联字段与关联表的对应关系（构造时解析一次，避免重复解析）。</summary>
     private readonly ForeignKeyResolution _fkResolution;
+
+    /// <summary>二级关联的分组对应关系（构造时解析一次）。</summary>
+    private readonly SecondaryLinkResolution _secondaryResolution;
     private System.Data.DataTable? _searchResults;
     private string _quickFilterText = "";
 
@@ -39,6 +42,7 @@ public partial class GenericCopyToolForm : Form
         _context = context;
         _config = config;
         _fkResolution = config.ForeignKeys;
+        _secondaryResolution = config.SecondaryLinks;
         InitializeComponent();
         LoadPresetAccounts();
         FormHotkeyHelper.Setup(this, () => BtnConfirm_Click(this, EventArgs.Empty));
@@ -144,7 +148,27 @@ public partial class GenericCopyToolForm : Form
         var searchDesc = searchCols.Count == 0 ? "全部列" : string.Join(",", searchCols);
         var hiddenCols = _config.HiddenColumnSet;
         var hiddenDesc = hiddenCols.Count == 0 ? string.Empty : $"    隐藏：{string.Join(",", hiddenCols)}";
-        return $"主表：{_config.MainTable}    主键：{_config.PrimaryKey}    关联表：{relatedDesc}    关联字段：{foreignKey}    搜索列：{searchDesc}{hiddenDesc}";
+        var secondaryDesc = BuildSecondaryDesc(_secondaryResolution);
+        return $"主表：{_config.MainTable}    主键：{_config.PrimaryKey}    关联表：{relatedDesc}    关联字段：{foreignKey}    搜索列：{searchDesc}{hiddenDesc}{secondaryDesc}";
+    }
+
+    /// <summary>
+    /// 生成「二级关联」显示文案（挂在对应一级关联表下）。
+    /// </summary>
+    private static string BuildSecondaryDesc(SecondaryLinkResolution sec)
+    {
+        if (!sec.IsEnabled) return string.Empty;
+        if (!sec.IsValid) return $"    二级关联：⚠ {sec.Error}";
+        if (sec.Groups.Count == 0) return string.Empty;
+
+        var parts = new List<string>();
+        foreach (var g in sec.Groups)
+        {
+            var items = new List<string>();
+            foreach (var (table, fk) in g.Pairs) items.Add($"{table}={fk}");
+            parts.Add($"第{g.FirstLevelIndex + 1}组[{string.Join(",", items)}]");
+        }
+        return $"    二级关联：{string.Join(" / ", parts)}";
     }
 
     /// <summary>
@@ -829,6 +853,11 @@ WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName";
             MessageBox.Show(fk.Error!, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+        if (!_secondaryResolution.IsValid)
+        {
+            MessageBox.Show(_secondaryResolution.Error!, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
 
         var relatedTables = fk.RelatedTables;
         var tag = $"[{_config.Name}]";
@@ -874,6 +903,10 @@ WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@tableName";
                                     var parentField = fk.GetForeignKey(t);
                                     if (string.IsNullOrWhiteSpace(parentField)) continue;
                                     TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, relatedTables[t], parentField, parentGuid, chkDeleteFirst.Checked, tag);
+
+                                    // ★ 二级关联：挂在该一级关联表下面（父值 = 一级表那一行的主键值）
+                                    CopySecondaryTables(srcConn, tgtConn, t, relatedTables[t], parentField, parentGuid,
+                                        chkDeleteFirst.Checked, tag, errors, key);
                                 }
                             }
                         }
@@ -938,6 +971,214 @@ ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
 
     private static bool ValidateTableName(string name) =>
         !string.IsNullOrWhiteSpace(name) && name.All(c => char.IsLetterOrDigit(c) || c == '_');
+
+    // ==================== 二级关联（2026-10-29 陛下：主表 → 一级关联表 → 二级关联表）====================
+
+    /// <summary>
+    /// 复制挂在第 <paramref name="firstLevelIndex"/> 个一级关联表下面的二级关联表（直连模式）。
+    /// 父值 = 该一级关联表那一行的<b>主键值</b>（主键列自动探测，也可用配置覆盖）。
+    /// </summary>
+    private void CopySecondaryTables(
+        SqlConnection srcConn, SqlConnection tgtConn, int firstLevelIndex,
+        string firstLevelTable, string firstLevelParentField, string parentGuid,
+        bool deleteFirst, string tag, List<string> errors, string key)
+    {
+        var group = _secondaryResolution.GetGroup(firstLevelIndex);
+        if (group == null || group.Count == 0) return;
+
+        // 表名/字段名来自配置 → 拼 SQL 前必须校验
+        if (!ValidateTableName(firstLevelTable) || !ValidateFieldName(firstLevelParentField))
+        {
+            errors.Add($"{key}: 一级关联表「{firstLevelTable}」名称不合法，二级关联未复制");
+            return;
+        }
+
+        var parentKeyColumn = ResolveSecondParentKeyColumn(srcConn, firstLevelTable, GetSecondaryParentKeyOverride(firstLevelIndex));
+        if (string.IsNullOrEmpty(parentKeyColumn))
+        {
+            errors.Add($"{key}: 一级关联表「{firstLevelTable}」找不到主键列（可在配置里用「二级关联父键」指定），二级关联未复制");
+            return;
+        }
+
+        var parentKeyValues = GetFirstLevelKeyValues(srcConn, firstLevelTable, parentKeyColumn, firstLevelParentField, parentGuid);
+        if (parentKeyValues.Count == 0) return;
+
+        foreach (var (secondTable, secondField) in group.Pairs)
+        {
+            if (!ValidateTableName(secondTable) || !ValidateFieldName(secondField))
+            {
+                errors.Add($"{key}: 二级关联「{secondTable}」或字段「{secondField}」名称不合法，未复制");
+                continue;
+            }
+            foreach (var parentKeyValue in parentKeyValues)
+                TableCopyService.CopyTableDataByParentGuid(srcConn, tgtConn, secondTable, secondField, parentKeyValue, deleteFirst, tag);
+        }
+    }
+
+    /// <summary>取该一级关联表对应的「二级关联父键」手动配置（没有则返回 null = 自动探测）。</summary>
+    private string? GetSecondaryParentKeyOverride(int firstLevelIndex)
+    {
+        var list = _config.SecondaryParentKeyList;
+        if (firstLevelIndex < 0 || firstLevelIndex >= list.Count) return null;
+        var v = list[firstLevelIndex];
+        return string.IsNullOrWhiteSpace(v) ? null : v;
+    }
+
+    /// <summary>
+    /// 解析一级关联表的「主键列」——二级关联用它当父值来源。
+    /// 优先：配置里手动指定 → 数据库定义的 PRIMARY KEY → GUID / OBJECTGUID / CODE 兜底。
+    /// </summary>
+    private static string? ResolveSecondParentKeyColumn(SqlConnection conn, string tableName, string? overrideKey)
+    {
+        if (!string.IsNullOrWhiteSpace(overrideKey)) return overrideKey.Trim();
+
+        const string pkSql = @"
+SELECT TOP 1 kc.COLUMN_NAME
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kc ON tc.CONSTRAINT_NAME = kc.CONSTRAINT_NAME
+WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_NAME = @tableName
+ORDER BY kc.ORDINAL_POSITION";
+        try
+        {
+            using var cmd = new SqlCommand(pkSql, conn);
+            cmd.Parameters.AddWithValue("@tableName", tableName);
+            var pk = cmd.ExecuteScalar()?.ToString();
+            if (!string.IsNullOrWhiteSpace(pk)) return pk;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"探测表 {tableName} 主键失败: {ex.Message}");
+        }
+
+        // 常见列名兜底
+        try
+        {
+            var columns = TableCopyService.GetTableColumns(conn, tableName);
+            foreach (var guess in new[] { "GUID", "OBJECTGUID", "CODE" })
+            {
+                var hit = columns.FirstOrDefault(c => string.Equals(c, guess, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(hit)) return hit;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"读取表 {tableName} 列名失败: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>取一级关联表里属于当前父行的那些行的主键值。</summary>
+    private static List<string> GetFirstLevelKeyValues(
+        SqlConnection conn, string tableName, string keyColumn, string whereField, string whereValue)
+    {
+        var list = new List<string>();
+        var sql = $"SELECT [{keyColumn}] FROM dbo.[{tableName}] WHERE [{whereField}] = @value";
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@value", whereValue);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var v = reader[0];
+            if (v != null && v != DBNull.Value) list.Add(v.ToString() ?? "");
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// 复制挂在第 <paramref name="firstLevelIndex"/> 个一级关联表下面的二级关联表（Http 代理模式）。
+    /// </summary>
+    private async Task CopySecondaryTablesHttpAsync(
+        IDataAccess srcDA, IDataAccess tgtDA, int firstLevelIndex,
+        string firstLevelTable, string firstLevelParentField, string parentGuid,
+        bool deleteFirst, string tag, List<string> errors, string key)
+    {
+        var group = _secondaryResolution.GetGroup(firstLevelIndex);
+        if (group == null || group.Count == 0) return;
+
+        if (!ValidateTableName(firstLevelTable) || !ValidateFieldName(firstLevelParentField))
+        {
+            errors.Add($"{key}: 一级关联表「{firstLevelTable}」名称不合法，二级关联未复制");
+            return;
+        }
+
+        var parentKeyColumn = await ResolveSecondParentKeyColumnHttpAsync(srcDA, firstLevelTable, GetSecondaryParentKeyOverride(firstLevelIndex));
+        if (string.IsNullOrEmpty(parentKeyColumn))
+        {
+            errors.Add($"{key}: 一级关联表「{firstLevelTable}」找不到主键列（可在配置里用「二级关联父键」指定），二级关联未复制");
+            return;
+        }
+
+        var parentKeyValues = await GetFirstLevelKeyValuesHttpAsync(srcDA, firstLevelTable, parentKeyColumn, firstLevelParentField, parentGuid);
+        if (parentKeyValues.Count == 0) return;
+
+        foreach (var (secondTable, secondField) in group.Pairs)
+        {
+            if (!ValidateTableName(secondTable) || !ValidateFieldName(secondField))
+            {
+                errors.Add($"{key}: 二级关联「{secondTable}」或字段「{secondField}」名称不合法，未复制");
+                continue;
+            }
+            foreach (var parentKeyValue in parentKeyValues)
+                await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, secondTable, secondField, parentKeyValue, deleteFirst, tag);
+        }
+    }
+
+    /// <summary>Http 版：解析一级关联表的主键列（与直连版规则一致）。</summary>
+    private static async Task<string?> ResolveSecondParentKeyColumnHttpAsync(IDataAccess da, string tableName, string? overrideKey)
+    {
+        if (!string.IsNullOrWhiteSpace(overrideKey)) return overrideKey.Trim();
+
+        var sql = $@"
+SELECT TOP 1 kc.COLUMN_NAME
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kc ON tc.CONSTRAINT_NAME = kc.CONSTRAINT_NAME
+WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_NAME = '{ProxyHelper.EscapeSql(tableName)}'
+ORDER BY kc.ORDINAL_POSITION";
+        try
+        {
+            var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+            if (dt.Rows.Count > 0)
+            {
+                var pk = dt.Rows[0][0]?.ToString();
+                if (!string.IsNullOrWhiteSpace(pk)) return pk;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"探测表 {tableName} 主键失败: {ex.Message}");
+        }
+
+        try
+        {
+            var columns = await ProxyHelper.GetTableColumnsAsync(da, tableName);
+            foreach (var guess in new[] { "GUID", "OBJECTGUID", "CODE" })
+            {
+                var hit = columns.FirstOrDefault(c => string.Equals(c, guess, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(hit)) return hit;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"读取表 {tableName} 列名失败: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>Http 版：取一级关联表里属于当前父行的那些行的主键值。</summary>
+    private static async Task<List<string>> GetFirstLevelKeyValuesHttpAsync(
+        IDataAccess da, string tableName, string keyColumn, string whereField, string whereValue)
+    {
+        var sql = $"SELECT [{ProxyHelper.EscapeSql(keyColumn)}] FROM dbo.[{ProxyHelper.EscapeSql(tableName)}] " +
+                  $"WHERE [{ProxyHelper.EscapeSql(whereField)}] = '{ProxyHelper.EscapeSql(whereValue)}'";
+        var dt = await ProxyHelper.ExecuteQueryToDataTableAsync(da, sql);
+        var list = new List<string>();
+        foreach (System.Data.DataRow row in dt.Rows)
+        {
+            var v = row[0];
+            if (v != null && v != DBNull.Value) list.Add(v.ToString() ?? "");
+        }
+        return list;
+    }
 
     private static bool ValidateFieldName(string name) =>
         !string.IsNullOrWhiteSpace(name) && name.All(c => char.IsLetterOrDigit(c) || c == '_');
@@ -1010,6 +1251,11 @@ ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
             MessageBox.Show(fk.Error!, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+        if (!_secondaryResolution.IsValid)
+        {
+            MessageBox.Show(_secondaryResolution.Error!, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
 
         var relatedTables = fk.RelatedTables;
         var tag = $"[{_config.Name}]";
@@ -1048,6 +1294,10 @@ ORDER BY CASE COLUMN_NAME WHEN 'GUID' THEN 0 ELSE 1 END";
                                 var parentField = fk.GetForeignKey(t);
                                 if (string.IsNullOrWhiteSpace(parentField)) continue;
                                 await ProxyHelper.CopyTableDataByParentGuidAsync(srcDA, tgtDA, relatedTables[t], parentField, parentGuid, chkDeleteFirst.Checked, tag);
+
+                                // ★ 二级关联：挂在该一级关联表下面（父值 = 一级表那一行的主键值）
+                                await CopySecondaryTablesHttpAsync(srcDA, tgtDA, t, relatedTables[t], parentField, parentGuid,
+                                    chkDeleteFirst.Checked, tag, errors, key);
                             }
                         }
                     }
