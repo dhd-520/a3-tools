@@ -19,32 +19,35 @@ namespace A3Tools.Services;
 ///   · 起始 Y = 20，每行行距 45px；
 ///   · 「远程方式」前额外留白 10px（原来的分组间距）；
 ///   · 「备注」是多行框，占 80px；
-///   · 「网页版自动登录」分组作为**一个整块**插入字段流（默认排在最后，占它自己的面板高度）；
-///   · 「代理模式」分组固定在字段流末尾，再往下留 10px。
+///   · 「代理模式」分组固定在字段流末尾，再往下 10px。
 ///
-/// ★ 分组字段（2026-10-29 陛下追问「账套用户名为什么不能改排序」）：
-///   「账套用户名」的输入框在「网页版自动登录」面板**内部**，控件本身没法单独在流里摆，
-///   所以它的**排序号决定整个分组面板的位置** —— 分组带着提示文字和输入框一起移动。
+/// ★ 固定字段（2026-10-29 陛下：只固定代码就行）：
+///   「代码」是唯一的固定字段 —— 永远排第一，排序号不可改，也不可隐藏。
+///   其余字段（含「账套用户名」「账套名称」）全部可排序、可显隐。
+///
+/// ★ 随行说明（Note）：
+///   某些字段带一句静态说明（如「账套用户名」下面的自动登录配置说明），
+///   说明文字排在该字段行的下面一行，跟着字段一起显示/隐藏。
 /// </summary>
 public sealed class AccountEditorLayout
 {
-    /// <summary>一个字段在录入窗体里的两个控件（标签 + 输入框）+ 可选的分组面板</summary>
+    /// <summary>字段与说明文字之间的间隙（像素）</summary>
+    private const int NoteGap = 4;
+
+    /// <summary>一个字段在录入窗体里的两个控件（标签 + 输入框）+ 可选的随行说明</summary>
     public sealed class Slot
     {
         public Label Label { get; }
         public Control Input { get; }
 
-        /// <summary>
-        /// 该字段所属的分组面板（非 null 时：排序号管的是**整个面板的位置**，
-        /// 面板内部的标签/输入框保持设计器里的相对位置不动）。
-        /// </summary>
-        public Control? GroupHost { get; }
+        /// <summary>随行说明（静态提示文字），排在该字段行的下面一行；null = 没有说明</summary>
+        public Control? Note { get; }
 
-        public Slot(Label label, Control input, Control? groupHost = null)
+        public Slot(Label label, Control input, Control? note = null)
         {
             Label = label ?? throw new ArgumentNullException(nameof(label));
             Input = input ?? throw new ArgumentNullException(nameof(input));
-            GroupHost = groupHost;
+            Note = note;
         }
     }
 
@@ -58,7 +61,7 @@ public sealed class AccountEditorLayout
     /// <summary>
     /// 构造排版引擎。
     /// </summary>
-    /// <param name="slots">字段名 → (标签, 输入框[, 分组面板])</param>
+    /// <param name="slots">字段名 → (标签, 输入框[, 随行说明])</param>
     /// <param name="proxyGroup">「代理模式」分组面板（固定在字段流末尾）</param>
     /// <param name="startY">第一个字段的起始 Y 坐标</param>
     public AccountEditorLayout(
@@ -79,7 +82,7 @@ public sealed class AccountEditorLayout
     {
         if (config == null) return;
 
-        // 可见且参与重排的字段（按录入排序）
+        // 可见且参与重排的字段（固定字段已在 GetEditorFields 里排到最前）
         var flow = AccountFieldResolver.GetEditorFields(config);
         var flowFields = new HashSet<string>(flow.Select(f => f.Field), StringComparer.Ordinal);
 
@@ -90,29 +93,26 @@ public sealed class AccountEditorLayout
 
             var def = AccountFieldCatalog.Find(f.Field);
             int gap = def?.EditorGapBefore ?? 0;
+            int advance = def?.EditorRowAdvance ?? 45;
 
             y += gap;
+            slot.Label.Top = y;
+            slot.Input.Top = y;
+            slot.Label.Visible = true;
+            slot.Input.Visible = true;
 
-            if (slot.GroupHost != null)
+            y += advance;
+
+            // 随行说明：紧跟在字段行下面
+            if (slot.Note != null)
             {
-                // 分组字段：整个分组面板作为一个整块插入字段流
-                slot.GroupHost.Top = y;
-                slot.GroupHost.Visible = true;
-                slot.Label.Visible = true;
-                slot.Input.Visible = true;
-                y += slot.GroupHost.Height;
-            }
-            else
-            {
-                slot.Label.Top = y;
-                slot.Input.Top = y;
-                slot.Label.Visible = true;
-                slot.Input.Visible = true;
-                y += def?.EditorRowAdvance ?? 45;
+                slot.Note.Top = y + NoteGap;
+                slot.Note.Visible = true;
+                y = slot.Note.Top + slot.Note.Height + NoteGap;
             }
         }
 
-        // 其余字段隐藏（分组内字段隐藏时，整个分组面板一起隐藏）
+        // 其余字段隐藏（带说明的，说明文字一起隐藏）
         foreach (var kv in _slots)
         {
             if (flowFields.Contains(kv.Key)) continue;
@@ -121,7 +121,7 @@ public sealed class AccountEditorLayout
             bool show = cfg?.ShowInEditor == true;
             kv.Value.Label.Visible = show;
             kv.Value.Input.Visible = show;
-            if (kv.Value.GroupHost != null) kv.Value.GroupHost.Visible = show;
+            if (kv.Value.Note != null) kv.Value.Note.Visible = show;
         }
 
         // 「代理模式」分组固定在字段流末尾，再往下 10px

@@ -55,8 +55,7 @@ partial class AccountDialog
     private TextBox txtProxyServerPublicKey = null!;
     private Button btnGenerateHubConfig = null!;
 
-    // ===== 网页版自动登录 =====
-    private Panel pnlWebGroup = null!;
+    // ===== 网页版自动登录说明（2026-10-29：已从独立分组改为随行说明）=====
     private Label lblWebHint = null!;
     private Label lblServerUsername = null!;
     private TextBox txtServerUsername = null!;
@@ -114,7 +113,6 @@ partial class AccountDialog
         lblProxyServerPublicKey = new Label();
         txtProxyServerPublicKey = new TextBox();
         btnGenerateHubConfig = new Button();
-        pnlWebGroup = new Panel();
         lblWebHint = new Label();
         lblServerUsername = new Label();
         txtServerUsername = new TextBox();
@@ -124,7 +122,6 @@ partial class AccountDialog
         titleBar.SuspendLayout();
         contentPanel.SuspendLayout();
         pnlProxyGroup.SuspendLayout();
-        pnlWebGroup.SuspendLayout();
         footerPanel.SuspendLayout();
         SuspendLayout();
         // 
@@ -183,7 +180,9 @@ partial class AccountDialog
         contentPanel.Controls.Add(lblRemark);
         contentPanel.Controls.Add(txtRemark);
         contentPanel.Controls.Add(pnlProxyGroup);
-        contentPanel.Controls.Add(pnlWebGroup);
+        contentPanel.Controls.Add(lblServerUsername);
+        contentPanel.Controls.Add(txtServerUsername);
+        contentPanel.Controls.Add(lblWebHint);
         contentPanel.Dock = DockStyle.Fill;
         contentPanel.Location = new Point(0, 50);
         contentPanel.Name = "contentPanel";
@@ -477,7 +476,7 @@ partial class AccountDialog
         pnlProxyGroup.Controls.Add(lblProxyServerPublicKey);
         pnlProxyGroup.Controls.Add(txtProxyServerPublicKey);
         pnlProxyGroup.Controls.Add(btnGenerateHubConfig);
-        pnlProxyGroup.Location = new Point(30, 805);
+        pnlProxyGroup.Location = new Point(30, 788);
         pnlProxyGroup.Name = "pnlProxyGroup";
         pnlProxyGroup.Size = new Size(840, 160);
         pnlProxyGroup.TabIndex = 28;
@@ -574,25 +573,13 @@ partial class AccountDialog
         btnGenerateHubConfig.UseVisualStyleBackColor = false;
         btnGenerateHubConfig.Click += BtnGenerateHubConfig_Click;
         // 
-        // pnlWebGroup
-        // 
-        pnlWebGroup.BackColor = Color.FromArgb(245, 248, 250);
-        pnlWebGroup.BorderStyle = BorderStyle.FixedSingle;
-        pnlWebGroup.Controls.Add(lblWebHint);
-        pnlWebGroup.Controls.Add(lblServerUsername);
-        pnlWebGroup.Controls.Add(txtServerUsername);
-        pnlWebGroup.Location = new Point(30, 695);
-        pnlWebGroup.Name = "pnlWebGroup";
-        pnlWebGroup.Size = new Size(840, 100);
-        pnlWebGroup.TabIndex = 28;
-        // 
         // lblWebHint
         // 
         lblWebHint.Font = new Font("微软雅黑", 10F, FontStyle.Bold, GraphicsUnit.Point);
         lblWebHint.ForeColor = Color.FromArgb(24, 145, 176);
-        lblWebHint.Location = new Point(15, 11);
+        lblWebHint.Location = new Point(30, 744);
         lblWebHint.Name = "lblWebHint";
-        lblWebHint.Size = new Size(810, 30);
+        lblWebHint.Size = new Size(840, 30);
         lblWebHint.TabIndex = 0;
         lblWebHint.Text = "🌐 自动登录配置（账套用户名用于客户端/开发工具/网页三处共用；客户端密码=账套密码；开发工具密码=单独加密存储）";
         // 
@@ -600,7 +587,7 @@ partial class AccountDialog
         // 
         lblServerUsername.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         lblServerUsername.ForeColor = Color.FromArgb(80, 80, 80);
-        lblServerUsername.Location = new Point(15, 55);
+        lblServerUsername.Location = new Point(30, 695);
         lblServerUsername.Name = "lblServerUsername";
         lblServerUsername.Size = new Size(210, 35);
         lblServerUsername.TabIndex = 1;
@@ -610,9 +597,9 @@ partial class AccountDialog
         // txtServerUsername
         // 
         txtServerUsername.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
-        txtServerUsername.Location = new Point(235, 55);
+        txtServerUsername.Location = new Point(250, 695);
         txtServerUsername.Name = "txtServerUsername";
-        txtServerUsername.Size = new Size(574, 41);
+        txtServerUsername.Size = new Size(590, 41);
         txtServerUsername.TabIndex = 2;
         // 
         // footerPanel
@@ -680,8 +667,6 @@ partial class AccountDialog
         contentPanel.PerformLayout();
         pnlProxyGroup.ResumeLayout(false);
         pnlProxyGroup.PerformLayout();
-        pnlWebGroup.ResumeLayout(false);
-        pnlWebGroup.PerformLayout();
         footerPanel.ResumeLayout(false);
         ResumeLayout(false);
     }

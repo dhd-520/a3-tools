@@ -62,12 +62,8 @@ public partial class AccountFieldSettingsForm : Form
 
         foreach (var cfg in _editing)
         {
-            // 分组字段（控件在分组面板内部）标注一下：排序号管的是整个分组的位置
-            string display = cfg.DisplayName;
-            if (!string.IsNullOrEmpty(cfg.EditorGroup)) display += "（整组一起移动）";
-
             int idx = this.dgvFields.Rows.Add(
-                display,
+                cfg.DisplayName,
                 cfg.ShowInList,
                 cfg.ListWidth,
                 cfg.ListOrder + 1,     // 表格里用 1 基序号（1 = 最前），人看着直观
@@ -160,10 +156,11 @@ public partial class AccountFieldSettingsForm : Form
         var cfg = GetConfigOfRow(this.dgvFields.Rows[e.RowIndex]);
         if (cfg == null) return;
 
-        // 不可改的单元格置灰
+        // 不可改的单元格置灰（固定字段：代码 —— 不可隐藏、录入界面永远排第一）
         bool readOnly = false;
         if (e.ColumnIndex == this.dgvFields.Columns["ColShowList"].Index && !cfg.CanShowInList) readOnly = true;
         if (e.ColumnIndex == this.dgvFields.Columns["ColShowEditor"].Index && cfg.Required) readOnly = true;
+        if (e.ColumnIndex == this.dgvFields.Columns["ColEditorOrder"].Index && cfg.Required) readOnly = true;
 
         if (readOnly)
         {

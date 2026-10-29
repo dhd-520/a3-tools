@@ -25,7 +25,7 @@ public static class AccountFieldCatalog
     {
         // ===== 列表 + 录入界面 =====
         new() { Field = nameof(Account.Code),           DisplayName = "代码",       ListHeader = "代码",       ShowInList = true,  ListWidth = 120, ListOrder = 0,  ShowInEditor = true, EditorOrder = 0,  ListWeight = 100, Required = true },
-        new() { Field = nameof(Account.Name),           DisplayName = "账套名称",   ListHeader = "账套名称",   ShowInList = true,  ListWidth = 0,   ListOrder = 1,  ShowInEditor = true, EditorOrder = 1,  ListWeight = 25,  Required = true },
+        new() { Field = nameof(Account.Name),           DisplayName = "账套名称",   ListHeader = "账套名称",   ShowInList = true,  ListWidth = 0,   ListOrder = 1,  ShowInEditor = true, EditorOrder = 1,  ListWeight = 25 },
         new() { Field = nameof(Account.Server),         DisplayName = "账套地址",   ListHeader = "账套地址",   ShowInList = true,  ListWidth = 0,   ListOrder = 2,  ShowInEditor = true, EditorOrder = 2,  ListWeight = 30 },
         new() { Field = nameof(Account.ServerBackup),   DisplayName = "备用地址",   ListHeader = "备用地址",   ShowInList = false, ListWidth = 0,   ListOrder = 9,  ShowInEditor = true, EditorOrder = 3,  ListWeight = 20 },
         new() { Field = nameof(Account.ServerPassword), DisplayName = "账套密码",   ListHeader = "账套密码",   ShowInList = false, ListWidth = 0,   ListOrder = 12, ShowInEditor = true, EditorOrder = 4,  CanShowInList = false },
@@ -39,9 +39,8 @@ public static class AccountFieldCatalog
         new() { Field = nameof(Account.RemotePassword), DisplayName = "远程密码",   ListHeader = "远程密码",   ShowInList = false, ListWidth = 0,   ListOrder = 14, ShowInEditor = true, EditorOrder = 12, CanShowInList = false },
         new() { Field = nameof(Account.Remark),         DisplayName = "备注",       ListHeader = "备注",       ShowInList = false, ListWidth = 0,   ListOrder = 10, ShowInEditor = true, EditorOrder = 13, ListWeight = 20, EditorRowAdvance = 80 },
 
-        // ===== 只在录入界面（位于「网页版自动登录」分组面板内部）=====
-        //   排序号 = 整个「网页版自动登录」分组在录入字段流里的位置（默认排最后）
-        new() { Field = nameof(Account.ServerUsername), DisplayName = "账套用户名", ListHeader = "账套用户名", ShowInList = false, ListWidth = 0, ListOrder = 15, ShowInEditor = true, EditorOrder = 14, EditorGroup = "Web", ListWeight = 15 },
+        // ===== 只在录入界面（普通字段，可自由排序）=====
+        new() { Field = nameof(Account.ServerUsername), DisplayName = "账套用户名", ListHeader = "账套用户名", ShowInList = false, ListWidth = 0, ListOrder = 15, ShowInEditor = true, EditorOrder = 14, ListWeight = 15 },
     };
 
     /// <summary>按字段名取定义（找不到返回 null）</summary>
@@ -76,7 +75,6 @@ public static class AccountFieldCatalog
                 ListWeight = f.ListWeight,
                 EditorRowAdvance = f.EditorRowAdvance,
                 EditorGapBefore = f.EditorGapBefore,
-                EditorGroup = f.EditorGroup,
                 Required = f.Required,
             });
         }

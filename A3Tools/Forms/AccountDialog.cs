@@ -82,9 +82,8 @@ public partial class AccountDialog : Form
             { nameof(Account.RemoteUser),     new AccountEditorLayout.Slot(lblRemoteUser, txtRemoteUser) },
             { nameof(Account.RemotePassword), new AccountEditorLayout.Slot(lblRemotePassword, txtRemotePassword) },
             { nameof(Account.Remark),         new AccountEditorLayout.Slot(lblRemark, txtRemark) },
-            // 「网页版自动登录」分组内的字段：它的排序号决定【整个分组面板】在字段流里的位置
-            //   （面板带着提示文字和输入框一起移动）
-            { nameof(Account.ServerUsername), new AccountEditorLayout.Slot(lblServerUsername, txtServerUsername, pnlWebGroup) },
+            // 「账套用户名」：普通字段（可排序、可显隐），下面带一句自动登录配置说明
+            { nameof(Account.ServerUsername), new AccountEditorLayout.Slot(lblServerUsername, txtServerUsername, lblWebHint) },
         };
 
         // 配置已由 Normalize 兜底：密码不进列表、必填不隐藏、排序号连续
@@ -178,8 +177,13 @@ public partial class AccountDialog : Form
         }
         if (string.IsNullOrWhiteSpace(this.txtName.Text))
         {
-            MessageBox.Show("账套名称不能为空！", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            this.txtName.Focus();
+            // 账套名称可能被用户隐藏了 → 提示去哪里恢复，否则用户会看到「看不到的必填项」
+            bool hidden = !this.lblName.Visible;
+            MessageBox.Show(hidden
+                    ? "账套名称不能为空！\n\n（该字段已被隐藏，请到「文件 → 账套字段设置」恢复显示，或直接在账套列表里编辑）"
+                    : "账套名称不能为空！",
+                "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (!hidden) this.txtName.Focus();
             return;
         }
 

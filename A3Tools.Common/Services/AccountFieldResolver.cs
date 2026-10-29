@@ -52,7 +52,6 @@ public static class AccountFieldResolver
                 ListWeight = def.ListWeight,
                 EditorRowAdvance = def.EditorRowAdvance,
                 EditorGapBefore = def.EditorGapBefore,
-                EditorGroup = def.EditorGroup,
                 Required = def.Required,
             };
 
@@ -143,18 +142,19 @@ public static class AccountFieldResolver
     }
 
     /// <summary>
-    /// 录入界面要显示的字段：按录入排序号升序。
+    /// 录入界面要显示的字段。
     ///
-    /// ★ 分组字段（如「账套用户名」在「网页版自动登录」面板里）**也在流里**——
-    ///   它的排序号决定整个分组面板在流中的位置（分组跟着一起移动）。
+    /// ★ 固定字段（当前只有「代码」，Required=true）**永远排第一** —— 它的排序号不可改。
+    ///   其余字段按录入排序号升序排列。
     /// </summary>
     public static List<AccountFieldConfig> GetEditorFields(List<AccountFieldConfig> config)
     {
         if (config == null) return new List<AccountFieldConfig>();
-        return config
-            .Where(x => x.ShowInEditor)
-            .OrderBy(x => x.EditorOrder)
-            .ToList();
+
+        var visible = config.Where(x => x.ShowInEditor).ToList();
+        var fixedFields = visible.Where(x => x.Required).OrderBy(x => x.EditorOrder).ToList();
+        var movable = visible.Where(x => !x.Required).OrderBy(x => x.EditorOrder).ToList();
+        return fixedFields.Concat(movable).ToList();
     }
 
     /// <summary>
