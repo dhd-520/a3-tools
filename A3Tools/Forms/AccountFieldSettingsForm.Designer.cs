@@ -75,8 +75,9 @@ partial class AccountFieldSettingsForm
         lblHint.Size = new Size(860, 58);
         lblHint.TabIndex = 1;
         lblHint.Text = "逐个账套字段设置它是否显示在列表、列表宽度、列表排序，以及是否显示在录入界面、录入界面排序。\r\n" +
-            "排序号越小越靠前（保存时自动整理为连续序号）；列表宽度填 0 表示自动（随窗口按权重铺满），填具体像素表示固定宽度。\r\n" +
-            "密码类字段不能显示在列表（避免明文泄露）；代码、账套名称为必填，不能从录入界面隐藏。";
+            "排序号 = 位置（填 3 就是排第 3 位，其余自动顺延）；列表宽度填 0 表示自动（随窗口按权重铺满），填具体像素表示固定宽度。\r\n" +
+            "密码类字段不能显示在列表（避免明文泄露）；代码、账套名称为必填，不能从录入界面隐藏。\r\n" +
+            "标了「（整组一起移动）」的字段在分组面板内部（如「网页版自动登录」），改它的排序号 = 整个分组在录入界面里上下移动。";
         //
         // dgvFields
         //
@@ -113,7 +114,7 @@ partial class AccountFieldSettingsForm
             Name = "ColField",
             HeaderText = "账套字段",
             ReadOnly = true,
-            Width = 170,
+            Width = 230,
             MinimumWidth = 140,
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,

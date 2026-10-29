@@ -39,8 +39,9 @@ public static class AccountFieldCatalog
         new() { Field = nameof(Account.RemotePassword), DisplayName = "远程密码",   ListHeader = "远程密码",   ShowInList = false, ListWidth = 0,   ListOrder = 14, ShowInEditor = true, EditorOrder = 12, CanShowInList = false },
         new() { Field = nameof(Account.Remark),         DisplayName = "备注",       ListHeader = "备注",       ShowInList = false, ListWidth = 0,   ListOrder = 10, ShowInEditor = true, EditorOrder = 13, ListWeight = 20, EditorRowAdvance = 80 },
 
-        // ===== 只在录入界面（固定在「网页版自动登录」分组内，不参与重排）=====
-        new() { Field = nameof(Account.ServerUsername), DisplayName = "账套用户名", ListHeader = "账套用户名", ShowInList = false, ListWidth = 0, ListOrder = 15, ShowInEditor = true, EditorOrder = 14, EditorOrderFixed = true, ListWeight = 15 },
+        // ===== 只在录入界面（位于「网页版自动登录」分组面板内部）=====
+        //   排序号 = 整个「网页版自动登录」分组在录入字段流里的位置（默认排最后）
+        new() { Field = nameof(Account.ServerUsername), DisplayName = "账套用户名", ListHeader = "账套用户名", ShowInList = false, ListWidth = 0, ListOrder = 15, ShowInEditor = true, EditorOrder = 14, EditorGroup = "Web", ListWeight = 15 },
     };
 
     /// <summary>按字段名取定义（找不到返回 null）</summary>
@@ -75,7 +76,7 @@ public static class AccountFieldCatalog
                 ListWeight = f.ListWeight,
                 EditorRowAdvance = f.EditorRowAdvance,
                 EditorGapBefore = f.EditorGapBefore,
-                EditorOrderFixed = f.EditorOrderFixed,
+                EditorGroup = f.EditorGroup,
                 Required = f.Required,
             });
         }

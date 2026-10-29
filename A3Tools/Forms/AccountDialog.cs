@@ -82,15 +82,15 @@ public partial class AccountDialog : Form
             { nameof(Account.RemoteUser),     new AccountEditorLayout.Slot(lblRemoteUser, txtRemoteUser) },
             { nameof(Account.RemotePassword), new AccountEditorLayout.Slot(lblRemotePassword, txtRemotePassword) },
             { nameof(Account.Remark),         new AccountEditorLayout.Slot(lblRemark, txtRemark) },
-            // 「网页版自动登录」分组内的字段：排序固定（EditorOrderFixed），不参与重排，
-            // 但仍然可以整体隐藏（ShowInEditor=false）
-            { nameof(Account.ServerUsername), new AccountEditorLayout.Slot(lblServerUsername, txtServerUsername) },
+            // 「网页版自动登录」分组内的字段：它的排序号决定【整个分组面板】在字段流里的位置
+            //   （面板带着提示文字和输入框一起移动）
+            { nameof(Account.ServerUsername), new AccountEditorLayout.Slot(lblServerUsername, txtServerUsername, pnlWebGroup) },
         };
 
         // 配置已由 Normalize 兜底：密码不进列表、必填不隐藏、排序号连续
         var config = AccountFieldResolver.Normalize(_fieldStore.Load());
 
-        var layout = new AccountEditorLayout(slots, pnlWebGroup, pnlProxyGroup, startY: 20);
+        var layout = new AccountEditorLayout(slots, pnlProxyGroup, startY: 20);
         layout.Apply(config);
 
         ShrinkToContent();

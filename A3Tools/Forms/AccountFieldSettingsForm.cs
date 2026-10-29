@@ -33,6 +33,7 @@ public partial class AccountFieldSettingsForm : Form
         InitializeComponent();
 
         this.dgvFields.CellValueChanged += DgvFields_CellValueChanged;
+        this.dgvFields.CellEndEdit += DgvFields_CellEndEdit;
         this.dgvFields.CellFormatting += DgvFields_CellFormatting;
         this.dgvFields.DataError += DgvFields_DataError;
         this.btnSave.Click += BtnSave_Click;
@@ -61,13 +62,17 @@ public partial class AccountFieldSettingsForm : Form
 
         foreach (var cfg in _editing)
         {
+            // 分组字段（控件在分组面板内部）标注一下：排序号管的是整个分组的位置
+            string display = cfg.DisplayName;
+            if (!string.IsNullOrEmpty(cfg.EditorGroup)) display += "（整组一起移动）";
+
             int idx = this.dgvFields.Rows.Add(
-                cfg.DisplayName,
+                display,
                 cfg.ShowInList,
                 cfg.ListWidth,
-                cfg.ListOrder,
+                cfg.ListOrder + 1,     // 表格里用 1 基序号（1 = 最前），人看着直观
                 cfg.ShowInEditor,
-                cfg.EditorOrder);
+                cfg.EditorOrder + 1);
 
             // 行号 → 字段，便于事件里定位
             this.dgvFields.Rows[idx].Tag = cfg.Field;
@@ -110,6 +115,44 @@ public partial class AccountFieldSettingsForm : Form
         }
     }
 
+    /// <summary>
+    /// 排序号格编辑完毕 → 按「位置语义」重排：填几就是第几位，其余字段自动顺延。
+    /// （否则排序号只是排序键：填 3 可能被稳定排序吃掉，用户的意图落空。）
+    /// </summary>
+    private void DgvFields_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= this.dgvFields.Rows.Count) return;
+
+        bool isListOrder = e.ColumnIndex == this.dgvFields.Columns["ColListOrder"].Index;
+        bool isEditorOrder = e.ColumnIndex == this.dgvFields.Columns["ColEditorOrder"].Index;
+        if (!isListOrder && !isEditorOrder) return;
+
+        var row = this.dgvFields.Rows[e.RowIndex];
+        var cfg = GetConfigOfRow(row);
+        if (cfg == null) return;
+
+        string colName = isListOrder ? "ColListOrder" : "ColEditorOrder";
+        int newPos = ToInt(row.Cells[colName].Value, 1);
+        if (newPos < 1) newPos = 1;
+
+        // 先把表格里的新序号写回内存，再让解析器重排（重排结果会回填到所有行）
+        if (isListOrder) cfg.ListOrder = newPos - 1;
+        else cfg.EditorOrder = newPos - 1;
+
+        AccountFieldResolver.MoveTo(_editing, cfg.Field, newPos, isEditorOrder);
+
+        // 回填所有行的序号（1 基）
+        foreach (DataGridViewRow r in this.dgvFields.Rows)
+        {
+            var c = GetConfigOfRow(r);
+            if (c == null) continue;
+            r.Cells["ColListOrder"].Value = c.ListOrder + 1;
+            r.Cells["ColEditorOrder"].Value = c.EditorOrder + 1;
+        }
+
+        this.lblStatus.Text = $"{cfg.DisplayName} 已移到第 {newPos} 位";
+    }
+
     private void DgvFields_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
     {
         if (e.RowIndex < 0 || e.RowIndex >= this.dgvFields.Rows.Count) return;
@@ -121,7 +164,6 @@ public partial class AccountFieldSettingsForm : Form
         bool readOnly = false;
         if (e.ColumnIndex == this.dgvFields.Columns["ColShowList"].Index && !cfg.CanShowInList) readOnly = true;
         if (e.ColumnIndex == this.dgvFields.Columns["ColShowEditor"].Index && cfg.Required) readOnly = true;
-        if (e.ColumnIndex == this.dgvFields.Columns["ColEditorOrder"].Index && cfg.EditorOrderFixed) readOnly = true;
 
         if (readOnly)
         {
@@ -150,9 +192,9 @@ public partial class AccountFieldSettingsForm : Form
 
             cfg.ShowInList = ToBool(row.Cells["ColShowList"].Value);
             cfg.ListWidth = ToInt(row.Cells["ColListWidth"].Value, cfg.ListWidth);
-            cfg.ListOrder = ToInt(row.Cells["ColListOrder"].Value, cfg.ListOrder);
+            cfg.ListOrder = ToInt(row.Cells["ColListOrder"].Value, cfg.ListOrder + 1) - 1;
             cfg.ShowInEditor = ToBool(row.Cells["ColShowEditor"].Value);
-            cfg.EditorOrder = ToInt(row.Cells["ColEditorOrder"].Value, cfg.EditorOrder);
+            cfg.EditorOrder = ToInt(row.Cells["ColEditorOrder"].Value, cfg.EditorOrder + 1) - 1;
         }
 
         // 归一化 + 强制约束（密码不进列表 / 必填不隐藏 / 排序号整理 / 宽度钳制）

@@ -19,47 +19,54 @@ namespace A3Tools.Services;
 ///   · 起始 Y = 20，每行行距 45px；
 ///   · 「远程方式」前额外留白 10px（原来的分组间距）；
 ///   · 「备注」是多行框，占 80px；
-///   · 排完所有字段后，「网页版自动登录」分组贴到最后一个字段下面，
-///     「代理模式」分组再往下 10px。
+///   · 「网页版自动登录」分组作为**一个整块**插入字段流（默认排在最后，占它自己的面板高度）；
+///   · 「代理模式」分组固定在字段流末尾，再往下留 10px。
+///
+/// ★ 分组字段（2026-10-29 陛下追问「账套用户名为什么不能改排序」）：
+///   「账套用户名」的输入框在「网页版自动登录」面板**内部**，控件本身没法单独在流里摆，
+///   所以它的**排序号决定整个分组面板的位置** —— 分组带着提示文字和输入框一起移动。
 /// </summary>
 public sealed class AccountEditorLayout
 {
-    /// <summary>一个字段在录入窗体里的两个控件（标签 + 输入框）</summary>
+    /// <summary>一个字段在录入窗体里的两个控件（标签 + 输入框）+ 可选的分组面板</summary>
     public sealed class Slot
     {
         public Label Label { get; }
         public Control Input { get; }
 
-        public Slot(Label label, Control input)
+        /// <summary>
+        /// 该字段所属的分组面板（非 null 时：排序号管的是**整个面板的位置**，
+        /// 面板内部的标签/输入框保持设计器里的相对位置不动）。
+        /// </summary>
+        public Control? GroupHost { get; }
+
+        public Slot(Label label, Control input, Control? groupHost = null)
         {
             Label = label ?? throw new ArgumentNullException(nameof(label));
             Input = input ?? throw new ArgumentNullException(nameof(input));
+            GroupHost = groupHost;
         }
     }
 
     private readonly IDictionary<string, Slot> _slots;
-    private readonly Panel? _webGroup;
     private readonly Panel? _proxyGroup;
     private readonly int _startY;
 
-    /// <summary>两个分组面板之间的间距（像素）</summary>
+    /// <summary>分组面板之间的间距（像素）</summary>
     private const int GroupGap = 10;
 
     /// <summary>
     /// 构造排版引擎。
     /// </summary>
-    /// <param name="slots">字段名 → (标签, 输入框)</param>
-    /// <param name="webGroup">「网页版自动登录」分组面板（跟在字段流下面）</param>
-    /// <param name="proxyGroup">「代理模式」分组面板（再往下）</param>
+    /// <param name="slots">字段名 → (标签, 输入框[, 分组面板])</param>
+    /// <param name="proxyGroup">「代理模式」分组面板（固定在字段流末尾）</param>
     /// <param name="startY">第一个字段的起始 Y 坐标</param>
     public AccountEditorLayout(
         IDictionary<string, Slot> slots,
-        Panel? webGroup = null,
         Panel? proxyGroup = null,
         int startY = 20)
     {
         _slots = slots ?? throw new ArgumentNullException(nameof(slots));
-        _webGroup = webGroup;
         _proxyGroup = proxyGroup;
         _startY = startY;
     }
@@ -83,18 +90,29 @@ public sealed class AccountEditorLayout
 
             var def = AccountFieldCatalog.Find(f.Field);
             int gap = def?.EditorGapBefore ?? 0;
-            int advance = def?.EditorRowAdvance ?? 45;
 
             y += gap;
-            slot.Label.Top = y;
-            slot.Input.Top = y;
-            slot.Label.Visible = true;
-            slot.Input.Visible = true;
 
-            y += advance;
+            if (slot.GroupHost != null)
+            {
+                // 分组字段：整个分组面板作为一个整块插入字段流
+                slot.GroupHost.Top = y;
+                slot.GroupHost.Visible = true;
+                slot.Label.Visible = true;
+                slot.Input.Visible = true;
+                y += slot.GroupHost.Height;
+            }
+            else
+            {
+                slot.Label.Top = y;
+                slot.Input.Top = y;
+                slot.Label.Visible = true;
+                slot.Input.Visible = true;
+                y += def?.EditorRowAdvance ?? 45;
+            }
         }
 
-        // 其余字段隐藏（分组内字段由自己的 ShowInEditor 决定）
+        // 其余字段隐藏（分组内字段隐藏时，整个分组面板一起隐藏）
         foreach (var kv in _slots)
         {
             if (flowFields.Contains(kv.Key)) continue;
@@ -103,10 +121,10 @@ public sealed class AccountEditorLayout
             bool show = cfg?.ShowInEditor == true;
             kv.Value.Label.Visible = show;
             kv.Value.Input.Visible = show;
+            if (kv.Value.GroupHost != null) kv.Value.GroupHost.Visible = show;
         }
 
-        // 分组面板跟到最后一个字段下面
-        if (_webGroup != null) _webGroup.Top = y;
-        if (_proxyGroup != null) _proxyGroup.Top = y + (_webGroup?.Height ?? 0) + GroupGap;
+        // 「代理模式」分组固定在字段流末尾，再往下 10px
+        if (_proxyGroup != null) _proxyGroup.Top = y + GroupGap;
     }
 }

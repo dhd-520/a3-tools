@@ -59,9 +59,14 @@ public class AccountFieldConfig
     [JsonIgnore]
     public int EditorGapBefore { get; set; }
 
-    /// <summary>录入界面排序是否固定（在分组面板内，不参与重排）</summary>
+    /// <summary>
+    /// 录入界面所属分组（null = 普通字段，控件直接在字段流里）。
+    ///
+    /// 非空时：该字段的控件位于某个分组面板内部（如「账套用户名」在「网页版自动登录」面板里），
+    /// 无法单独在字段流里摆放 —— 它的**排序号决定整个分组面板在字段流中的位置**（分组跟着一起移动）。
+    /// </summary>
     [JsonIgnore]
-    public bool EditorOrderFixed { get; set; }
+    public string? EditorGroup { get; set; }
 
     /// <summary>录入界面是否必填（必填字段不允许隐藏）</summary>
     [JsonIgnore]
