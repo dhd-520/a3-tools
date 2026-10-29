@@ -20,6 +20,11 @@ namespace A3Tools.Services;
 ///   · 首次按 FillWeight 权重铺满（尊重每列 MinimumWidth）；
 ///   · 拖动某列 → 该列取新宽，差值由【相邻列】吸收，总宽恒定；
 ///   · 窗口缩放 / 垂直滚动条出现 → 按当前比例重新铺满可用宽度。
+///
+/// ★ 2026-10-28 新增（陛下要的「列表宽度」设置）：
+///   账套字段设置页允许给每个字段指定固定像素宽度。固定列在铺列宽时
+///   **严格保持指定宽度**，不会被窗口缩放改写，也不会被相邻列拖动挤占；
+///   其余列分剩余空间（不够时退到各自 MinimumWidth，允许出水平滚动条）。
 /// </summary>
 public sealed class DgvColumnLayoutManager : IDisposable
 {
@@ -29,8 +34,11 @@ public sealed class DgvColumnLayoutManager : IDisposable
     /// <summary>各列当前生效宽度（列名 → 像素）。列重建后据此恢复用户调好的宽度。</summary>
     private readonly Dictionary<string, int> _widths = new(StringComparer.Ordinal);
 
-    /// <summary>用户手动调整过的列 → 窗口缩放时不再锁定宽度。</summary>
+    /// <summary>用户手动调整过的列 → 窗口缩放时不再锁定宽度（沿用 v2.6.7 语义）。</summary>
     private readonly HashSet<string> _userSized = new(StringComparer.Ordinal);
+
+    /// <summary>配置指定的固定宽度（列名 → 像素）。0/缺省 = 自动。</summary>
+    private readonly Dictionary<string, int> _configFixedWidths = new(StringComparer.Ordinal);
 
     /// <summary>程序自己写宽度时置 true，避免与用户拖动互相递归。</summary>
     private bool _applying;
@@ -60,6 +68,33 @@ public sealed class DgvColumnLayoutManager : IDisposable
     public void Resume() => _suspended = false;
 
     /// <summary>
+    /// 设置「配置固定宽度」的列（列名 → 像素宽）。
+    /// 宽度 ≤ 0 的列视为自动（按权重分剩余空间）。
+    /// </summary>
+    public void SetConfigFixedWidths(IEnumerable<KeyValuePair<string, int>>? widths)
+    {
+        _configFixedWidths.Clear();
+        if (widths != null)
+        {
+            foreach (var kv in widths)
+            {
+                if (!string.IsNullOrEmpty(kv.Key) && kv.Value > 0)
+                    _configFixedWidths[kv.Key] = kv.Value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 清空「记忆中的列宽」，下次 <see cref="ColumnsChanged"/> 会按当前配置重新播种。
+    /// 账套字段设置变更后调用（否则旧的记忆宽度会盖住新配置）。
+    /// </summary>
+    public void InvalidateLayout()
+    {
+        _widths.Clear();
+        _userSized.Clear();
+    }
+
+    /// <summary>
     /// 列重建完成后调用：首次按 FillWeight 权重分配；已有记录则沿用用户调好的宽度。
     /// </summary>
     public void ColumnsChanged()
@@ -81,17 +116,17 @@ public sealed class DgvColumnLayoutManager : IDisposable
 
         var current = new int[count];
         var mins = new int[count];
-        var locked = new bool[count];
         for (int i = 0; i < count; i++)
         {
             var col = _grid.Columns[i];
             current[i] = _widths.TryGetValue(col.Name, out var w) ? w : col.Width;
             mins[i] = col.MinimumWidth;
-            // 固定列默认锁宽；用户一旦手动拖过它，就跟着其它列一起缩放
-            locked[i] = col.Name == _fixedColumnName && !_userSized.Contains(col.Name);
         }
 
-        var next = DgvColumnWidthAllocator.ScaleToFit(current, mins, locked, available);
+        // 固定宽度列：严格保持配置值，不参与缩放
+        var fixedWidths = BuildFixedWidths(out _);
+
+        var next = DgvColumnWidthAllocator.ScaleToFitKeepFixed(current, mins, fixedWidths, available);
         ApplyWidths(next);
     }
 
@@ -129,7 +164,7 @@ public sealed class DgvColumnLayoutManager : IDisposable
         }
     }
 
-    /// <summary>首次铺列宽：固定列按其自身宽度，其余列按 FillWeight 权重分剩余空间。</summary>
+    /// <summary>首次铺列宽：固定列保持指定宽度，其余列按 FillWeight 权重分剩余空间。</summary>
     private void SeedIfNeeded()
     {
         int count = _grid.Columns.Count;
@@ -148,19 +183,50 @@ public sealed class DgvColumnLayoutManager : IDisposable
 
         var weights = new double[count];
         var mins = new int[count];
-        var fixedWidths = new int[count];
         for (int i = 0; i < count; i++)
         {
             var c = _grid.Columns[i];
             weights[i] = c.FillWeight;
             mins[i] = c.MinimumWidth;
-            if (c.Name == _fixedColumnName) fixedWidths[i] = c.Width;
         }
 
-        // DistributeByWeight 内部用 FitCore 做水位填充 + 最大余数法，
-        // 尊重每列 MinimumWidth，且总和精确等于 available（不会溢出出水平滚动条）
-        var seed = DgvColumnWidthAllocator.DistributeByWeight(weights, mins, fixedWidths, available);
+        var fixedWidths = BuildFixedWidths(out _);
+
+        // 固定列严格保持指定宽度；其余列按权重分剩余空间（尊重 MinimumWidth）
+        var seed = DgvColumnWidthAllocator.DistributeByWeightKeepFixed(weights, mins, fixedWidths, available);
         ApplyWidths(seed);
+    }
+
+    /// <summary>
+    /// 算出每列的「固定宽度」：配置指定 &gt; 0 → 用配置值；否则沿用旧版的固定列语义。
+    /// </summary>
+    private int[] BuildFixedWidths(out bool[] locked)
+    {
+        int count = _grid.Columns.Count;
+        var fixedWidths = new int[count];
+        locked = new bool[count];
+        for (int i = 0; i < count; i++)
+        {
+            int fw = GetFixedWidth(_grid.Columns[i]);
+            if (fw > 0) { fixedWidths[i] = fw; locked[i] = true; }
+        }
+        return fixedWidths;
+    }
+
+    /// <summary>某列的固定像素宽（0 = 不固定）。</summary>
+    private int GetFixedWidth(DataGridViewColumn col)
+    {
+        // 用户手动调过的列 → 不再锁定（沿用 v2.6.7「手动调整后不再固定」的语义）
+        if (_userSized.Contains(col.Name)) return 0;
+
+        if (_configFixedWidths.TryGetValue(col.Name, out int fw) && fw > 0)
+            return fw;
+
+        // 兼容旧调用：构造时指定的固定列（保持它自身的宽度）
+        if (!string.IsNullOrEmpty(_fixedColumnName) && col.Name == _fixedColumnName)
+            return col.Width;
+
+        return 0;
     }
 
     /// <summary>用户拖动列宽 → 只让相邻列吸收差值，总宽恒定。</summary>
@@ -186,7 +252,13 @@ public sealed class DgvColumnLayoutManager : IDisposable
             mins[i] = c.MinimumWidth;
         }
 
-        var result = DgvColumnWidthAllocator.ApplyUserResize(current, mins, idx, column.Width);
+        // 用户手动拖了「固定列」→ 该列就此解除锁定（配置值仍然保留在文件里，下次启动再生效）
+        if (GetFixedWidth(column) > 0)
+            _userSized.Add(column.Name);
+
+        var fixedWidths = BuildFixedWidths(out var locked);
+
+        var result = DgvColumnWidthAllocator.ApplyUserResize(current, mins, idx, column.Width, locked);
         ApplyWidths(result);
 
         // 用户手动调过的列 → 窗口缩放时不再锁定宽度

@@ -12,6 +12,9 @@ public partial class AccountDialog : Form
     private readonly Account? _original;
     private readonly DataService _dataService = new();
 
+    /// <summary>账套字段显示配置（录入界面的显隐与排序）</summary>
+    private readonly AccountFieldStore _fieldStore = new();
+
     /// <summary>是否显示密码明文（Root模式使用）</summary>
     public bool ShowPasswords { get; set; } = false;
 
@@ -30,6 +33,7 @@ public partial class AccountDialog : Form
         InitializeComponent();
         this.KeyPreview = true;
         this.KeyDown += AccountDialog_KeyDown;
+        ApplyFieldLayout();
         if (account != null)
             LoadAccount(account);
         else
@@ -48,6 +52,77 @@ public partial class AccountDialog : Form
                 maxCode = code;
         }
         this.txtCode.Text = (maxCode + 1).ToString("D4");
+    }
+
+    /// <summary>
+    /// 按「账套字段设置」里的配置重排录入界面：
+    ///   · 字段的显示/隐藏；
+    ///   · 字段的上下顺序；
+    ///   · 「网页版自动登录」「代理模式」两个分组跟着字段流往下走。
+    ///
+    /// ★ 不动态创建控件：只用设计器里已经定义好的 Label/输入框，
+    ///   控件的 X 坐标/宽高/字体完全由 AccountDialog.Designer.cs 决定（所见即所得）。
+    /// </summary>
+    private void ApplyFieldLayout()
+    {
+        // 字段名 → (标签, 输入框)
+        var slots = new Dictionary<string, AccountEditorLayout.Slot>(StringComparer.OrdinalIgnoreCase)
+        {
+            { nameof(Account.Code),           new AccountEditorLayout.Slot(lblCode, txtCode) },
+            { nameof(Account.Name),           new AccountEditorLayout.Slot(lblName, txtName) },
+            { nameof(Account.Server),         new AccountEditorLayout.Slot(lblServer, txtServer) },
+            { nameof(Account.ServerBackup),   new AccountEditorLayout.Slot(lblServerBackup, txtServerBackup) },
+            { nameof(Account.ServerPassword), new AccountEditorLayout.Slot(lblServerPassword, txtServerPassword) },
+            { nameof(Account.Database),       new AccountEditorLayout.Slot(lblDatabase, txtDatabase) },
+            { nameof(Account.DatabaseName),   new AccountEditorLayout.Slot(lblDatabaseName, txtDatabaseName) },
+            { nameof(Account.DbUser),         new AccountEditorLayout.Slot(lblDbUser, txtDbUser) },
+            { nameof(Account.DbPassword),     new AccountEditorLayout.Slot(lblDbPassword, txtDbPassword) },
+            { nameof(Account.RemoteType),     new AccountEditorLayout.Slot(lblRemoteType, cboRemoteType) },
+            { nameof(Account.RemoteAddress),  new AccountEditorLayout.Slot(lblRemoteAddress, txtRemoteAddress) },
+            { nameof(Account.RemoteUser),     new AccountEditorLayout.Slot(lblRemoteUser, txtRemoteUser) },
+            { nameof(Account.RemotePassword), new AccountEditorLayout.Slot(lblRemotePassword, txtRemotePassword) },
+            { nameof(Account.Remark),         new AccountEditorLayout.Slot(lblRemark, txtRemark) },
+            // 「网页版自动登录」分组内的字段：排序固定（EditorOrderFixed），不参与重排，
+            // 但仍然可以整体隐藏（ShowInEditor=false）
+            { nameof(Account.ServerUsername), new AccountEditorLayout.Slot(lblServerUsername, txtServerUsername) },
+        };
+
+        // 配置已由 Normalize 兜底：密码不进列表、必填不隐藏、排序号连续
+        var config = AccountFieldResolver.Normalize(_fieldStore.Load());
+
+        var layout = new AccountEditorLayout(slots, pnlWebGroup, pnlProxyGroup, startY: 20);
+        layout.Apply(config);
+
+        ShrinkToContent();
+    }
+
+    /// <summary>
+    /// 字段被隐藏后，窗体高度跟着收（只收不放，不会超过设计器里定的高度）。
+    /// 否则底部会留一大块空白。
+    /// </summary>
+    private void ShrinkToContent()
+    {
+        try
+        {
+            // 内容底部 = 最后一个可见元素的下沿
+            int bottom = 0;
+            foreach (Control c in contentPanel.Controls)
+            {
+                if (!c.Visible) continue;
+                int b = c.Top + c.Height;
+                if (b > bottom) bottom = b;
+            }
+            if (bottom <= 0) return;
+
+            int wanted = titleBar.Height + bottom + 20 + footerPanel.Height;
+            int maxH = 720; // 设计器里定的 ClientSize 高度
+            if (wanted < maxH && wanted >= this.MinimumSize.Height)
+                this.ClientSize = new Size(this.ClientSize.Width, wanted);
+        }
+        catch (Exception)
+        {
+            // 调整尺寸失败不影响使用，忽略
+        }
     }
 
     private void UpdateTitle()

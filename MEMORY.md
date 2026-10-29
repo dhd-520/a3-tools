@@ -375,3 +375,51 @@
   - 影响：github 源仓库 master 落后（本地/来源 HEAD=`50be8d9`，github 停在 `bcaeb8f`），**不影响 Gitee 发布和用户更新**
   - 缓解：`release.ps1` 默认 `SkipGitHub=$true`；国内用户走 gitee
   - ★ 补推方式（网络恢复后）：`git push github master`；**不要**重跑整个 `release.ps1`（会再走一遍打包+发版）
+
+---
+
+## v2.6.9 账套字段设置（2026-10-29 陛下需求）
+
+### 需求原文
+> 账套管理增加设置页面，可以单独设置每个账套字段是否显示列表、列表宽度、排序、是否显示在录入界面、录入界面排序
+
+**后续陛下改口径**：不用页签形式 → 改成**独立设置窗体**，入口挂在**文件**菜单下（`menuAccountFieldSettings`，菜单位置在「导入账套」和「退出」之间）。
+
+### 新增文件
+| 文件 | 作用 |
+|---|---|
+| `A3Tools.Common/Models/AccountFieldConfig.cs` | 单个字段的配置模型（Field 主键 + 显隐/宽度/排序） |
+| `A3Tools.Common/Services/AccountFieldCatalog.cs` | **字段单一数据源**（15 个字段 + 默认值 = 改造前行为） |
+| `A3Tools.Common/Services/AccountFieldResolver.cs` | 纯逻辑：合并配置、强制约束、排序归一化、派生视图 |
+| `A3Tools.Common/Services/AccountFieldStore.cs` | 持久化 `DATA\account-fields.json`（camelCase） |
+| `A3Tools/Forms/AccountFieldSettingsForm.cs` + `.Designer.cs` | 设置窗体（表格 15 行 × 6 列） |
+| `A3Tools/Services/AccountEditorLayout.cs` | 录入界面**纯排版引擎**（不创建控件，只摆位置） |
+
+### 架构约定（下次别走偏）
+- **设置页 / 账套列表 / 录入窗体 三处共用 `AccountFieldCatalog`** —— 各自写字段清单必然漂移
+- **不动态创建控件**：`AccountEditorLayout` 只改设计器里既有 Label/输入框的 `Top` 和 `Visible`，X 坐标/宽高/字体仍由 `.Designer.cs` 说了算（所见即所得）
+- **录入排版引擎与设计器逐像素对齐**：起始 Y=20、行距 45、远程方式前 +10、备注行占 80、web 分组 695、proxy 分组 805（= web 底部 +10）
+- **列名 = "Col" + 字段名**（`ColCode` / `ColName` …），和改造前的列名完全一致，别另起一套
+- 强制约束（`Normalize` 兜底，界面置灰只是提示）：密码类字段禁止进列表；`Code`/`Name` 必填不可隐藏；宽度钳制 `0..2000`；排序号归一化为 `0..n-1`；列表至少一列
+
+### ★ 踩坑：测试宿主非 DPI 感知 → 窗体坐标全错
+- 单测里直接 `new AccountDialog(null)` 断言 `lblRemoteType.Top == 435` **失败**，实测 `pnlWebGroup` 变成 473×58（设计值 840×100）
+- 根因：**WinForms 窗体按 `AutoScaleDimensions` + 字体自动缩放**，而控制台测试宿主默认**非 DPI 感知** → 缩放系数 ≈0.57，所有设计坐标都被缩掉
+- 修法：测试 `Main` 开头加 `Application.SetHighDpiMode(HighDpiMode.PerMonitorV2)`，**与生产程序（A3Tools.exe 带 app.manifest，DPI 感知）对齐** → 57 项全绿，坐标与设计器逐像素一致
+- ★ 教训：**断言 WinForms 绝对坐标的测试，必须先对齐 DPI 感知模式**，否则测的是「宿主缩放」而不是「生产布局」
+
+### 验证（本轮）
+- 新增字段配置单测 `D:\Temp\a3fieldtest` → **57 pass / 0 fail**（A 默认值兼容 / B 强制约束 / C 排序归一化 / D 派生视图 / E 持久化往返 / F 录入排版 / G 窗体运行时冒烟）
+- 列宽单测 `D:\Temp\a3coltest` → **59 pass / 0 fail**
+- 关联字段单测 `D:\Temp\a3fktest` → **46 pass / 0 fail**
+- SQL 回归 `D:\Temp\a3sqltest` → **89 passed, 0 failed**（输出在 `test-output.txt`，控制台是空的，别以为没跑）
+
+### 部署（已完成）
+- 版本 **2.6.9**（`A3Tools.csproj` 的 `<Version>`），程序集版本 2.6.9.0
+- 已发布到 `D:\Work\工具\A3工具箱更新`（`DATA\` 未动，仍是 10/16 16:11:16）
+- ★ 部署前要 `Stop-Process` 掉 A3Tools：它 `CloseMainWindow` 只会**缩到托盘**不退出，exe 锁着写不进去；而且**它会被重新拉起**（本次杀完又冒出 PID 20724），杀完立刻复制
+- 发布说明：`release-notes-v2.6.9.md` → 同时拷成部署目录的 `RELEASE_NOTES.md`（原来那份还停在 v2.6.6）
+
+### 未发布到 Gitee
+- `v2.6.7` / `v2.6.8` / `v2.6.9` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
+- 等陛下确认后再跑 `release.ps1 -Version 2.6.9`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）

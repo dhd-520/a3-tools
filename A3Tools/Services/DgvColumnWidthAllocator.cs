@@ -67,6 +67,110 @@ public static class DgvColumnWidthAllocator
     }
 
     /// <summary>
+    /// 按权重首次分配列宽，但【固定宽度的列严格保持指定像素】，其余列分剩余空间。
+    ///
+    /// 与 <see cref="DistributeByWeight"/> 的区别：
+    ///   · DistributeByWeight：固定列占的空间太多时 → 放弃全部锁定，按权重重分（固定宽度会丢失）；
+    ///   · 本方法：固定列**永远保持指定宽度**，剩余空间不够时其余列退到各自 MinimumWidth，
+    ///     总宽超出 → 出现水平滚动条（与本项目「空间不足优先保证最小宽度」的既定规则一致）。
+    ///
+    /// 用途（2026-10-28 陛下要的「列表宽度」设置）：用户明确指定了某列的像素宽度，
+    /// 这个意图不应该被窗口宽度变化悄悄抹掉。
+    /// </summary>
+    /// <param name="weights">各列权重（仅对非固定列生效）。</param>
+    /// <param name="minWidths">各列最小宽度，可为 null。</param>
+    /// <param name="fixedWidths">fixedWidths[i] &gt; 0 的列固定该宽度，其余列分剩余空间；可为 null。</param>
+    /// <param name="totalWidth">目标总宽。</param>
+    /// <returns>新的列宽数组；固定列严格等于 fixedWidths。</returns>
+    public static int[] DistributeByWeightKeepFixed(double[] weights, int[]? minWidths, int[]? fixedWidths, int totalWidth)
+    {
+        int n = weights.Length;
+        var result = new int[n];
+        if (n == 0 || totalWidth <= 0) return result;
+
+        var mins = BuildMins(n, minWidths);
+        var fixedArr = new int[n];
+        for (int i = 0; i < n; i++)
+            fixedArr[i] = fixedWidths != null && i < fixedWidths.Length ? Math.Max(0, fixedWidths[i]) : 0;
+
+        return FitWithFixed(weights, mins, fixedArr, totalWidth);
+    }
+
+    /// <summary>
+    /// 按当前宽度比例铺满可用宽度，但【固定宽度的列严格保持指定像素】。
+    ///
+    /// 与 <see cref="ScaleToFit"/> 的区别同 <see cref="DistributeByWeightKeepFixed"/>：
+    /// 固定列不会被窗口缩放改写，空间不够时其余列退到 MinimumWidth（允许总宽超出）。
+    /// </summary>
+    /// <param name="current">当前各列宽度（同时作为非固定列的比例基准）。</param>
+    /// <param name="minWidths">各列最小宽度，可为 null。</param>
+    /// <param name="fixedWidths">fixedWidths[i] &gt; 0 的列固定该宽度；可为 null。</param>
+    /// <param name="totalWidth">目标总宽。</param>
+    /// <returns>新的列宽数组；固定列严格等于 fixedWidths。</returns>
+    public static int[] ScaleToFitKeepFixed(int[] current, int[]? minWidths, int[]? fixedWidths, int totalWidth)
+    {
+        int n = current.Length;
+        var result = (int[])current.Clone();
+        if (n == 0 || totalWidth <= 0) return result;
+
+        var mins = BuildMins(n, minWidths);
+        var weights = new double[n];
+        for (int i = 0; i < n; i++) weights[i] = current[i];
+
+        var fixedArr = new int[n];
+        for (int i = 0; i < n; i++)
+            fixedArr[i] = fixedWidths != null && i < fixedWidths.Length ? Math.Max(0, fixedWidths[i]) : 0;
+
+        return FitWithFixed(weights, mins, fixedArr, totalWidth);
+    }
+
+    /// <summary>
+    /// 核心：固定列严格保持宽度，其余列按权重分剩余空间（不够就退到 MinimumWidth，允许超出）。
+    /// </summary>
+    private static int[] FitWithFixed(double[] weights, int[] mins, int[] fixedWidths, int totalWidth)
+    {
+        int n = weights.Length;
+        var result = new int[n];
+
+        var flex = new List<int>();
+        int fixedSum = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (fixedWidths[i] > 0) { result[i] = fixedWidths[i]; fixedSum += fixedWidths[i]; }
+            else flex.Add(i);
+        }
+        if (flex.Count == 0) return result;
+
+        int budget = totalWidth - fixedSum;
+        if (budget <= 0)
+        {
+            // 固定列已经把空间吃光了 → 其余列只能保底（总宽会超出 → 出水平滚动条）
+            foreach (int i in flex) result[i] = mins[i];
+            return result;
+        }
+
+        // 只对「弹性列」做分配（权重/最小宽度都取子集）
+        var flexWeights = new double[flex.Count];
+        var flexMins = new int[flex.Count];
+        for (int k = 0; k < flex.Count; k++)
+        {
+            flexWeights[k] = weights[flex[k]];
+            flexMins[k] = mins[flex[k]];
+        }
+
+        // FitCore 在 budget 不足时会把列压到 0，这里传「无锁」版本，最后再兜底保证 >= MinimumWidth
+        var flexResult = FitCore(flexWeights, new int[flex.Count], flexMins, new bool[flex.Count], budget);
+
+        for (int k = 0; k < flex.Count; k++)
+        {
+            int w = flexResult[k];
+            if (w < flexMins[k]) w = flexMins[k];
+            result[flex[k]] = w;
+        }
+        return result;
+    }
+
+    /// <summary>
     /// 模拟用户拖动某一列：被拖列取新宽，差值由【相邻列】吸收，列宽总和保持不变。
     /// 吸收顺序：先右侧（用户拖的是该列右边的分隔线），再往左回退。
     /// </summary>
@@ -74,12 +178,16 @@ public static class DgvColumnWidthAllocator
     /// <param name="minWidths">各列最小宽度，可为 null。</param>
     /// <param name="changedIndex">被拖动列的下标。</param>
     /// <param name="newWidth">被拖动列的新宽度。</param>
+    /// <param name="locked">locked[i]=true 的列不参与差值吸收（固定宽度列）；可为 null。</param>
     /// <returns>新的列宽数组；总和与入参一致。</returns>
-    public static int[] ApplyUserResize(int[] current, int[]? minWidths, int changedIndex, int newWidth)
+    public static int[] ApplyUserResize(int[] current, int[]? minWidths, int changedIndex, int newWidth, bool[]? locked = null)
     {
         int n = current.Length;
         var result = (int[])current.Clone();
         if (changedIndex < 0 || changedIndex >= n) return result;
+
+        // 被拖的列本身是固定列 → 不允许改（由调用方先取消固定）
+        if (locked != null && changedIndex < locked.Length && locked[changedIndex]) return result;
 
         var mins = BuildMins(n, minWidths);
 
@@ -100,6 +208,8 @@ public static class DgvColumnWidthAllocator
         foreach (int idx in order)
         {
             if (pending == 0) break;
+            // 固定宽度列不参与差值吸收
+            if (locked != null && idx < locked.Length && locked[idx]) continue;
             if (pending > 0)
             {
                 int canTake = result[idx] - mins[idx];

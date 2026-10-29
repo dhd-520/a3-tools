@@ -18,6 +18,7 @@ partial class MainForm
     private ToolStripMenuItem menuHelp = null!;
     private ToolStripMenuItem menuHotkeySettings = null!;
     private ToolStripMenuItem menuImportAccount = null!;
+    private ToolStripMenuItem menuAccountFieldSettings = null!;
     private ToolStripMenuItem menuExit = null!;
     private ToolStripMenuItem menuAbout = null!;
     private ToolStripMenuItem menuCheckUpdate = null!;
@@ -91,6 +92,7 @@ partial class MainForm
         menuCopyAccount = new ToolStripMenuItem();
         menuHotkeySettings = new ToolStripMenuItem();
         menuImportAccount = new ToolStripMenuItem();
+        menuAccountFieldSettings = new ToolStripMenuItem();
         menuExit = new ToolStripMenuItem();
         menuHelp = new ToolStripMenuItem();
         menuAbout = new ToolStripMenuItem();
@@ -164,7 +166,7 @@ partial class MainForm
         // 
         // menuFile
         //
-        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuHotkeySettings, menuImportAccount, menuExit });
+        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuHotkeySettings, menuImportAccount, menuAccountFieldSettings, menuExit });
         menuFile.Name = "menuFile";
         menuFile.Size = new Size(106, 32);
         menuFile.Text = "文件(_F)";
@@ -186,6 +188,12 @@ partial class MainForm
         menuImportAccount.Name = "menuImportAccount";
         menuImportAccount.Size = new Size(270, 40);
         menuImportAccount.Text = "导入账套(_I)";
+        // 
+        // menuAccountFieldSettings
+        // 
+        menuAccountFieldSettings.Name = "menuAccountFieldSettings";
+        menuAccountFieldSettings.Size = new Size(270, 40);
+        menuAccountFieldSettings.Text = "账套字段设置(_F)";
         //
         // menuExit 
         menuExit.Name = "menuExit";
