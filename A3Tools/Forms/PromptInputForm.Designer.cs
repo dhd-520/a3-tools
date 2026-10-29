@@ -77,7 +77,8 @@ partial class PromptInputForm
         // PromptInputForm
         //
         AcceptButton = btnOk;
-        AutoScaleDimensions = new SizeF(16F, 35F);
+        // ★ 10pt 微软雅黑对应的设计尺寸是 (14F, 30F)（11pt 才是 16F,35F）
+        AutoScaleDimensions = new SizeF(14F, 30F);
         AutoScaleMode = AutoScaleMode.Font;
         BackColor = Color.White;
         CancelButton = btnCancel;

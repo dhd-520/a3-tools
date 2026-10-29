@@ -53,7 +53,7 @@ partial class AccountFieldSettingsForm
         headerPanel.Dock = DockStyle.Top;
         headerPanel.Location = new Point(0, 0);
         headerPanel.Name = "headerPanel";
-        headerPanel.Size = new Size(860, 46);
+        headerPanel.Size = new Size(1060, 46);
         headerPanel.TabIndex = 0;
         //
         // lblTitle
@@ -63,25 +63,27 @@ partial class AccountFieldSettingsForm
         lblTitle.ForeColor = Color.White;
         lblTitle.Location = new Point(0, 0);
         lblTitle.Name = "lblTitle";
-        lblTitle.Size = new Size(860, 46);
+        lblTitle.Size = new Size(1060, 46);
         lblTitle.TabIndex = 0;
         lblTitle.Text = "账套字段设置";
         lblTitle.TextAlign = ContentAlignment.MiddleCenter;
         //
         // lblHint
         //
+        // ★ 2026-10-29 陛下反馈「底部重叠」：提示文字原本 4 行挤在 58px 里，
+        //   运行时实测文字需要 224px → 被截断。现在压成 3 行、每行不过宽，
+        //   高度按 3 行文字 + 内边距给足（72px），保证一行都不少。
         lblHint.Dock = DockStyle.Top;
         lblHint.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
         lblHint.ForeColor = Color.FromArgb(80, 80, 80);
         lblHint.Location = new Point(0, 46);
         lblHint.Name = "lblHint";
         lblHint.Padding = new Padding(12, 8, 12, 8);
-        lblHint.Size = new Size(860, 58);
+        lblHint.Size = new Size(1060, 100);
         lblHint.TabIndex = 1;
-        lblHint.Text = "逐个账套字段设置它是否显示在列表、列表宽度、列表排序，以及是否显示在录入界面、录入界面排序。\r\n" +
-            "排序号 = 位置（填 3 就是排第 3 位，其余自动顺延）；列表宽度填 0 表示自动（随窗口按权重铺满），填具体像素表示固定宽度。\r\n" +
-            "密码类字段不能显示在列表（避免明文泄露）；【代码】是固定字段：永远排在录入界面第一位，不可隐藏。\r\n" +
-            "其余字段（含账套名称、账套用户名）都可自由排序、可隐藏；隐藏后新增账套时该字段将无法填写。";
+        lblHint.Text = "排序号 = 位置（填 3 就是排第 3 位，其余自动顺延）；列表宽度填 0 表示自动宽度。\r\n" +
+            "密码类字段不能显示在列表（防明文泄露）；【代码】是固定字段：永远排录入界面第一位，不可隐藏。\r\n" +
+            "其余字段（含账套名称、账套用户名）都可自由排序、可隐藏；隐藏后新增账套时该字段无法填写。";
         //
         // dgvFields
         //
@@ -102,34 +104,36 @@ partial class AccountFieldSettingsForm
         dgvFields.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
         dgvFields.EnableHeadersVisualStyles = false;
         dgvFields.Font = new Font("微软雅黑", 9F);
-        dgvFields.Location = new Point(0, 104);
+        dgvFields.Location = new Point(0, 146);
         dgvFields.MultiSelect = false;
         dgvFields.Name = "dgvFields";
         dgvFields.RowHeadersVisible = false;
         dgvFields.RowTemplate.Height = 30;
         dgvFields.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvFields.Size = new Size(860, 452);
+        dgvFields.Size = new Size(1060, 526);
         dgvFields.TabIndex = 2;
         //
         // 列定义（★ 2026-10-28 陛下要的账套字段设置）
         //
+        // 「账套字段」列用 Fill：窗体拉宽时它吃掉富余宽度，右侧不留空白（其余列保持固定宽度）
         dgvFields.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "ColField",
             HeaderText = "账套字段",
             ReadOnly = true,
-            Width = 230,
-            MinimumWidth = 140,
+            Width = 260,
+            MinimumWidth = 160,
             SortMode = DataGridViewColumnSortMode.NotSortable,
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 40,
         });
         dgvFields.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "ColType",
             HeaderText = "类型",
             ReadOnly = true,
-            Width = 70,
-            MinimumWidth = 60,
+            Width = 80,
+            MinimumWidth = 70,
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
@@ -138,8 +142,8 @@ partial class AccountFieldSettingsForm
         {
             Name = "ColShowList",
             HeaderText = "显示列表",
-            Width = 90,
-            MinimumWidth = 80,
+            Width = 100,
+            MinimumWidth = 90,
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
         });
@@ -148,8 +152,8 @@ partial class AccountFieldSettingsForm
             Name = "ColListWidth",
             HeaderText = "列表宽度(px)",
             ValueType = typeof(int),
-            Width = 110,
-            MinimumWidth = 90,
+            Width = 120,
+            MinimumWidth = 100,
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
@@ -159,8 +163,8 @@ partial class AccountFieldSettingsForm
             Name = "ColListOrder",
             HeaderText = "列表排序",
             ValueType = typeof(int),
-            Width = 90,
-            MinimumWidth = 80,
+            Width = 100,
+            MinimumWidth = 90,
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
@@ -169,8 +173,8 @@ partial class AccountFieldSettingsForm
         {
             Name = "ColShowEditor",
             HeaderText = "显示录入界面",
-            Width = 110,
-            MinimumWidth = 100,
+            Width = 130,
+            MinimumWidth = 110,
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
         });
@@ -179,8 +183,8 @@ partial class AccountFieldSettingsForm
             Name = "ColEditorOrder",
             HeaderText = "录入界面排序",
             ValueType = typeof(int),
-            Width = 120,
-            MinimumWidth = 100,
+            Width = 140,
+            MinimumWidth = 110,
             SortMode = DataGridViewColumnSortMode.NotSortable,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
@@ -188,6 +192,9 @@ partial class AccountFieldSettingsForm
         //
         // footerPanel
         //
+        // ★ 2026-10-29 陛下反馈「底部重叠」：原来状态标签和按钮挤在同一行，
+        //   状态文字一长就压住按钮。现在改成上下两行：
+        //   上行 = 状态文字（左右拉伸，永远不与按钮同排），下行 = 按钮（靠右）。
         footerPanel.BackColor = Color.FromArgb(245, 245, 245);
         footerPanel.Controls.Add(lblStatus);
         footerPanel.Controls.Add(btnAddField);
@@ -196,20 +203,21 @@ partial class AccountFieldSettingsForm
         footerPanel.Controls.Add(btnCancel);
         footerPanel.Controls.Add(btnSave);
         footerPanel.Dock = DockStyle.Bottom;
-        footerPanel.Location = new Point(0, 556);
+        footerPanel.Location = new Point(0, 672);
         footerPanel.Name = "footerPanel";
-        footerPanel.Size = new Size(860, 64);
+        footerPanel.Size = new Size(1060, 88);
         footerPanel.TabIndex = 3;
         //
         // lblStatus
         //
-        lblStatus.AutoSize = true;
+        lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         lblStatus.ForeColor = Color.FromArgb(120, 120, 120);
-        lblStatus.Location = new Point(12, 22);
+        lblStatus.Location = new Point(16, 10);
         lblStatus.Name = "lblStatus";
-        lblStatus.Size = new Size(53, 15);
+        lblStatus.Size = new Size(1028, 20);
         lblStatus.TabIndex = 0;
         lblStatus.Text = "就绪";
+        lblStatus.TextAlign = ContentAlignment.MiddleLeft;
         //
         // btnAddField
         //
@@ -220,7 +228,7 @@ partial class AccountFieldSettingsForm
         btnAddField.FlatStyle = FlatStyle.Flat;
         btnAddField.Font = new Font("微软雅黑", 10F);
         btnAddField.ForeColor = Color.FromArgb(80, 80, 80);
-        btnAddField.Location = new Point(200, 12);
+        btnAddField.Location = new Point(424, 40);
         btnAddField.Name = "btnAddField";
         btnAddField.Size = new Size(120, 40);
         btnAddField.TabIndex = 1;
@@ -236,7 +244,7 @@ partial class AccountFieldSettingsForm
         btnDeleteField.FlatStyle = FlatStyle.Flat;
         btnDeleteField.Font = new Font("微软雅黑", 10F);
         btnDeleteField.ForeColor = Color.FromArgb(80, 80, 80);
-        btnDeleteField.Location = new Point(330, 12);
+        btnDeleteField.Location = new Point(554, 40);
         btnDeleteField.Name = "btnDeleteField";
         btnDeleteField.Size = new Size(120, 40);
         btnDeleteField.TabIndex = 2;
@@ -252,7 +260,7 @@ partial class AccountFieldSettingsForm
         btnReset.FlatStyle = FlatStyle.Flat;
         btnReset.Font = new Font("微软雅黑", 10F);
         btnReset.ForeColor = Color.FromArgb(80, 80, 80);
-        btnReset.Location = new Point(460, 12);
+        btnReset.Location = new Point(684, 40);
         btnReset.Name = "btnReset";
         btnReset.Size = new Size(110, 40);
         btnReset.TabIndex = 3;
@@ -268,7 +276,7 @@ partial class AccountFieldSettingsForm
         btnCancel.FlatStyle = FlatStyle.Flat;
         btnCancel.Font = new Font("微软雅黑", 10F);
         btnCancel.ForeColor = Color.FromArgb(80, 80, 80);
-        btnCancel.Location = new Point(580, 12);
+        btnCancel.Location = new Point(804, 40);
         btnCancel.Name = "btnCancel";
         btnCancel.Size = new Size(110, 40);
         btnCancel.TabIndex = 4;
@@ -284,7 +292,7 @@ partial class AccountFieldSettingsForm
         btnSave.FlatStyle = FlatStyle.Flat;
         btnSave.Font = new Font("微软雅黑", 10F, FontStyle.Bold);
         btnSave.ForeColor = Color.White;
-        btnSave.Location = new Point(700, 12);
+        btnSave.Location = new Point(924, 40);
         btnSave.Name = "btnSave";
         btnSave.Size = new Size(110, 40);
         btnSave.TabIndex = 5;
@@ -293,18 +301,20 @@ partial class AccountFieldSettingsForm
         //
         // AccountFieldSettingsForm
         //
-        AutoScaleDimensions = new SizeF(16F, 35F);
+        // ★ AutoScaleDimensions 必须与窗体 Font（微软雅黑 10pt）匹配，
+        //   否则 WinForms 会按字体差值把整个窗体缩放（实测 0.86 倍 → 看着"变小且挤"）。
+        //   10pt 微软雅黑对应的设计尺寸是 (14F, 30F)。
+        AutoScaleDimensions = new SizeF(14F, 30F);
         AutoScaleMode = AutoScaleMode.Font;
         BackColor = Color.White;
-        ClientSize = new Size(860, 620);
+        ClientSize = new Size(1060, 760);
         Controls.Add(dgvFields);
         Controls.Add(lblHint);
         Controls.Add(headerPanel);
         Controls.Add(footerPanel);
         Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        MinimumSize = new Size(760, 520);
+        MinimumSize = new Size(900, 640);
         Name = "AccountFieldSettingsForm";
-        Size = new Size(860, 620);
         StartPosition = FormStartPosition.CenterParent;
         Text = "账套字段设置";
         ((System.ComponentModel.ISupportInitialize)dgvFields).EndInit();

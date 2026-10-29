@@ -496,6 +496,28 @@
 - 绑定 DataGridView 时，列的 DataPropertyName 指向不存在的属性会报错 → 自定义字段列用
   **DataPropertyName=null + CellFormatting 手动填值**
 
+### ★★ v2.6.12 陛下反馈：「账套字段设置界面有点小，底部很多东西重叠了」
+**表象是「窗口小」，底下压着三个真 bug（靠运行时实测坐标查出来的，不是看设计器）**：
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | 窗体整体缩小（实测客户区 732×477，设计写 860×620） | `AutoScaleDimensions=(16,35)` 是 **11pt** 微软雅黑基准，窗体却用 **10pt** → WinForms 按字体差值整体缩放 **0.86 倍** | 改成 10pt 对应的 `(14,30)` → 缩放系数实测 **1.000** |
+| 2 | 状态文字压住底部按钮 | `lblStatus` `AutoSize=true` 且与按钮**同一行**（按钮 X=155 起，状态文字实测 243px） | 底栏改**上下两行**：上行状态文字（左右拉伸），下行按钮（靠右） |
+| 3 | 顶部提示文字被截断 | 4 行提示挤在 58px 标签里，文字实测需要 **224px** | 压成 3 行 + 标签给到 100px |
+
+**★ 三条通用教训（WinForms，必记）**：
+- **`AutoScaleDimensions` 必须与窗体 `Font` 严格匹配**：
+  微软雅黑 **10pt → (14F, 30F)**、**11pt → (16F, 35F)**、9pt → (7F, 15F)。
+  写错 → 整个窗体被按字体差值缩放（不报错、不崩，**只是看着变小又挤**，极难靠读代码发现）
+- **设计器里 `Size = new Size(w,h)` 会覆盖 `ClientSize`**（`Size` 是含边框的外框尺寸）→ 客户区凭空少 16×39px。
+  **只写 `ClientSize`，别写 `Size`**（本项目 AccountDialog 等都是这么写的）
+- **AutoSize 标签不要和按钮放同一行**：消息一变长就压住按钮。要么固定宽度，要么换行
+
+**★ 排查手法（本次靠它定位）**：写个一次性诊断程序，**实例化窗体 → Show → PerformLayout → 反射读运行时真实坐标**，
+再断言 ①缩放系数 ②两两相交 ③越界 ④文字实际所需高度（`TextRenderer.MeasureText`）⑤列宽/行高 vs 可视区。
+比盯设计器代码可靠得多 → 这套已固化成单测 **J 段 14 项**（`D:\Temp\a3fieldtest`）
+- 诊断工程：`D:\Temp\a3layoutdiag`（可复用，改 `CheckForm` 就能测别的窗体）
+
 ### 未发布到 Gitee
-- `v2.6.7` ~ `v2.6.11` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
-- 等陛下确认后再跑 `release.ps1 -Version 2.6.11`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）
+- `v2.6.7` ~ `v2.6.12` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
+- 等陛下确认后再跑 `release.ps1 -Version 2.6.12`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）
