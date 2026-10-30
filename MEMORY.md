@@ -562,6 +562,25 @@
 3. **缩放基准的实测判据不是 `CurrentAutoScaleDimensions / AutoScaleDimensions`**（框架运行时会覆写设计值，比值恒为 1），
    而是 **运行时 `ClientSize` vs 你写的 `ClientSize`** —— 这才是真信号。
 
+### ★★ 配置文件「防丢」加固（v2.6.14，必记）
+**踩过的坑**：JSON 配置文件被损坏时，`LoadAll()` 吞异常返回【空列表】→ 界面只是「工具不见了」无任何提示
+→ 用户保存任意一个工具 → `Upsert()` 再读（还是空）→ `SaveAll()` 只写回这 1 个 → **其余配置被永久覆盖丢失**。
+
+**修法（三层）**：
+1. **原子写**：先写 `xxx.json.tmp` → `File.Move(tmp, target, overwrite:true)` 原子替换；
+   替换前把上一版复制成 `xxx.json.bak`。不残留半截文件（半截文件正是触发损坏的原因）。
+2. **读取失败不静默**：`CustomToolStorage` / `AccountFieldStore` 新增 `LastError`；
+   读取失败先备份原文件为 `custom-tools.corrupt-yyyyMMdd-HHmmss.json`，绝不丢原始数据。
+   MainForm / AccountFieldSettingsForm 读取失败时**弹窗告知**（含备份路径）。
+3. **损坏状态禁止写入**：`Upsert()` / `Delete()` 读失败直接抛错 → 堵死覆盖路径。
+
+**⚠️ 验证老配置兼容性时必须走生产路径**：
+- `CustomToolStorage._jsonOptions` 用 `JsonNamingPolicy.CamelCase`（**没有** `PropertyNameCaseInsensitive`）
+  → 自己写 `JsonSerializer.Deserialize` 不带这个选项会**一个字段都读不进去**，还会误判成「全 PASS」的假绿
+- 正确做法：`new CustomToolStorage().LoadAll()`（它按 `AppContext.BaseDirectory\DATA` 定位文件）
+- 验证工程：`D:\Temp\a3compat`（69 项：真实文件逐条验 + 不设置组合矩阵 + 老配置兼容 + 防丢保护）
+- ⚠️ 生产 JSON 里中文是 **`\uXXXX` 转义**存的，不是明文 → 别用 `Contains("中文")` 判断
+
 ### 未发布到 Gitee
-- `v2.6.7` ~ `v2.6.13` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
-- 等陛下确认后再跑 `release.ps1 -Version 2.6.13`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）
+- `v2.6.7` ~ `v2.6.14` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
+- 等陛下确认后再跑 `release.ps1 -Version 2.6.14`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）

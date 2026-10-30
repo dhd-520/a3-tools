@@ -3399,6 +3399,17 @@ public partial class MainForm : Form, IToolContext
         flpCustomTools.Controls.Add(btnAddCustomTool);
 
         var configs = _customToolStorage.LoadAll();
+
+        // ⚠️ 配置读取失败时必须告诉用户（否则界面只是「工具不见了」，用户无从知道原文件已损坏）
+        if (_customToolStorage.LastError != null)
+        {
+            MessageBox.Show(
+                $"自定义工具配置读取失败，已保留原文件副本，未做任何修改。\n\n{_customToolStorage.LastError}",
+                "自定义工具配置警告",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+
         foreach (var config in configs)
         {
             var btn = CreateToolCard("🧩", config.Name, string.IsNullOrEmpty(config.Description) ? $"{config.MainTable} / {config.PrimaryKey}" : config.Description);

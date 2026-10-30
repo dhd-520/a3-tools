@@ -49,6 +49,18 @@ public partial class AccountFieldSettingsForm : Form
     private void LoadFromStore()
     {
         _editing = _store.Load();
+
+        // ⚠️ 配置损坏时必须告知用户（否则界面只显示默认字段，用户可能误以为没配过而覆盖原文件）
+        if (_store.LastError != null)
+        {
+            MessageBox.Show(
+                $"账套字段配置读取失败，已保留原文件副本，下面显示的是默认配置。\n\n{_store.LastError}\n\n" +
+                "若继续保存会覆盖原配置，请先确认或从备份文件恢复。",
+                "账套字段配置警告",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+
         if (_editing == null || _editing.Count == 0)
             _editing = AccountFieldCatalog.CreateDefaults();
 

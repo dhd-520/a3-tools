@@ -40,11 +40,18 @@ public class AccountFieldStore
     public string FilePath => _filePath;
 
     /// <summary>
+    /// 上一次读取是否失败（配置损坏等）。非 null 时 UI 应提示用户。
+    /// </summary>
+    public string? LastError { get; private set; }
+
+    /// <summary>
     /// 读取配置并归一化（缺字段自动补默认、非法值自动纠正）。
-    /// 文件不存在/损坏 → 返回默认配置（等价于「用户没配置过」）。
+    /// 文件不存在 → 返回默认配置（等价于「用户没配置过」）。
+    /// 文件损坏 → 备份原文件后返回默认配置，并通过 <see cref="LastError"/> 告知调用方。
     /// </summary>
     public List<AccountFieldConfig> Load()
     {
+        LastError = null;
         List<AccountFieldConfig>? raw = null;
         try
         {
@@ -57,6 +64,15 @@ public class AccountFieldStore
         }
         catch (Exception ex)
         {
+            // 配置损坏：先备份原文件，避免后续保存把它覆盖掉
+            string backup = _filePath + $".corrupt-{DateTime.Now:yyyyMMdd-HHmmss}";
+            try
+            {
+                if (File.Exists(_filePath)) File.Copy(_filePath, backup, true);
+            }
+            catch { /* 备份失败不掩盖原始错误 */ }
+
+            LastError = $"{ex.Message}（原文件已备份到 {backup}）";
             System.Diagnostics.Debug.WriteLine($"[AccountFieldStore] 读取失败，回退默认: {ex.Message}");
             raw = null;
         }
@@ -75,7 +91,26 @@ public class AccountFieldStore
 
         var payload = new AccountFieldSettingsFile { Fields = normalized };
         string json = JsonSerializer.Serialize(payload, _jsonOptions);
-        File.WriteAllText(_filePath, json);
+
+        // 原子写：先写临时文件再替换，避免断电/崩溃留下半截文件（下次就读不出来了）
+        string tmp = _filePath + ".tmp";
+        File.WriteAllText(tmp, json);
+        try
+        {
+            if (File.Exists(_filePath))
+            {
+                try { File.Copy(_filePath, _filePath + ".bak", true); } catch { /* 备份失败不阻断保存 */ }
+                File.Move(tmp, _filePath, true);
+            }
+            else
+            {
+                File.Move(tmp, _filePath);
+            }
+        }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* ignore */ }
+        }
     }
 
     /// <summary>恢复默认（删除配置文件，等价于「从来没配过」）</summary>
