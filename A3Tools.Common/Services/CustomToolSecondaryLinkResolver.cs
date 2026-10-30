@@ -1,6 +1,18 @@
 namespace A3Tools.Services;
 
 /// <summary>
+/// 组内二级关联字段的对应模式（与一级关联字段的 Shared / PerTable 完全对称）。
+/// </summary>
+public enum SecondaryFieldMatchMode
+{
+    /// <summary>只填了 1 个关联字段：该组所有二级表共用这一个字段。</summary>
+    Shared = 1,
+
+    /// <summary>填了多个关联字段：与该组二级表按顺序一一对应。</summary>
+    PerTable = 2
+}
+
+/// <summary>
 /// 一个「一级关联表」下面的二级关联表组。
 /// 组内每张二级表带一个外键列，指向该一级关联表的主键。
 /// </summary>
@@ -12,17 +24,25 @@ public sealed class SecondaryLinkGroup
     /// <summary>本组的二级关联表（顺序与 <see cref="ForeignKeys"/> 一致）。</summary>
     public IReadOnlyList<string> Tables { get; }
 
-    /// <summary>二级关联表各自的外键列（= 二级表里指向一级关联表主键的列）。</summary>
+    /// <summary>
+    /// 每张二级表各自的外键列（= 二级表里指向一级关联表主键的列）。
+    /// <b>已按组内模式展开</b>：Shared 模式下每张表都是同一个字段，所以与 <see cref="Tables"/> 始终等长同序。
+    /// </summary>
     public IReadOnlyList<string> ForeignKeys { get; }
+
+    /// <summary>组内对应模式（Shared = 共用一个 / PerTable = 一一对应）。</summary>
+    public SecondaryFieldMatchMode Mode { get; }
 
     /// <summary>本组的二级关联表数量。</summary>
     public int Count => Tables.Count;
 
-    public SecondaryLinkGroup(int firstLevelIndex, IReadOnlyList<string> tables, IReadOnlyList<string> foreignKeys)
+    public SecondaryLinkGroup(int firstLevelIndex, IReadOnlyList<string> tables, IReadOnlyList<string> foreignKeys,
+        SecondaryFieldMatchMode mode)
     {
         FirstLevelIndex = firstLevelIndex;
         Tables = tables;
         ForeignKeys = foreignKeys;
+        Mode = mode;
     }
 
     /// <summary>逐个取出「二级表 + 其外键列」的配对。</summary>
@@ -82,7 +102,9 @@ public sealed class SecondaryLinkResolution
 /// <item><b>分号 = 组边界</b>（第 N 组对应第 N 个一级关联表），<b>逗号 = 组内多个表</b>。
 /// 例：<c>S_PRINTSCHEMEDATA,S_PRINTSCHEMEDATA2;S_PRINTSCHEMEDATA3</c>
 /// → 第 1 个一级表下挂 2 张二级表，第 2 个一级表下挂 1 张。</item>
-/// <item>二级关联字段与二级关联表<b>分组一一对应</b>，组内表数必须等于字段数。</item>
+/// <item>二级关联字段与二级关联表<b>分组一一对应</b>（第 N 组 → 第 N 个一级关联表）。
+/// 组内规则与一级关联字段<b>完全对称</b>：
+/// 只填 1 个 → 该组所有二级表共用这一个字段；填多个 → 必须与该组表数一致、一一对应。</item>
 /// <item>分组总数必须等于一级关联表数量（否则无法确定每组挂在哪个一级表下）。</item>
 /// </list>
 ///
@@ -173,14 +195,37 @@ public static class CustomToolSecondaryLinkResolver
             // 该一级表没有二级表 → 跳过
             if (tables.Count == 0 && fields.Count == 0) continue;
 
-            if (tables.Count != fields.Count)
+            // 表有但字段没配 → 报错
+            if (tables.Count > 0 && fields.Count == 0)
+                return Fail(
+                    $"第 {i + 1} 组（对应一级关联表 {firstLevelTables[i]}）：配了 {tables.Count} 个二级关联表，" +
+                    "却没有配二级关联字段。");
+
+            // ★ 组内规则与一级关联字段完全对称：
+            //   只填 1 个 → 该组所有二级表共用这一个（Shared）
+            //   填多个   → 必须与该组表数一致、一一对应（PerTable）
+            IReadOnlyList<string> effectiveFields;
+            SecondaryFieldMatchMode mode;
+            if (fields.Count == tables.Count)
+            {
+                effectiveFields = fields;
+                mode = SecondaryFieldMatchMode.PerTable;
+            }
+            else if (fields.Count == 1)
+            {
+                effectiveFields = Enumerable.Repeat(fields[0], tables.Count).ToList();
+                mode = SecondaryFieldMatchMode.Shared;
+            }
+            else
+            {
                 return Fail(
                     $"第 {i + 1} 组（对应一级关联表 {firstLevelTables[i]}）：二级关联表 {tables.Count} 个，" +
-                    $"但二级关联字段 {fields.Count} 个，数量必须一致。" +
-                    $"表：{(tables.Count == 0 ? "（无）" : string.Join(",", tables))}；" +
-                    $"字段：{(fields.Count == 0 ? "（无）" : string.Join(",", fields))}");
+                    $"但二级关联字段 {fields.Count} 个。只填 1 个关联字段时该组所有表共用；" +
+                    "填多个时必须与该组表数一致、一一对应。" +
+                    $"表：{string.Join(",", tables)}；字段：{string.Join(",", fields)}");
+            }
 
-            groups.Add(new SecondaryLinkGroup(i, tables, fields));
+            groups.Add(new SecondaryLinkGroup(i, tables, effectiveFields, mode));
         }
 
         return new SecondaryLinkResolution(true, groups, null);

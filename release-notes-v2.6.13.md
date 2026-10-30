@@ -23,24 +23,28 @@
 **规则**
 - 二级留空 = 不复制二级表（旧配置完全兼容，**无需迁移**）
 - 分组总数必须 = 一级关联表数量（按顺序一一对应）
-- 组内「表数」必须 = 「字段数」，否则**明确报错**（沿用项目既有约定）
+- **组内关联字段规则与一级关联字段完全对称**：
+  - 只填 **1** 个 → 该组**所有表共用**这一个字段（如 `S_PRINTSCHEMEDATA3,S_PRINTSCHEMEDATA4` 都用 `GUID3`）
+  - 填**多个** → 必须与该组表数一致，一一对应
+  - 其他数量 → 明确报错
 - 二级表的父值 = 对应一级关联表那一行的**主键值**
   - 自动探测顺序：数据库定义的 `PRIMARY KEY` → `GUID` → `OBJECTGUID` → `CODE`
   - 探测不到时可用「二级关联父键」手动指定
 
-### ⚠️ 陛下原始配置里有一处数量不匹配
+### 📋 陛下给的实际配置（已按此实现并验证）
 
-```
-二级关联表   S_PRINTSCHEMEDATA,S_PRINTSCHEMEDATA2;S_PRINTSCHEMEDATA3,S_PRINTSCHEMEDATA4;S_PRINTSCHEMEDATA5
-二级关联字段 GUID,GUID2;GUID3;GUID5
-```
-第 2 组有 **2 张表**（`S_PRINTSCHEMEDATA3`、`S_PRINTSCHEMEDATA4`）却只配了 **1 个字段**（`GUID3`）。
+| 配置项 | 值 |
+|---|---|
+| 主表 | `S_PRINT` |
+| 一级关联表 | `S_PRINTSCHEME;S_PRINTSCHEME2;S_PRINTSCHEME3` |
+| 一级关联字段 | `GUID;GUID2;GUID3` |
+| 二级关联表 | `S_PRINTSCHEMEDATA,S_PRINTSCHEMEDATA2;S_PRINTSCHEMEDATA3,S_PRINTSCHEMEDATA4;S_PRINTSCHEMEDATA5` |
+| 二级关联字段 | `GUID,GUID2;GUID3;GUID5` |
 
-按「表N ↔ GUIDN」的规律，第 2 组应该是 **`GUID3,GUID4`**，即：
-```
-二级关联字段  GUID,GUID2;GUID3,GUID4;GUID5
-```
-保存时会明确报出「第 2 组：2 个关联表，1 个关联字段」。
+解析结果：
+- 第 1 组（→ `S_PRINTSCHEME`）：`S_PRINTSCHEMEDATA`=`GUID`、`S_PRINTSCHEMEDATA2`=`GUID2`（一一对应）
+- 第 2 组（→ `S_PRINTSCHEME2`）：`S_PRINTSCHEMEDATA3`=`GUID3`、`S_PRINTSCHEMEDATA4`=`GUID3`（**共用一个字段**）
+- 第 3 组（→ `S_PRINTSCHEME3`）：`S_PRINTSCHEMEDATA5`=`GUID5`
 
 ### 🐛 顺手修的配置窗体布局问题
 
@@ -49,7 +53,7 @@
 - `AutoScroll` 挂在窗体上时，`Dock=Bottom` 的按钮会贴到「内容」底部，**被滚走看不见** → 改成内层面板负责滚动、按钮单独钉在窗体底部
 
 ### 🧪 验证
-- 二级关联解析器单测 **79 项全绿**（新增 H 段 33 项，含**陛下原始数据实测报错**）
+- 二级关联解析器单测 **76 项全绿**（新增 H 段 30 项，含**陛下原始配置实测**）
 - 字段配置单测 **119 项全绿**（新增 K 段 14 项配置窗体布局回归）
 - 账套列宽 **59/0** · SQL 回归 **89/0**
 

@@ -518,6 +518,50 @@
 比盯设计器代码可靠得多 → 这套已固化成单测 **J 段 14 项**（`D:\Temp\a3fieldtest`）
 - 诊断工程：`D:\Temp\a3layoutdiag`（可复用，改 `CheckForm` 就能测别的窗体）
 
+### ★★ v2.6.13 陛下需求：自定义工具增加「二级关联表 + 二级关联字段」
+**复制链路：主表 → 一级关联表 → 二级关联表**（三级）
+
+**配置格式（分号 = 组边界，逗号 = 组内多表）**：
+```
+一级关联表   S_PRINTSCHEME;S_PRINTSCHEME2;S_PRINTSCHEME3
+一级关联字段 GUID;GUID2;GUID3
+二级关联表   S_PRINTSCHEMEDATA,S_PRINTSCHEMEDATA2;S_PRINTSCHEMEDATA3,S_PRINTSCHEMEDATA4;S_PRINTSCHEMEDATA5
+二级关联字段 GUID,GUID2;GUID3;GUID5
+```
+
+**★★ 最重要的一条规则（二级组内与一级字段完全对称）**：
+- 组内只填 **1** 个关联字段 → **该组所有表共用**这一个（Shared）
+  （例：组2 的 `S_PRINTSCHEMEDATA3,S_PRINTSCHEMEDATA4` 对应 `S_PRINTSCHEME2`，字段相同都是 `GUID3`）
+- 组内填 **多个** → 必须与该组表数一致，一一对应（PerTable）
+- 其他数量 → 明确报错
+> ⚠️ 二哈一开始把组内规则写成「表数必须 == 字段数」，把陛下的原始配置误判成错误。
+> **教训：新增的分组规则要跟已有的同层规则对称，不要自己发明更严的约束。**
+
+**实现**：
+- 模型：`CustomToolConfig` 新增 `SecondaryRelatedTables` / `SecondaryForeignKey` / `SecondaryParentKey`
+- 解析器：`A3Tools.Common/Services/CustomToolSecondaryLinkResolver.cs`（纯逻辑可单测）
+  · 新增枚举 `SecondaryFieldMatchMode { Shared, PerTable }`
+  · `SecondaryLinkGroup.ForeignKeys` 存**展开后**的字段（与 Tables 始终等长同序）→ 复制引擎不用改
+  · `SplitGroups` 按 `;` 分组并**保留中间空组**（空组 = 该一级表无二级表）
+- 复制引擎（`GenericCopyToolForm.cs`，直连 + Http 两分支都加）：
+  · 二级表的父值 = **对应一级关联表那一行的主键值**
+  · 主键列探测：配置指定 → 数据库 `PRIMARY KEY` → `GUID` → `OBJECTGUID` → `CODE`
+  · 复用现有 `TableCopyService.CopyTableDataByParentGuid`，**不新增复制路径**
+  · 表名/字段名来自配置 → 拼 SQL 前一律 `ValidateTableName/ValidateFieldName`
+  · 二级配置不合法 → **复制前**就报错，不带着坏配置去连库
+
+### ★★ WinForms 布局的另外两个坑（v2.6.13 实测又踩到）
+1. **窗体没设 `Font` 时会继承系统字体**（Microsoft YaHei UI 9pt）→
+   `AutoScaleDimensions` 就得是 `(13F, 28F)`；硬写成 10pt 的 `(14,30)` → 窗体被缩放 ~7%
+   （实测设计 1040×830 渲染成 **936×775**）。
+   → **要么给窗体显式设 `Font = 微软雅黑 10pt`（推荐，和各控件一致），要么按继承字体填缩放基准**
+2. **`AutoScroll` 挂窗体上时，`Dock=Bottom` 的按钮会贴到「内容」底部而不是视口底部** → 被滚走看不见。
+   → 正确做法：**内层面板负责滚动**（`Panel.AutoScroll=true` + 布局 `Dock=Top` + `AutoSize`），
+     按钮区单独挂在窗体上 `Dock=Bottom`，永久钉在可视区底部。
+   · 还要注意 `Controls.Add` 顺序：**先加 Fill 区再加 Bottom 区** → 底部区先占位，内容区自动让开
+3. **缩放基准的实测判据不是 `CurrentAutoScaleDimensions / AutoScaleDimensions`**（框架运行时会覆写设计值，比值恒为 1），
+   而是 **运行时 `ClientSize` vs 你写的 `ClientSize`** —— 这才是真信号。
+
 ### 未发布到 Gitee
-- `v2.6.7` ~ `v2.6.12` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
-- 等陛下确认后再跑 `release.ps1 -Version 2.6.12`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）
+- `v2.6.7` ~ `v2.6.13` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
+- 等陛下确认后再跑 `release.ps1 -Version 2.6.13`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）

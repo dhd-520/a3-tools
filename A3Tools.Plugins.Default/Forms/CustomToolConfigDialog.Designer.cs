@@ -328,7 +328,7 @@ partial class CustomToolConfigDialog
         txtSecondaryForeignKey.Margin = new Padding(11, 10, 0, 10);
         txtSecondaryForeignKey.Multiline = true;
         txtSecondaryForeignKey.Name = "txtSecondaryForeignKey";
-        txtSecondaryForeignKey.PlaceholderText = "分组同上,值为二级表里指向一级表主键的外键列,如:GUID,GUID2;GUID3;GUID5";
+        txtSecondaryForeignKey.PlaceholderText = "分组同上,值为二级表里指向一级表主键的外键列;组内只填1个则该组所有表共用,如:GUID,GUID2;GUID3;GUID5";
         txtSecondaryForeignKey.ScrollBars = ScrollBars.Vertical;
         txtSecondaryForeignKey.Size = new Size(802, 79);
         txtSecondaryForeignKey.TabIndex = 15;
@@ -455,7 +455,7 @@ partial class CustomToolConfigDialog
         lblSecondaryHint.Padding = new Padding(11, 5, 0, 0);
         lblSecondaryHint.Size = new Size(800, 26);
         lblSecondaryHint.TabIndex = 20;
-        lblSecondaryHint.Text = "提示：二级关联表留空 = 不复制二级表（推荐）。填写时「分号」分组（组数必须与关联表数量一致，按顺序对应），「逗号」分组内多个表；组内表数必须与二级关联字段个数一致。";
+        lblSecondaryHint.Text = "提示：二级关联表留空 = 不复制二级表（推荐）。填写时「分号」分组（组数必须与关联表数量一致，按顺序对应），「逗号」分组内多个表；组内关联字段只填 1 个则该组所有表共用，填多个则与该组表数一一对应。";
         //
         // lblSearchHint2
         //
