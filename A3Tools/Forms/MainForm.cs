@@ -1699,7 +1699,6 @@ public partial class MainForm : Form, IToolContext
         }
 
         LoadAccounts();
-        RefreshAccountList();
 
         string extra = mergedFieldCount > 0 ? $"\n并迁移了 {mergedFieldCount} 个自定义字段配置。" : "";
         MessageBox.Show(
