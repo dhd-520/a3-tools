@@ -26,6 +26,8 @@ partial class MainForm
     private ToolStripMenuItem menuAiChat = null!;
     private ToolStripMenuItem menuAiSettings = null!;
     private ToolStripMenuItem menuCopyAccount = null!;
+    // ★ 2026-10-30 整机迁移：导出全部账套（明文，含密码，仅 Root 模式可见）
+    private ToolStripMenuItem menuExportAccounts = null!;
     // ★ 2026-09-01 知识库入口
     private ToolStripMenuItem menuKnowledgeBase = null!;
     private ContextMenuStrip addMenu = null!;
@@ -90,6 +92,7 @@ partial class MainForm
         menuStrip = new MenuStrip();
         menuFile = new ToolStripMenuItem();
         menuCopyAccount = new ToolStripMenuItem();
+        menuExportAccounts = new ToolStripMenuItem();
         menuHotkeySettings = new ToolStripMenuItem();
         menuImportAccount = new ToolStripMenuItem();
         menuAccountFieldSettings = new ToolStripMenuItem();
@@ -166,7 +169,7 @@ partial class MainForm
         // 
         // menuFile
         //
-        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuHotkeySettings, menuImportAccount, menuAccountFieldSettings, menuExit });
+        menuFile.DropDownItems.AddRange(new ToolStripItem[] { menuCopyAccount, menuExportAccounts, menuHotkeySettings, menuImportAccount, menuAccountFieldSettings, menuExit });
         menuFile.Name = "menuFile";
         menuFile.Size = new Size(106, 32);
         menuFile.Text = "文件(_F)";
@@ -176,6 +179,12 @@ partial class MainForm
         menuCopyAccount.Name = "menuCopyAccount";
         menuCopyAccount.Size = new Size(270, 40);
         menuCopyAccount.Text = "复制账套信息";
+        //
+        // menuExportAccounts
+        //
+        menuExportAccounts.Name = "menuExportAccounts";
+        menuExportAccounts.Size = new Size(270, 40);
+        menuExportAccounts.Text = "导出全部账套(_E)";
         //
         // menuHotkeySettings
         //

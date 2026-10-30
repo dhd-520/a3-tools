@@ -1234,6 +1234,7 @@ public partial class MainForm : Form, IToolContext
         // ★ 2026-10-26 列宽管理（只改相邻列 + 总宽恒定 + 始终占满 100%）
         _dgvColumnLayout = new DgvColumnLayoutManager(this.dgvAccounts);
         this.menuCopyAccount.Click += MenuCopyAccount_Click;
+        this.menuExportAccounts.Click += MenuExportAccounts_Click;
         this.menuHotkeySettings.Click += MenuHotkeySettings_Click;
         this.menuAccountFieldSettings.Click += MenuAccountFieldSettings_Click;
         this.menuAbout.Click += MenuAbout_Click;
@@ -1436,7 +1437,99 @@ public partial class MainForm : Form, IToolContext
             ShowToast($"账套「{added.Name}」已添加（代码 {added.Code}）");
         }
     }
-    private void MenuImportAccount_Click(object? sender, EventArgs e) => ImportFromXml();
+    /// <summary>
+    /// 「文件 → 导出全部账套(_E)」：导出**所有**账套到一个 JSON 文件，拿到另一台电脑直接导入。
+    ///
+    /// ★ 为什么必须是新格式（而不是直接拷 accounts.json）：
+    ///   账套密码用 EncryptionService 加密，而它的密钥是 SHA256(机器名+用户名+A3Tools-2026)
+    ///   派生的 —— **跟机器绑定**。换台电脑后同一份密文根本解不开（表现为「密码全没了」且不报错）。
+    ///   所以跨机迁移必须用一份密码明文的独立文件。
+    ///
+    /// ⚠ 文件里是明文密码，等同于把所有账套密码写在纸上。
+    ///   因此：只在 Root 模式下可见（普通模式菜单里根本没有这一项），且导出前再确认一次。
+    /// </summary>
+    private void MenuExportAccounts_Click(object? sender, EventArgs e)
+    {
+        // 双重保险：菜单只在 Root 模式显示，这里再判一次（防止以后有人把它改成常驻）
+        if (!_isRootMode)
+        {
+            MessageBox.Show("导出全部账套需要 Root 模式。\n\n（连点标题栏 5 次，输入 Root 密码即可进入）",
+                "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var accounts = _dataService.LoadAndDecryptAccounts();
+        if (accounts.Count == 0)
+        {
+            MessageBox.Show("没有可导出的账套。", "导出账套", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        int pwdCount = accounts.Count(a =>
+            !string.IsNullOrEmpty(a.ServerPassword) ||
+            !string.IsNullOrEmpty(a.DbPassword) ||
+            !string.IsNullOrEmpty(a.RemotePassword));
+
+        var confirm = MessageBox.Show(
+            $"将导出 **{accounts.Count}** 个账套到 JSON 文件。\n\n" +
+            $"⚠ 文件里的密码是**明文**（{pwdCount} 个账套含密码），等同于把所有账套密码写在纸上。\n" +
+            "请只在自己信任的机器/介质之间传递，用完及时删除。\n\n是否继续？",
+            "导出全部账套",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes) return;
+
+        using var dialog = new SaveFileDialog
+        {
+            Title = "保存账套导出文件",
+            Filter = "账套文件(*.json)|*.json",
+            FileName = $"A3Tools_账套导出_{DateTime.Now:yyyyMMdd_HHmmss}.json",
+            InitialDirectory = ResolveInitialDir()
+        };
+
+        if (dialog.ShowDialog() != DialogResult.OK)
+            return;
+
+        try
+        {
+            var fieldCfg = _accountFieldStore.Load();
+            string json = AccountTransferService.BuildJson(
+                accounts,
+                fieldCfg,
+                UpdateService.CurrentVersion,
+                Environment.MachineName);
+
+            // 原子写：先写 .tmp 再替换，避免写到一半断电留半截文件
+            string tmp = dialog.FileName + ".tmp";
+            File.WriteAllText(tmp, json, new System.Text.UTF8Encoding(false));
+            File.Move(tmp, dialog.FileName, true);
+
+            MessageBox.Show(
+                $"已导出 {accounts.Count} 个账套：\n\n{dialog.FileName}\n\n" +
+                "在另一台电脑上用「文件 → 导入账套(_I)」选中这个文件即可直接导入。",
+                "导出成功",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"导出失败：{ex.Message}", "导出失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>保存对话框的默认目录（桌面优先，退回程序目录）</summary>
+    private static string ResolveInitialDir()
+    {
+        try
+        {
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            if (!string.IsNullOrEmpty(desktop) && Directory.Exists(desktop)) return desktop;
+        }
+        catch { /* ignore */ }
+        return AppContext.BaseDirectory;
+    }
+
+    private void MenuImportAccount_Click(object? sender, EventArgs e) => ImportAccountFile();
     private void BtnRefresh_Click(object? sender, EventArgs e) => RefreshAccountList();
 
     /// <summary>
@@ -1458,28 +1551,168 @@ public partial class MainForm : Form, IToolContext
         }
     }
 
-    private void ImportFromXml()
+    /// <summary>
+    /// 「文件 → 导入账套」入口：按**文件内容**自动分流。
+    ///   · 本工具导出的 JSON（$type=a3accounts-v1）→ 新导入（整机迁移，字段全）
+    ///   · 老工具的 A3 XML（&lt;TbLYBillSet&gt;）→ 老导入（只有基础字段）
+    /// </summary>
+    private void ImportAccountFile()
     {
         using var dialog = new OpenFileDialog
         {
-            Title = "选择XML账套文件",
-            Filter = "XML文件(*.xml)|*.xml|所有文件(*.*)|*.*",
+            Title = "选择账套文件（本工具导出的 JSON / 老工具的 XML）",
+            Filter = "账套文件(*.json;*.xml)|*.json;*.xml|所有文件(*.*)|*.*",
             Multiselect = false
         };
 
         if (dialog.ShowDialog() != DialogResult.OK)
             return;
 
-        string xmlPath = dialog.FileName;
-        if (!File.Exists(xmlPath))
+        string filePath = dialog.FileName;
+        if (!File.Exists(filePath))
         {
             MessageBox.Show("文件不存在！", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
+        string content;
         try
         {
-            string content = File.ReadAllText(xmlPath);
+            content = File.ReadAllText(filePath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"读取文件失败：{ex.Message}", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        if (AccountTransferService.LooksLikeTransferFile(content))
+        {
+            ImportTransferFile(filePath, content);
+            return;
+        }
+
+        ImportFromXml(filePath, content);
+    }
+
+    /// <summary>
+    /// 导入本工具导出的账套文件（整机迁移）。
+    ///
+    /// 合并策略（按【代码】匹配）：
+    ///   · 代码本地没有 → 新增；
+    ///   · 代码本地已有 → 覆盖（导入的那份赢）—— 迁移语义就该如此；
+    ///   · 代码为空 → 自动接在本地最大代码后面。
+    ///
+    /// ⚠ 导入的密码是明文，落盘时由 DataService 用**本机密钥**重新加密
+    ///   （机器密钥跟机器绑定，明文不加密存到另一台机器上也解不开）。
+    /// </summary>
+    private void ImportTransferFile(string filePath, string content)
+    {
+        AccountTransferService.TransferFile file;
+        try
+        {
+            file = AccountTransferService.Parse(content);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"导入失败：{ex.Message}", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        if (file.Accounts.Count == 0)
+        {
+            MessageBox.Show("该文件里没有账套数据！", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 本地账套取「原始落盘态」（密码仍是本机密文），避免解密再加密绕一圈
+        var local = _dataService.LoadAccounts();
+        var plan = AccountTransferService.PlanMerge(local, file.Accounts);
+
+        // 代码为空的 → 自动分配
+        if (plan.ToAssignCode.Count > 0)
+        {
+            int maxCode = 0;
+            foreach (var acc in local)
+            {
+                if (int.TryParse((acc.Code ?? "").TrimStart('0'), out int n) && n > maxCode)
+                    maxCode = n;
+            }
+            int next = maxCode + 1;
+            foreach (var acc in plan.ToAssignCode)
+            {
+                acc.Code = next.ToString("D4");
+                next++;
+            }
+            plan.ToAdd.AddRange(plan.ToAssignCode);
+        }
+
+        // 覆盖确认
+        if (plan.ToOverwrite.Count > 0)
+        {
+            string names = string.Join("、", plan.ToOverwrite.Select(a => $"{a.Code}({a.Name})"));
+            string msg = plan.ToOverwrite.Count <= 6
+                ? $"以下 {plan.ToOverwrite.Count} 个账套的【代码】本地已存在，将被覆盖：\n{names}\n\n是否继续？"
+                : $"有 {plan.ToOverwrite.Count} 个账套的【代码】本地已存在，将被覆盖。\n\n是否继续？";
+            var r = MessageBox.Show(msg, "确认导入", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (r != DialogResult.Yes) return;
+        }
+
+        // 应用合并：先把被覆盖的本地账套拿掉，再放入导入的
+        var overwriteCodes = new HashSet<string>(
+            plan.ToOverwrite.Select(a => a.Code ?? ""), StringComparer.OrdinalIgnoreCase);
+        var merged = new List<Account>();
+        foreach (var acc in local)
+        {
+            if (!overwriteCodes.Contains(acc.Code ?? "")) merged.Add(acc);
+        }
+        merged.AddRange(plan.ToOverwrite);
+        merged.AddRange(plan.ToAdd);
+
+        try
+        {
+            _dataService.SaveAccounts(merged);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"保存账套失败：{ex.Message}", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        // 字段配置（自定义字段的名字/显隐）也一并迁移
+        int mergedFieldCount = 0;
+        if (file.FieldConfig != null && file.FieldConfig.Count > 0)
+        {
+            try
+            {
+                var store = new AccountFieldStore();
+                var localCfg = store.Load();
+                var mergedCfg = AccountTransferService.MergeFieldConfig(localCfg, file.FieldConfig);
+                mergedFieldCount = mergedCfg.Count - localCfg.Count;
+                store.Save(mergedCfg);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"账套字段配置合并失败（账套本身已导入成功）：{ex.Message}",
+                    "部分失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        LoadAccounts();
+        RefreshAccountList();
+
+        string extra = mergedFieldCount > 0 ? $"\n并迁移了 {mergedFieldCount} 个自定义字段配置。" : "";
+        MessageBox.Show(
+            $"成功从 {Path.GetFileName(filePath)} 导入 {plan.ToOverwrite.Count + plan.ToAdd.Count} 个账套！" +
+            $"（覆盖 {plan.ToOverwrite.Count} 个，新增 {plan.ToAdd.Count} 个）{extra}",
+            "导入成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    /// <summary>导入老工具的 A3 XML 账套文件（只有 NAME/ZTADDRESS/ZTPWD/SQLADDRESS/USERCODE/USERPWD 等基础字段）</summary>
+    private void ImportFromXml(string xmlPath, string content)
+    {
+        try
+        {
             var accounts = new List<Account>();
             var rgx = new System.Text.RegularExpressions.Regex("<TbLYBillSet>(.*?)</TbLYBillSet>", System.Text.RegularExpressions.RegexOptions.Singleline);
             foreach (System.Text.RegularExpressions.Match m in rgx.Matches(content))
@@ -3575,12 +3808,15 @@ public partial class MainForm : Form, IToolContext
             this.lblTitle.Text = "🔓 A3工具箱 (Root)";
             this.lblTitle.ForeColor = Color.Yellow;
             this.menuCopyAccount.Visible = true;
+            // ★ 2026-10-30 导出全部账套是明文（含密码），只在 Root 模式下露出来
+            this.menuExportAccounts.Visible = true;
         }
         else
         {
             this.lblTitle.Text = "A3工具箱";
             this.lblTitle.ForeColor = Color.White;
             this.menuCopyAccount.Visible = false;
+            this.menuExportAccounts.Visible = false;
         }
 
         // 切换 Root 模式后重绘账套列表，重新走 CellFormatting 决定是否脱敏
