@@ -88,8 +88,11 @@ public partial class AccountDialog : Form
             { nameof(Account.RemoteUser),     new AccountEditorLayout.Slot(lblRemoteUser, txtRemoteUser) },
             { nameof(Account.RemotePassword), new AccountEditorLayout.Slot(lblRemotePassword, txtRemotePassword) },
             { nameof(Account.Remark),         new AccountEditorLayout.Slot(lblRemark, txtRemark) },
-            // 「账套用户名」：普通字段（可排序、可显隐），下面带一句自动登录配置说明
-            { nameof(Account.ServerUsername), new AccountEditorLayout.Slot(lblServerUsername, txtServerUsername, lblWebHint) },
+            // 「账套用户名」：普通字段（可排序、可显隐）
+            //   2026-10-31 陛下：原来下面跟着一行加粗青色的「🌐 自动登录配置（…）」提示，
+            //   但字段可自由排序，一排序它就夹在别的字段中间、看着像那个字段的组表头 → 已去掉。
+            //   说明文字改挂到输入框的悬浮提示（Designer 里 toolTipServerUsername）。
+            { nameof(Account.ServerUsername), new AccountEditorLayout.Slot(lblServerUsername, txtServerUsername) },
         };
 
         // 配置已由 Normalize 兜底：密码不进列表、必填不隐藏、排序号连续

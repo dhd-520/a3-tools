@@ -55,10 +55,14 @@ partial class AccountDialog
     private TextBox txtProxyServerPublicKey = null!;
     private Button btnGenerateHubConfig = null!;
 
-    // ===== 网页版自动登录说明（2026-10-29：已从独立分组改为随行说明）=====
-    private Label lblWebHint = null!;
     private Label lblServerUsername = null!;
     private TextBox txtServerUsername = null!;
+
+    // ===== 账套用户名的补充说明（2026-10-31 陛下：提示行去掉，改成悬浮提示）=====
+    //   原来是一行加粗青色的「🌐 自动登录配置（…）」文字，排在「账套用户名」下面。
+    //   但字段可自由排序，一排序它就会夹在别的字段中间、看着像那个字段的组表头 → 已去掉。
+    //   说明文字改挂到输入框的悬浮提示里：不占界面空间，信息也不丢。
+    private ToolTip toolTipServerUsername = null!;
 
     // ===== 按钮 =====
     private Button btnSave = null!;
@@ -73,6 +77,7 @@ partial class AccountDialog
 
     private void InitializeComponent()
     {
+        components = new System.ComponentModel.Container();
         titleBar = new Panel();
         lblTitle = new Label();
         contentPanel = new Panel();
@@ -113,7 +118,7 @@ partial class AccountDialog
         lblProxyServerPublicKey = new Label();
         txtProxyServerPublicKey = new TextBox();
         btnGenerateHubConfig = new Button();
-        lblWebHint = new Label();
+        toolTipServerUsername = new ToolTip(components);
         lblServerUsername = new Label();
         txtServerUsername = new TextBox();
         footerPanel = new Panel();
@@ -182,7 +187,6 @@ partial class AccountDialog
         contentPanel.Controls.Add(pnlProxyGroup);
         contentPanel.Controls.Add(lblServerUsername);
         contentPanel.Controls.Add(txtServerUsername);
-        contentPanel.Controls.Add(lblWebHint);
         contentPanel.Dock = DockStyle.Fill;
         contentPanel.Location = new Point(0, 50);
         contentPanel.Name = "contentPanel";
@@ -476,7 +480,7 @@ partial class AccountDialog
         pnlProxyGroup.Controls.Add(lblProxyServerPublicKey);
         pnlProxyGroup.Controls.Add(txtProxyServerPublicKey);
         pnlProxyGroup.Controls.Add(btnGenerateHubConfig);
-        pnlProxyGroup.Location = new Point(30, 788);
+        pnlProxyGroup.Location = new Point(30, 750);
         pnlProxyGroup.Name = "pnlProxyGroup";
         pnlProxyGroup.Size = new Size(840, 160);
         pnlProxyGroup.TabIndex = 28;
@@ -573,16 +577,6 @@ partial class AccountDialog
         btnGenerateHubConfig.UseVisualStyleBackColor = false;
         btnGenerateHubConfig.Click += BtnGenerateHubConfig_Click;
         // 
-        // lblWebHint
-        // 
-        lblWebHint.Font = new Font("微软雅黑", 10F, FontStyle.Bold, GraphicsUnit.Point);
-        lblWebHint.ForeColor = Color.FromArgb(24, 145, 176);
-        lblWebHint.Location = new Point(30, 744);
-        lblWebHint.Name = "lblWebHint";
-        lblWebHint.Size = new Size(840, 30);
-        lblWebHint.TabIndex = 0;
-        lblWebHint.Text = "🌐 自动登录配置（账套用户名用于客户端/开发工具/网页三处共用；客户端密码=账套密码；开发工具密码=单独加密存储）";
-        // 
         // lblServerUsername
         // 
         lblServerUsername.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
@@ -601,6 +595,10 @@ partial class AccountDialog
         txtServerUsername.Name = "txtServerUsername";
         txtServerUsername.Size = new Size(590, 41);
         txtServerUsername.TabIndex = 2;
+        // 
+        // toolTipServerUsername
+        // 
+        toolTipServerUsername.SetToolTip(txtServerUsername, "账套用户名用于客户端 / 开发工具 / 网页三处共用；\r\n客户端密码 = 账套密码；开发工具密码单独加密存储。");
         // 
         // footerPanel
         // 

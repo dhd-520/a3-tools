@@ -25,29 +25,25 @@ namespace A3Tools.Services;
 ///   「代码」是唯一的固定字段 —— 永远排第一，排序号不可改，也不可隐藏。
 ///   其余字段（含「账套用户名」「账套名称」）全部可排序、可显隐。
 ///
-/// ★ 随行说明（Note）：
-///   某些字段带一句静态说明（如「账套用户名」下面的自动登录配置说明），
-///   说明文字排在该字段行的下面一行，跟着字段一起显示/隐藏。
+/// ★ 随行说明（Note）—— 已于 2026-10-31 移除：
+///   原来支持「某个字段下面跟一句静态说明」（当年只有「账套用户名」下面的自动登录配置提示）。
+///   但字段可以自由排序，一排序那行说明就夹在别的字段中间、看着像那个字段的组表头
+///   （陛下当时看到的就是它夹在「账套密码」上面）→ 已从界面去掉。
+///   说明文字改挂到输入框的悬浮提示里（Designer 的 toolTipServerUsername）。
+///   所以这里不再有 Note 概念：每个字段就是「标签 + 输入框」两行，排版更干净。
 /// </summary>
 public sealed class AccountEditorLayout
 {
-    /// <summary>字段与说明文字之间的间隙（像素）</summary>
-    private const int NoteGap = 4;
-
-    /// <summary>一个字段在录入窗体里的两个控件（标签 + 输入框）+ 可选的随行说明</summary>
+    /// <summary>一个字段在录入窗体里的两个控件（标签 + 输入框）</summary>
     public sealed class Slot
     {
         public Label Label { get; }
         public Control Input { get; }
 
-        /// <summary>随行说明（静态提示文字），排在该字段行的下面一行；null = 没有说明</summary>
-        public Control? Note { get; }
-
-        public Slot(Label label, Control input, Control? note = null)
+        public Slot(Label label, Control input)
         {
             Label = label ?? throw new ArgumentNullException(nameof(label));
             Input = input ?? throw new ArgumentNullException(nameof(input));
-            Note = note;
         }
     }
 
@@ -102,17 +98,9 @@ public sealed class AccountEditorLayout
             slot.Input.Visible = true;
 
             y += advance;
-
-            // 随行说明：紧跟在字段行下面
-            if (slot.Note != null)
-            {
-                slot.Note.Top = y + NoteGap;
-                slot.Note.Visible = true;
-                y = slot.Note.Top + slot.Note.Height + NoteGap;
-            }
         }
 
-        // 其余字段隐藏（带说明的，说明文字一起隐藏）
+        // 其余字段隐藏
         foreach (var kv in _slots)
         {
             if (flowFields.Contains(kv.Key)) continue;
@@ -121,7 +109,6 @@ public sealed class AccountEditorLayout
             bool show = cfg?.ShowInEditor == true;
             kv.Value.Label.Visible = show;
             kv.Value.Input.Visible = show;
-            if (kv.Value.Note != null) kv.Value.Note.Visible = show;
         }
 
         // 「代理模式」分组固定在字段流末尾，再往下 10px
