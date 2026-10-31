@@ -633,6 +633,31 @@
 `AccountEditorLayout` 的 `Note` 机制**已整块移除**（它当初只为这一行提示而存在）。
 代理分组 Y：788 → **750**（少一行说明的高度）。
 
+### ✅ 2026-10-31 v2.6.16 发布（已完成，一次补齐 10 个版本）
+**结果**
+- Gitee release: https://gitee.com/wangq80368036/A3ToolsRelease/releases/tag/v2.6.16 （id=**1258625**）
+- tag `v2.6.16` -> release marker commit `f82b24f`（只在 A3ToolsRelease 仓库，源码不泄露）
+- zip `A3Tools_v2.6.16.zip`（81.47 MB / 85,426,296 bytes）已上传；`RELEASE_NOTES.md` 已内嵌 zip
+- **GitHub 也推上去了**（网络恢复）：origin / github master 都是 `66e64dd`
+- 发布说明文件：`release-notes-v2.6.16-full.md`（汇总 v2.6.7~v2.6.16 十个版本）
+- 部署目录 `D:\Work\工具\A3工具箱更新\` 已更新到 **File=2.6.16.0**，
+  `DATA\` 四件套 SHA256 **全部 UNCHANGED**（部署前后逐个比对过）
+- 三个 csproj 版本全部同步到 `2.6.16`（主项目 / Plugins.Default / Common）——**脚本会自动做**
+
+**★ 两条容易误判的「假故障」（都不是 bug）**
+1. **release.ps1 跑完返回 exit code 1** → 是 PowerShell 把 `git push` 的 stderr
+   （`To https://...`）当成 `NativeCommandError` 抛出来的，**脚本本身全流程已完成**
+   （看最后打印的「Release v2.6.16 done」+ 三条 ✓ 校验为准）
+2. **读回 Gitee release body 看着像乱码** → 是 PS 5.1 的 `Invoke-RestMethod` 默认按
+   Latin-1 解码造成的**假 mojibake**。Gitee 存的是真 UTF-8。验证办法：
+   用 `HttpClient.GetByteArrayAsync` + `[System.Text.Encoding]::UTF8.GetString(bytes)`，
+   再拿中文字符串 `Contains()` 判定（本次命中「账套整机迁移」「自动登录配置」「二级关联」→ 全 True）
+
+**★ PS 5.1 写自动化脚本的硬规矩（这次又踩了一次）**
+- `.ps1` **无 BOM 时按 ANSI 读** → 脚本里**任何中文字面量都会破坏语法**
+  （这次连续踩了两次：先是把 `*新增*` 写进 `-like`，后是 `-contains 'A3Tools.exe'` 报「字符串缺少终止符」）
+- 办法：脚本**纯 ASCII**，中文用码点拼 `[char]0x8D26` / `[string][char]0x81EA + [char]0x52A8`
+- 也可写成 **UTF-8 with BOM**，PS 5.1 会按 UTF-8 读（但历史脚本没这习惯，码点法更保险）
+
 ### 未发布到 Gitee
-- `v2.6.7` ~ `v2.6.16` **都还没发 Gitee Release**，tag 只到 `v2.6.6`
-- 等陛下确认后再跑 `release.ps1 -Version 2.6.16`（**发布 tag 校验要以 release marker 为基准，不是源码 HEAD**）
+- ~~`v2.6.7` ~ `v2.6.16` 都还没发~~ → **2026-10-31 已全部补齐到 v2.6.16**
