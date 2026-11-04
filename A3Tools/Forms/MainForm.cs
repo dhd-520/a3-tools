@@ -35,6 +35,43 @@ public partial class MainForm : Form, IToolContext
     private DateTime _lastTitleClickTime = DateTime.MinValue;
     private const string ROOT_PASSWORD = "xiaopacai"; // Root模式密码
 
+    // ★ 2026-11-04 陛下要求：彻底隐藏「A3密文解密」工具。
+    //   手势：3 秒内连点工具箱页签下的「默认工具」小标题 5 次 → 弹「请输入口令」
+    //        → 口令正确 → 直接弹出对应功能窗体。
+    //   工具箱里永远不会出现该工具卡片；大标题的 Root 模式完全不受影响。
+    private const string SECRET_CIPHER_TOOL_CLASS = "A3Tools.Plugins.Default.A3DesDecryptTool";
+
+    /// <summary>口令错误时的提示文案</summary>
+    private const string SECRET_DENIED_MESSAGE = "哪里来的小贼还想偷混进来";
+
+    /// <summary>
+    /// ★ 2026-11-04 口令 → 功能 映射表。
+    /// <para>后续要加新口令对应别的功能时，只要往这张表里加一条即可，
+    /// 手势（5 连击小标题）和弹窗逻辑都不用动。</para>
+    /// </summary>
+    private readonly Dictionary<string, Action> _secretPassphrases = new(StringComparer.Ordinal)
+    {
+        // 口令：你将无所遁形 → 打开 A3 密文解密窗体
+        ["你将无所遁形"] = () =>
+        {
+            var cipherForm = new A3DesDecryptForm();
+            cipherForm.Show();
+            cipherForm.BringToFront();
+        },
+    };
+
+    /// <summary>「默认工具」小标题连击计数（与大标题的 Root 模式计数完全独立）</summary>
+    private int _secretTitleClickCount = 0;
+
+    /// <summary>「默认工具」小标题上次点击时间（超过 3 秒重新计数）</summary>
+    private DateTime _lastSecretTitleClickTime = DateTime.MinValue;
+
+    /// <summary>默认工具中实际可见的数量（隐藏密文工具后状态栏只报可见数）</summary>
+    private int _visibleDefaultToolCount = 0;
+
+    /// <summary>自定义工具数量（状态栏显示用）</summary>
+    private int _customToolCount = 0;
+
     // 账套列表中需要脱敏显示的列（正常模式显示 ***，Root 模式才显示明文）
     private static readonly HashSet<string> _sensitiveColumnNames = new(StringComparer.Ordinal)
     {
@@ -1243,6 +1280,8 @@ public partial class MainForm : Form, IToolContext
         this.menuAiChat.Click += MenuAiChat_Click;
         this.menuAiSettings.Click += MenuAiSettings_Click;
         this.lblTitle.Click += LblTitle_Click;
+        // ★ 2026-11-04 隐藏密文工具的解锁入口：连点「默认工具」小标题
+        this.lblDefaultToolsTitle.Click += LblDefaultToolsTitle_Click;
 
         this.KeyDown += MainForm_KeyDown;
     }
@@ -3589,8 +3628,13 @@ public partial class MainForm : Form, IToolContext
     {
         _toolExecutorService.LoadTools(_toolsConfigService, this);
 
+        int visible = 0;
         foreach (var tool in _toolExecutorService.Tools)
         {
+            // ★ 2026-11-04 「A3密文解密」永不生成卡片：
+            //   只能通过「默认工具」小标题的密语解锁直接打开解密窗体
+            if (IsSecretCipherTool(tool.Config)) continue;
+
             var btn = CreateToolCard("🔧", tool.Config.Name, tool.Config.Description);
             var loadedTool = tool;
             btn.Click += (s, e) =>
@@ -3603,9 +3647,26 @@ public partial class MainForm : Form, IToolContext
                 _toolExecutorService.ExecuteTool(loadedTool, account, this);
             };
             this.flpTools.Controls.Add(btn);
+            visible++;
         }
 
-        this.lblPluginStatus.Text = $"已加载 {_toolExecutorService.Tools.Count} 个默认工具";
+        _visibleDefaultToolCount = visible;
+        UpdateToolStatusText();
+    }
+
+    /// <summary>
+    /// 判断是否为需要隐藏的密文工具（按 tools.json 里的 className 匹配）。
+    /// </summary>
+    private static bool IsSecretCipherTool(ToolConfig config)
+        => string.Equals(config.ClassName, SECRET_CIPHER_TOOL_CLASS, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 状态栏显示默认工具 / 自定义工具数量。
+    /// 用可见数量而非加载总数，避免暴露"少了一个工具"。
+    /// </summary>
+    private void UpdateToolStatusText()
+    {
+        this.lblPluginStatus.Text = $"默认工具 {_visibleDefaultToolCount} 个，自定义工具 {_customToolCount} 个";
     }
 
     private void BtnAddCustomTool_Click(object? sender, EventArgs e)
@@ -3674,7 +3735,8 @@ public partial class MainForm : Form, IToolContext
             flpCustomTools.Controls.Add(btn);
         }
 
-        lblPluginStatus.Text = $"默认工具 {_toolExecutorService.Tools.Count} 个，自定义工具 {configs.Count} 个";
+        _customToolCount = configs.Count;
+        UpdateToolStatusText();
     }
 
     private void EditCustomTool(CustomToolConfig config)
@@ -3740,6 +3802,56 @@ public partial class MainForm : Form, IToolContext
         if (_titleClickCount >= 5)
         {
             ShowRootPasswordDialog();
+        }
+    }
+
+    /// <summary>
+    /// ★ 2026-11-04 隐藏密文工具的解锁入口：3 秒内连点「默认工具」小标题 5 次 → 弹「你是谁？」
+    /// 答「我是任劳任怨的牛马」即显示隐藏的「A3密文解密」工具。
+    /// 与大标题的 Root 模式完全独立（计数、弹窗、状态全部分开，大标题行为不变）。
+    /// </summary>
+    private void LblDefaultToolsTitle_Click(object? sender, EventArgs e)
+    {
+        var now = DateTime.Now;
+        if ((now - _lastSecretTitleClickTime).TotalSeconds > 3)
+        {
+            _secretTitleClickCount = 0;
+        }
+        _lastSecretTitleClickTime = now;
+        _secretTitleClickCount++;
+
+        if (_secretTitleClickCount >= 5)
+        {
+            ShowPassphraseDialog();
+        }
+    }
+
+    /// <summary>
+    /// ★ 2026-11-04 口令验证：连点「默认工具」小标题 5 次后弹出「请输入口令」，
+    /// 口令正确则执行对应功能（当前：直接弹出「A3密文解密」窗体）。
+    /// 工具箱里不出现该工具卡片（不重建工具卡片，工具箱布局保持原样）。
+    /// </summary>
+    private void ShowPassphraseDialog()
+    {
+        // 重置计数，让下一次 5 连击重新开始计数（小标题计数，与 Root 模式无关）
+        _secretTitleClickCount = 0;
+
+        using var dlg = new PromptInputForm("请输入口令", "请输入口令");
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        var input = (dlg.InputText ?? string.Empty).Trim();
+        if (_secretPassphrases.TryGetValue(input, out var action))
+        {
+            // ★ 口令正确 → 执行对应功能（工具箱里不生成任何卡片）
+            action.Invoke();
+        }
+        else
+        {
+            MessageBox.Show(
+                SECRET_DENIED_MESSAGE,
+                "提示",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
     }
 
