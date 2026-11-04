@@ -1,12 +1,10 @@
-# v2.6.17 一键发布包装脚本
-# 用途: 把 release notes **文件路径** 传给 release.ps1
+# v2.6.17 one-click release wrapper
+# Purpose: pass the release notes FILE PATH (not the multi-line content) to release.ps1
 #
-# ★ 沿用 v2.6.6 的修正: 传「文件路径」而不是「文件内容(多行字符串)」,
-#   否则 release.ps1 里的 `Test-Path $ReleaseNotes` 拿带换行的正文当路径 -> 抛错。
-#   release.ps1 内部会自己用 [IO.File]::ReadAllText(path, UTF8) 读, 避开 GBK 污染。
-#
-# ★ v2.6.17: notes 放在仓库根目录 release-notes-v2.6.17.md（随源码一起提交），
-#   release.ps1 会再写一份到 publish\RELEASE_NOTES_v2.6.17.md 并嵌进 zip。
+# NOTE: this script is intentionally ASCII-only. PS 5.1 reads a .ps1 without BOM
+# using the system ANSI codepage (GBK on this machine), so literal CJK chars
+# inside the script file would turn into mojibake. All CJK here is built from
+# code points at runtime.
 $ErrorActionPreference = "Stop"
 $gitRoot = "D:\Work\A3Tools"
 Set-Location $gitRoot
@@ -14,9 +12,10 @@ Set-Location $gitRoot
 $notesPath = Join-Path $gitRoot "release-notes-v2.6.17.md"
 if (-not (Test-Path $notesPath)) { Write-Error "notes not found: $notesPath"; exit 1 }
 
-# 自检: 确认能按 UTF-8 读出中文(防 GBK 污染回归)
+# Self-check: read the notes as UTF-8 and make sure real CJK survived.
+$cjkRange = "[" + [char]0x4e00 + "-" + [char]0x9fff + "]"
 $probe = [System.IO.File]::ReadAllText($notesPath, [System.Text.Encoding]::UTF8)
-if ($probe -notmatch "[一-龥]") { Write-Error "notes 缺中文, 疑似编码问题"; exit 1 }
-Write-Host ("[wrapper] notes OK: " + $notesPath + " (" + $probe.Length + " chars, 中文校验通过)") -ForegroundColor Cyan
+if ($probe -notmatch $cjkRange) { Write-Error "notes lost CJK, suspect encoding"; exit 1 }
+Write-Host ("[wrapper] notes OK: " + $notesPath + " (" + $probe.Length + " chars, CJK check passed)") -ForegroundColor Cyan
 
 & (Join-Path $gitRoot "scripts\release.ps1") -Version "2.6.17" -ReleaseNotes $notesPath
