@@ -210,7 +210,7 @@ partial class AccountDialog
         txtCode.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtCode.Location = new Point(250, 20);
         txtCode.Name = "txtCode";
-        txtCode.Size = new Size(590, 41);
+        txtCode.Size = new Size(620, 41);
         txtCode.TabIndex = 1;
         // 
         // lblName
@@ -229,7 +229,7 @@ partial class AccountDialog
         txtName.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtName.Location = new Point(250, 65);
         txtName.Name = "txtName";
-        txtName.Size = new Size(590, 41);
+        txtName.Size = new Size(620, 41);
         txtName.TabIndex = 3;
         // 
         // lblServer
@@ -248,7 +248,7 @@ partial class AccountDialog
         txtServer.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtServer.Location = new Point(250, 110);
         txtServer.Name = "txtServer";
-        txtServer.Size = new Size(590, 41);
+        txtServer.Size = new Size(620, 41);
         txtServer.TabIndex = 5;
         // 
         // lblServerBackup
@@ -267,7 +267,7 @@ partial class AccountDialog
         txtServerBackup.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtServerBackup.Location = new Point(250, 155);
         txtServerBackup.Name = "txtServerBackup";
-        txtServerBackup.Size = new Size(590, 41);
+        txtServerBackup.Size = new Size(620, 41);
         txtServerBackup.TabIndex = 7;
         // 
         // lblServerPassword
@@ -286,7 +286,7 @@ partial class AccountDialog
         txtServerPassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtServerPassword.Location = new Point(250, 200);
         txtServerPassword.Name = "txtServerPassword";
-        txtServerPassword.Size = new Size(590, 41);
+        txtServerPassword.Size = new Size(620, 41);
         txtServerPassword.TabIndex = 9;
         txtServerPassword.UseSystemPasswordChar = true;
         // 
@@ -306,7 +306,7 @@ partial class AccountDialog
         txtDatabase.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtDatabase.Location = new Point(250, 245);
         txtDatabase.Name = "txtDatabase";
-        txtDatabase.Size = new Size(590, 41);
+        txtDatabase.Size = new Size(620, 41);
         txtDatabase.TabIndex = 11;
         // 
         // lblDatabaseName
@@ -325,7 +325,7 @@ partial class AccountDialog
         txtDatabaseName.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtDatabaseName.Location = new Point(250, 290);
         txtDatabaseName.Name = "txtDatabaseName";
-        txtDatabaseName.Size = new Size(590, 41);
+        txtDatabaseName.Size = new Size(620, 41);
         txtDatabaseName.TabIndex = 13;
         // 
         // lblDbUser
@@ -344,7 +344,7 @@ partial class AccountDialog
         txtDbUser.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtDbUser.Location = new Point(250, 335);
         txtDbUser.Name = "txtDbUser";
-        txtDbUser.Size = new Size(590, 41);
+        txtDbUser.Size = new Size(620, 41);
         txtDbUser.TabIndex = 15;
         // 
         // lblDbPassword
@@ -363,7 +363,7 @@ partial class AccountDialog
         txtDbPassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtDbPassword.Location = new Point(250, 380);
         txtDbPassword.Name = "txtDbPassword";
-        txtDbPassword.Size = new Size(590, 41);
+        txtDbPassword.Size = new Size(620, 41);
         txtDbPassword.TabIndex = 17;
         txtDbPassword.UseSystemPasswordChar = true;
         // 
@@ -385,7 +385,7 @@ partial class AccountDialog
         cboRemoteType.Items.AddRange(new object[] { "RDP", "向日葵", "其他" });
         cboRemoteType.Location = new Point(250, 435);
         cboRemoteType.Name = "cboRemoteType";
-        cboRemoteType.Size = new Size(590, 43);
+        cboRemoteType.Size = new Size(620, 43);
         cboRemoteType.TabIndex = 19;
         // 
         // lblRemoteAddress
@@ -404,7 +404,7 @@ partial class AccountDialog
         txtRemoteAddress.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtRemoteAddress.Location = new Point(250, 480);
         txtRemoteAddress.Name = "txtRemoteAddress";
-        txtRemoteAddress.Size = new Size(590, 41);
+        txtRemoteAddress.Size = new Size(620, 41);
         txtRemoteAddress.TabIndex = 21;
         // 
         // lblRemoteUser
@@ -423,7 +423,7 @@ partial class AccountDialog
         txtRemoteUser.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtRemoteUser.Location = new Point(250, 525);
         txtRemoteUser.Name = "txtRemoteUser";
-        txtRemoteUser.Size = new Size(590, 41);
+        txtRemoteUser.Size = new Size(620, 41);
         txtRemoteUser.TabIndex = 23;
         // 
         // lblRemotePassword
@@ -442,7 +442,7 @@ partial class AccountDialog
         txtRemotePassword.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtRemotePassword.Location = new Point(250, 570);
         txtRemotePassword.Name = "txtRemotePassword";
-        txtRemotePassword.Size = new Size(590, 41);
+        txtRemotePassword.Size = new Size(620, 41);
         txtRemotePassword.TabIndex = 25;
         txtRemotePassword.UseSystemPasswordChar = true;
         // 
@@ -465,7 +465,7 @@ partial class AccountDialog
         txtRemark.Multiline = true;
         txtRemark.Name = "txtRemark";
         txtRemark.ScrollBars = ScrollBars.Vertical;
-        txtRemark.Size = new Size(590, 60);
+        txtRemark.Size = new Size(620, 60);
         txtRemark.TabIndex = 27;
         // 
         // pnlProxyGroup
@@ -593,7 +593,7 @@ partial class AccountDialog
         txtServerUsername.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
         txtServerUsername.Location = new Point(250, 695);
         txtServerUsername.Name = "txtServerUsername";
-        txtServerUsername.Size = new Size(590, 41);
+        txtServerUsername.Size = new Size(620, 41);
         txtServerUsername.TabIndex = 2;
         // 
         // toolTipServerUsername

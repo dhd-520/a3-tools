@@ -55,6 +55,63 @@ public sealed class AccountEditorLayout
     private const int GroupGap = 10;
 
     /// <summary>
+    /// 内容区左右边距（像素）——设计器里是 30；运行时实际值由 ApplyColumns 的 margin 参数带入
+    /// （后者已经被窗体 AutoScale 缩放过）。
+    /// </summary>
+    public const int SideMargin = 30;
+
+    /// <summary>
+    /// 标题列占「可用宽度」的比例 = 1/4（陛下要求，2026-11-05）。
+    /// </summary>
+    public const double LabelWidthRatio = 0.25;
+
+    /// <summary>标题列与输入列之间的间距（设计器里是 10）</summary>
+    public const int ColumnGap = 10;
+
+    /// <summary>
+    /// 按内容区实际宽度重排「标题列 + 输入列」（2026-11-05 陛下）。
+    ///
+    /// ★ 宽度按百分比：标题占可用宽度的 1/4、输入框占剩下的 3/4。
+    ///   所以换分辨率、换缩放、甚至拖动窗体大小，字段行都保持对齐。
+    ///
+    /// ★ 内置字段和自定义字段走的是同一段代码 → 结构上不可能再错位。
+    ///   （以前是两套几何来源：内置的来自设计器、自定义的写死一份，缩放后必然分叉）
+    ///
+    /// ★ margin / gap 取自设计器「代码」字段的运行时真实值：
+    ///   设计器 30 / 210 / 250 → margin=30、gap=10；
+    ///   窗体 AutoScale 之后这两个值也跟着缩放（本机实测 17 / 6，
+    ///   缩放系数逐机不同）→ 任何 DPI 下都对得上。
+    /// </summary>
+    public void ApplyColumns(int contentWidth, int margin, int gap)
+    {
+        if (contentWidth <= 0) return;
+
+        int usable = Math.Max(0, contentWidth - margin * 2);
+        int labelWidth = (int)Math.Round(usable * LabelWidthRatio);
+        int inputWidth = Math.Max(0, usable - labelWidth - gap);
+
+        foreach (var kv in _slots)
+        {
+            var label = kv.Value.Label;
+            var input = kv.Value.Input;
+
+            // 标题：固定列宽 + 右对齐 → 标题文字始终紧贴输入框（与设计器一致）
+            label.AutoSize = false;
+            label.TextAlign = ContentAlignment.MiddleRight;
+            label.Left = margin;
+            label.Width = labelWidth;
+
+            // 输入框
+            input.Left = margin + labelWidth + gap;
+            input.Width = inputWidth;
+        }
+
+        // ★ 不动「代理模式」分组：它内部的控件是设计器里的固定坐标布局
+        //   （密钥/公钥输入框、按钮都在写死的位置上），改宽度会被裁切。
+        //   它由窗体 AutoScale 统一缩放，跟其他设计器控件保持一致。
+    }
+
+    /// <summary>
     /// 构造排版引擎。
     /// </summary>
     /// <param name="slots">字段名 → (标签, 输入框[, 随行说明])</param>

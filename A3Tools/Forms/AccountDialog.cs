@@ -21,6 +21,15 @@ public partial class AccountDialog : Form
     /// </summary>
     private readonly Dictionary<string, (Label Label, TextBox Input)> _customSlots = new();
 
+    /// <summary>当前排版引擎（重排时复用，方便窗体改变大小时重算列宽）</summary>
+    private AccountEditorLayout? _layout;
+
+    /// <summary>内容区左右边距（像素）—— 取自设计器模板的运行时真实值（已随 AutoScale 缩放）</summary>
+    private int _colMargin = AccountEditorLayout.SideMargin;
+
+    /// <summary>标题列与输入列之间的间距（像素）—— 同上</summary>
+    private int _colGap = AccountEditorLayout.ColumnGap;
+
     /// <summary>是否显示密码明文（Root模式使用）</summary>
     public bool ShowPasswords { get; set; } = false;
 
@@ -39,6 +48,14 @@ public partial class AccountDialog : Form
         InitializeComponent();
         this.KeyPreview = true;
         this.KeyDown += AccountDialog_KeyDown;
+        contentPanel.ClientSizeChanged += ContentPanel_ClientSizeChanged;
+
+        // ★ 边距/间距：从设计器模板（「代码」字段）的真实运行时几何取。
+        //   InitializeComponent 结束时窗体已完成 AutoScale（见 AutoScaleDimensions），
+        //   所以这两个值已经是缩放后的真实值 —— 用它们算百分比，两类字段必然对齐。
+        _colMargin = lblCode.Left;
+        _colGap = Math.Max(0, txtCode.Left - (lblCode.Left + lblCode.Width));
+
         ApplyFieldLayout();
         if (account != null)
             LoadAccount(account);
@@ -68,6 +85,9 @@ public partial class AccountDialog : Form
     ///
     /// ★ 不动态创建控件：只用设计器里已经定义好的 Label/输入框，
     ///   控件的 X 坐标/宽高/字体完全由 AccountDialog.Designer.cs 决定（所见即所得）。
+    ///
+    /// ★ 列宽按百分比算（2026-11-05 陛下）：标题占 1/4、输入框占 3/4，
+    ///   内置字段和自定义字段走同一套算法 → 任何分辨率、任何窗体大小都不会错位。
     /// </summary>
     private void ApplyFieldLayout()
     {
@@ -102,9 +122,97 @@ public partial class AccountDialog : Form
         EnsureCustomFieldControls(config, slots);
 
         var layout = new AccountEditorLayout(slots, pnlProxyGroup, startY: 20);
+        _layout = layout;
         layout.Apply(config);
 
+        // 列宽按比例重算（标题 1/4、输入 3/4）—— 内置/自定义字段统一处理
+        ApplyColumnWidths();
+
         ShrinkToContent();
+    }
+
+    /// <summary>
+    /// 按内容区实际宽度重算「标题列 + 输入列」的宽度。
+    ///
+    /// ★ 2026-11-05 陛下：宽度改成百分比显示（标题 1/4、输入 3/4），
+    ///   这样换分辨率、换缩放、甚至拖动窗体大小，字段行都保持对齐。
+    ///
+    /// ★ 内置字段和自定义字段走同一段代码 → 结构上不可能再错位。
+    ///   （以前是两套几何来源：内置的来自设计器、自定义的写死一份）
+    ///
+    /// ★ 边距/间距用的是「设计器模板控件的真实运行时几何」，
+    ///   已经被窗体 AutoScale 缩放过 → 任何缩放比例下都跟内置行对齐。
+    /// </summary>
+    private void ApplyColumnWidths()
+    {
+        if (_layout == null) return;
+        int w = contentPanel.ClientSize.Width;
+        if (w <= 0) return;
+        _layout.ApplyColumns(w, _colMargin, _colGap);
+    }
+
+    /// <summary>
+    /// 窗体大小变化时重算列宽（百分比布局 → 跟着一起变）。
+    /// </summary>
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        ApplyColumnWidths();
+    }
+
+    /// <summary>
+    /// 内容区宽度变化（含垂直滚动条出现/消失）时重算列宽。
+    /// </summary>
+    private void ContentPanel_ClientSizeChanged(object? sender, EventArgs e)
+    {
+        ApplyColumnWidths();
+    }
+
+    /// <summary>
+    /// ★ 2026-11-05 修复：自定义字段行在不同分辨率/缩放的电脑上与内置字段错位。
+    ///
+    /// 病根：自定义字段的「标题 + 输入框」是【运行时创建】的（设计器里没有），
+    ///   之前把设计器坐标（x=30/250、宽 210/590）硬编码了一份。
+    ///   但窗体开了 <c>AutoScaleMode.Font</c> —— 字体/DPI 与设计机不同时，
+    ///   关键在缩放的【时序】而不是「谁被缩放」：
+    ///   内置控件在 InitializeComponent 阶段创建，随窗体一起被缩放；
+    ///   运行时创建的控件若在窗体句柄创建之后才加入（如「运行中新增自定义字段」），
+    ///   就完全错过这次缩放 —— 自定义行于是成了「原始像素」，在内置行旁边错位：
+    ///   标题后面空出一段（一个标题宽度），输入框的位置和宽度也对不上。
+    ///
+    /// 修法：不写死像素，改为继承「模板控件」的真实几何 ——
+    ///   模板 = 设计器里的「代码」字段（固定字段，永远存在）。
+    ///   复制 AutoSize / 尺寸 / 位置 / 对齐 / 字体，
+    ///   自定义行就成了内置行的结构克隆，任何缩放下都对齐。
+    ///
+    ///   ★ 2026-11-05 补充：宽度最终统一由 <c>AccountEditorLayout.ApplyColumns</c>
+    ///     按百分比重算（标题 1/4、输入 3/4），内置与自定义字段走同一段代码。
+    ///     本方法负责的是 ApplyColumns 不管的属性：高度 / 字体 / 颜色 / 对齐。
+    /// </summary>
+    private void SyncCustomFieldGeometry()
+    {
+        var tplLabel = lblCode;      // 模板：设计器里的固定字段
+        var tplInput = txtCode;
+
+        foreach (var kv in _customSlots)
+        {
+            var lb = kv.Value.Label;
+            var tb = kv.Value.Input;
+
+            // 标题：先设 AutoSize 再设 Size（AutoSize=true 时 Size 会被忽略）
+            lb.AutoSize = tplLabel.AutoSize;
+            lb.Size = tplLabel.Size;
+            lb.Left = tplLabel.Left;
+            lb.TextAlign = tplLabel.TextAlign;
+            lb.Font = new Font(tplLabel.Font, tplLabel.Font.Style);   // 复制一份，不共享（共享的 Font 会被一起 Dispose）
+            lb.ForeColor = tplLabel.ForeColor;
+
+            // 输入框
+            tb.AutoSize = tplInput.AutoSize;
+            tb.Size = tplInput.Size;
+            tb.Left = tplInput.Left;
+            tb.Font = new Font(tplInput.Font, tplInput.Font.Style);
+        }
     }
 
     /// <summary>
@@ -134,20 +242,24 @@ public partial class AccountDialog : Form
         {
             if (!_customSlots.TryGetValue(c.Field, out var pair))
             {
+                // ★ 几何不写死：全部继承设计器里的「代码」字段（模板），
+                //   否则缩放/字体不同时会和内置字段错位（见 SyncCustomFieldGeometry 注释）
                 var lb = new Label
                 {
                     Text = c.DisplayName + "：",
-                    Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point),
-                    ForeColor = Color.FromArgb(80, 80, 80),
-                    Size = new Size(210, 35),
-                    Location = new Point(30, 0),
-                    TextAlign = ContentAlignment.MiddleRight,
+                    AutoSize = lblCode.AutoSize,
+                    Size = lblCode.Size,
+                    Location = new Point(lblCode.Left, 0),
+                    TextAlign = lblCode.TextAlign,
+                    Font = new Font(lblCode.Font, lblCode.Font.Style),
+                    ForeColor = lblCode.ForeColor,
                 };
                 var tb = new TextBox
                 {
-                    Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point),
-                    Size = new Size(590, 41),
-                    Location = new Point(250, 0),
+                    AutoSize = txtCode.AutoSize,
+                    Size = txtCode.Size,
+                    Location = new Point(txtCode.Left, 0),
+                    Font = new Font(txtCode.Font, txtCode.Font.Style),
                 };
                 contentPanel.Controls.Add(lb);
                 contentPanel.Controls.Add(tb);
@@ -156,6 +268,20 @@ public partial class AccountDialog : Form
             }
             slots[c.Field] = new AccountEditorLayout.Slot(pair.Label, pair.Input);
         }
+
+        // 已存在的控件同样要校准（新建时可能还没缩放，缩放后几何会变）
+        SyncCustomFieldGeometry();
+    }
+
+    /// <summary>
+    /// 窗体在句柄创建时完成 DPI 自动缩放（<c>AutoScaleMode.Font</c>），
+    /// 之后设计器控件才是「真实几何」。这里重新排一次，
+    /// 让自定义字段拿到缩放后的尺寸/位置，与内置字段完全对齐。
+    /// </summary>
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        ApplyFieldLayout();
     }
 
     /// <summary>
@@ -177,7 +303,9 @@ public partial class AccountDialog : Form
             if (bottom <= 0) return;
 
             int wanted = titleBar.Height + bottom + 20 + footerPanel.Height;
-            int maxH = 720; // 设计器里定的 ClientSize 高度
+            // 上限用「当前窗体高度」而不是写死的 720 —— 窗体可能被 DPI 缩放过，
+            // 写死会在高缩放的机器上把窗体压得过矮
+            int maxH = this.ClientSize.Height;
             if (wanted < maxH && wanted >= this.MinimumSize.Height)
                 this.ClientSize = new Size(this.ClientSize.Width, wanted);
         }
