@@ -42,6 +42,32 @@ function Ok($msg)   { Write-Host ("[{0}] ✓ {1}" -f (Get-Date -Format 'HH:mm:ss
 function Warn($msg) { Write-Host ("[{0}] ! {1}" -f (Get-Date -Format 'HH:mm:ss'), $msg) -ForegroundColor Yellow }
 function Err($msg)  { Write-Host ("[{0}] ✗ {1}" -f (Get-Date -Format 'HH:mm:ss'), $msg) -ForegroundColor Red }
 
+# ★ 2026-11-06 v2.6.18 后加固：把原生命令的 stdout/stderr 收进日志文件，
+#   控制台只留脚本自己的一行摘要。
+#   为什么：dotnet publish 的输出可达 ~200KB（428 条历史存量 warning），
+#   直接喷进 agent 的 tool result 后，那一坨会被后续每一轮反复重读，
+#   单次发布凭空多耗数万 token。日志落在 publish\ 下（已被 .gitignore 忽略）。
+#
+#   EAP 陷阱：$ErrorActionPreference="Stop" 时，原生命令只要往 stderr 写一个字节，
+#   PS 5.1 就把它变成终止性 RemoteException —— 连"成功但带 banner"的 git push 都会炸。
+#   所以这里临时降级为 Continue，退出码改用 $LASTEXITCODE 判定，finally 恢复原值。
+function Invoke-NativeQuiet([string]$LogPath, [scriptblock]$Cmd) {
+    # 日志目录可能不存在（publish\ 已被 .gitignore，全新 clone 就没有）——
+    # 不建目录的话 *> 重定向会抛 DirectoryNotFoundException。
+    $logDir = Split-Path -Parent $LogPath
+    if ($logDir -and -not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Cmd *> $LogPath
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 # 1) 参数校验
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     Err ("Version format wrong: " + $Version + " (expect x.y.z)")
@@ -179,7 +205,7 @@ foreach ($csproj in $csprojs) {
     if ((& git status --porcelain $csproj) -ne "") { $csprojChanged = $true; break }
 }
 if ($csprojChanged) {
-    & git add $csprojs
+    & git add $csprojs | Out-Null
     & git commit -m ("chore(release): csproj 版本号 bump -> " + $Version) --no-verify | Out-Null
     Ok "csproj bump committed"
 } else {
@@ -191,17 +217,26 @@ $standaloneDir = Join-Path $gitRoot (Join-Path $PublishDir "StandaloneSF")
 if (Test-Path $standaloneDir) { Remove-Item $standaloneDir -Recurse -Force }
 
 Info "dotnet publish StandaloneSF..."
-& dotnet publish "A3Tools\A3Tools.csproj" `
-    -c Release `
-    -r win-x64 `
-    --self-contained `
-    -o $standaloneDir `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
-    -p:EnableCompressionInSingleFile=true `
-    --nologo
-if ($LASTEXITCODE -ne 0) { Err "dotnet publish failed"; exit 1 }
-Ok "StandaloneSF done"
+# ★ 2026-11-06：输出收进 publish\build-v<ver>.log，不再喷进调用方上下文
+#   （本仓 428 条历史 warning ≈ 200KB，每次发版都白白重读一遍）。
+$buildLog = Join-Path $gitRoot (Join-Path $PublishDir ("build-v" + $Version + ".log"))
+$buildCode = Invoke-NativeQuiet $buildLog {
+    & dotnet publish "A3Tools\A3Tools.csproj" `
+        -c Release `
+        -r win-x64 `
+        --self-contained `
+        -o $standaloneDir `
+        -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        -p:EnableCompressionInSingleFile=true `
+        --nologo
+}
+if ($buildCode -ne 0) {
+    Err ("dotnet publish failed (exit " + $buildCode + ")")
+    Err ("build log: " + $buildLog)
+    exit 1
+}
+Ok ("StandaloneSF done (build log: " + $buildLog + ")")
 
 # 7) 打 zip
 $zipPath = Join-Path $gitRoot (Join-Path $PublishDir ("A3Tools_v" + $Version + ".zip"))
@@ -243,7 +278,14 @@ try {
         }
         try {
             Info ("  pushing master to " + $remote + "...")
-            & git push $remote master
+            # ★ 2026-11-06: 输出收进日志，成败改用退出码判定。
+            #   旧写法在 EAP=Stop 下，git push 即使成功也会因 stderr 的 "remote:" banner
+            #   抛 NativeCommandError —— 这就是"脚本已成功、外层却返回 exit 1"的已知陷阱。
+            $pushLog = Join-Path $gitRoot (Join-Path $PublishDir ("push-master-" + $remote + ".log"))
+            $pushCode = Invoke-NativeQuiet $pushLog { & git push $remote master }
+            if ($pushCode -ne 0) {
+                throw ("git push " + $remote + " master failed (exit " + $pushCode + "), see " + $pushLog)
+            }
         } catch {
             Err ("  push to " + $remote + " failed: " + $_.Exception.Message)
             throw
@@ -295,7 +337,12 @@ try {
     Info ("  release marker commit: " + $markerSha.Substring(0, 7))
 
     # 8.3) tag 指向 marker (不是 HEAD)
-    & git tag $tag $markerSha
+    $tagLog = Join-Path $gitRoot (Join-Path $PublishDir ("tag-" + $tag + ".log"))
+    $tagCode = Invoke-NativeQuiet $tagLog { & git tag $tag $markerSha }
+    if ($tagCode -ne 0) {
+        Err ("git tag " + $tag + " failed (exit " + $tagCode + "), see " + $tagLog)
+        exit 1
+    }
     # ★ 2026-08-19 拆分：只推 A3ToolsRelease。源仓库不打 tag（污染列表）。
     $releaseRemote = "A3ToolsRelease"
     $found = $false
@@ -308,7 +355,11 @@ try {
     } else {
         try {
             Info ("  pushing tag to " + $releaseRemote + "...")
-            & git push $releaseRemote $tag --force
+            $tagPushLog = Join-Path $gitRoot (Join-Path $PublishDir ("push-tag-" + $tag + ".log"))
+            $tagPushCode = Invoke-NativeQuiet $tagPushLog { & git push $releaseRemote $tag --force }
+            if ($tagPushCode -ne 0) {
+                throw ("git push " + $releaseRemote + " " + $tag + " failed (exit " + $tagPushCode + "), see " + $tagPushLog)
+            }
         } catch {
             Err ("  push to " + $releaseRemote + " failed: " + $_.Exception.Message)
             throw
@@ -330,7 +381,11 @@ try {
         if ($expectedSha -ne $actualSha) {
             Err ("tag " + $tag + " 指向错 commit: " + $actualSha + " (期望 marker " + $expectedSha + ")")
             Err "force push 修正..."
-            & git push $releaseRemote $tag --force
+            $fixLog = Join-Path $gitRoot (Join-Path $PublishDir ("push-tag-fix-" + $tag + ".log"))
+            $fixCode = Invoke-NativeQuiet $fixLog { & git push $releaseRemote $tag --force }
+            if ($fixCode -ne 0) {
+                Err ("force push 修正失败 (exit " + $fixCode + "), see " + $fixLog)
+            }
             $actualSha = (& git rev-parse "$tag^{}" 2>$null).Trim()
             if ($actualSha -eq $expectedSha) {
                 Ok ("tag 修正完成 -> " + $expectedSha.Substring(0, 7))
@@ -472,11 +527,17 @@ if ($SkipGitHub) {
 
     if ($ghCli) {
         try {
-            & gh release create $tag $zipPath `
-                --repo ("$ghOwner/$ghRepo") `
-                --title ("A3Tools v" + $Version) `
-                --notes $ReleaseNotes `
-                --latest
+            $ghLog = Join-Path $gitRoot (Join-Path $PublishDir ("github-release-" + $tag + ".log"))
+            $ghCode = Invoke-NativeQuiet $ghLog {
+                & gh release create $tag $zipPath `
+                    --repo ("$ghOwner/$ghRepo") `
+                    --title ("A3Tools v" + $Version) `
+                    --notes $ReleaseNotes `
+                    --latest
+            }
+            if ($ghCode -ne 0) {
+                Err ("gh release create failed (exit " + $ghCode + "), see " + $ghLog)
+            }
             Ok "GitHub release created (gh CLI)"
             $githubReleaseUrl = ("https://github.com/" + $ghOwner + "/" + $ghRepo + "/releases/tag/" + $tag)
         } catch {
