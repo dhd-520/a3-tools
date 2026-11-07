@@ -93,6 +93,8 @@ public class MemoryChatStore : IChatStore
         lock (_lock)
         {
             _sessions.RemoveAll(s => s.Id == sessionId);
+            // ★ 2026-11-07 图片消息支持：连带删该会话的图片文件（否则磁盘一直涨）
+            AiImageService.DeleteSessionImages(sessionId);
         }
     }
 
@@ -101,6 +103,14 @@ public class MemoryChatStore : IChatStore
         lock (_lock)
         {
             _sessions.Clear();
+            // ★ 2026-11-07 图片消息支持：连带删所有会话图片
+            try
+            {
+                string imagesDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                               AiImageService.ImagesFolder.Replace('/', Path.DirectorySeparatorChar));
+                if (Directory.Exists(imagesDir)) Directory.Delete(imagesDir, true);
+            }
+            catch { }
         }
     }
 
@@ -145,6 +155,8 @@ public class MemoryChatStore : IChatStore
         TokensUsed = m.TokensUsed,
         IsError = m.IsError,
         ErrorMessage = m.ErrorMessage,
-        ToolCalls = m.ToolCalls
+        ToolCalls = m.ToolCalls,
+        // ★ 2026-11-07 图片消息支持：不复制 Images → Memory 策略下图片元数据全丢
+        Images = m.Images
     };
 }

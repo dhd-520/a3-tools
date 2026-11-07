@@ -42,6 +42,10 @@ partial class AiChatForm
         txtInput = new TextBox();
         pnlTopBar = new Panel();
         lblCurrentProvider = new Label();
+        btnAttachImage = new Button();
+        pnlImgPreview = new Panel();
+        flpImgPreview = new FlowLayoutPanel();
+        lblImgHint = new Label();
         pnlHeader.SuspendLayout();
         pnlSidebar.SuspendLayout();
         pnlChatArea.SuspendLayout();
@@ -52,6 +56,7 @@ partial class AiChatForm
         pnlMessagesScroll.SuspendLayout();
         pnlInput.SuspendLayout();
         pnlTopBar.SuspendLayout();
+        pnlImgPreview.SuspendLayout();
         SuspendLayout();
         // 
         // pnlHeader
@@ -288,6 +293,7 @@ partial class AiChatForm
         splitChat.Panel1.BackColor = Color.White;
         splitChat.Panel1.Padding = new Padding(0);
         splitChat.Panel1.Controls.Add(pnlMessagesScroll);
+        splitChat.Panel1.Controls.Add(pnlImgPreview);
         splitChat.Panel1MinSize = 0;
         // 
         // splitChat.Panel2
@@ -404,10 +410,74 @@ partial class AiChatForm
         txtInput.Size = new Size(1372, 118);
         txtInput.TabIndex = 0;
         // 
+        // btnAttachImage
+        //  ★ 2026-11-07 图片消息支持：选图入口（放在顶部栏右侧，避开输入框）
+        // 
+        btnAttachImage.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        btnAttachImage.BackColor = Color.FromArgb(245, 245, 245);
+        btnAttachImage.FlatStyle = FlatStyle.Flat;
+        btnAttachImage.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        btnAttachImage.ForeColor = Color.FromArgb(24, 144, 255);
+        btnAttachImage.Location = new Point(1437, 12);
+        btnAttachImage.Margin = new Padding(6);
+        btnAttachImage.Name = "btnAttachImage";
+        btnAttachImage.Size = new Size(120, 36);
+        btnAttachImage.TabIndex = 1;
+        btnAttachImage.Text = "选择图片";
+        btnAttachImage.UseVisualStyleBackColor = true;
+        btnAttachImage.Cursor = Cursors.Hand;
+        // 
+        // pnlImgPreview
+        //  ★ 2026-11-07 图片消息支持：待发送图片预览条
+        //    放在 splitChat.Panel1 底部（= 输入框正上方），Dock=Bottom 不抢输入区空间
+        //    ★ Add 顺序：pnlMessagesScroll(Fill) 先 Add → pnlImgPreview(Bottom) 后 Add
+        //      顺序反了 Fill 不会收缩、反而重叠（已用探针验证）
+        // 
+        pnlImgPreview.BackColor = Color.FromArgb(248, 250, 252);
+        pnlImgPreview.Controls.Add(flpImgPreview);
+        pnlImgPreview.Controls.Add(lblImgHint);
+        pnlImgPreview.Dock = DockStyle.Bottom;
+        pnlImgPreview.Location = new Point(0, 0);
+        pnlImgPreview.Margin = new Padding(6);
+        pnlImgPreview.Name = "pnlImgPreview";
+        pnlImgPreview.Size = new Size(1597, 104);
+        pnlImgPreview.TabIndex = 1;
+        pnlImgPreview.Visible = false;
+        // 
+        // flpImgPreview
+        //  ★ 待发送图片缩略图横排容器
+        // 
+        flpImgPreview.AutoScroll = true;
+        flpImgPreview.BackColor = Color.FromArgb(248, 250, 252);
+        flpImgPreview.Dock = DockStyle.Fill;
+        flpImgPreview.FlowDirection = FlowDirection.LeftToRight;
+        flpImgPreview.Location = new Point(0, 0);
+        flpImgPreview.Margin = new Padding(0);
+        flpImgPreview.Name = "flpImgPreview";
+        flpImgPreview.Size = new Size(1597, 78);
+        flpImgPreview.TabIndex = 0;
+        flpImgPreview.WrapContents = false;
+        // 
+        // lblImgHint
+        //  ★ 预览条底部提示文字
+        // 
+        lblImgHint.AutoSize = false;
+        lblImgHint.Dock = DockStyle.Bottom;
+        lblImgHint.Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point);
+        lblImgHint.ForeColor = Color.FromArgb(120, 120, 120);
+        lblImgHint.Location = new Point(0, 78);
+        lblImgHint.Margin = new Padding(6);
+        lblImgHint.Name = "lblImgHint";
+        lblImgHint.Size = new Size(1597, 20);
+        lblImgHint.TabIndex = 1;
+        lblImgHint.Text = "可粘贴（Ctrl+V）或拖拽图片；悬停缩略图可删除";
+        lblImgHint.TextAlign = ContentAlignment.MiddleLeft;
+        // 
         // pnlTopBar
         // 
         pnlTopBar.BackColor = Color.FromArgb(245, 245, 245);
         pnlTopBar.Controls.Add(lblCurrentProvider);
+        pnlTopBar.Controls.Add(btnAttachImage);
         pnlTopBar.Dock = DockStyle.Top;
         pnlTopBar.Location = new Point(0, 0);
         pnlTopBar.Margin = new Padding(6);
@@ -456,6 +526,8 @@ partial class AiChatForm
         pnlInput.PerformLayout();
         pnlTopBar.ResumeLayout(false);
         pnlTopBar.PerformLayout();
+        pnlImgPreview.ResumeLayout(false);
+        pnlImgPreview.PerformLayout();
         ResumeLayout(false);
     }
 
@@ -480,6 +552,11 @@ partial class AiChatForm
     private SplitContainer splitChat;
     private Panel pnlTopBar;
     private Label lblCurrentProvider;
+    // ★ 2026-11-07 图片消息支持
+    private Button btnAttachImage;
+    private Panel pnlImgPreview;
+    private FlowLayoutPanel flpImgPreview;
+    private Label lblImgHint;
     private Panel pnlMessagesScroll;
     private FlowLayoutPanel flpMessages;
     private Panel pnlInput;

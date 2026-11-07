@@ -52,8 +52,52 @@ public class AiProviderConfig
     /// <summary>是否为当前默认厂商</summary>
     public bool IsDefault { get; set; } = false;
 
+    /// <summary>
+    /// ★ 2026-11-07 图片消息支持：该厂商的模型是否支持视觉（看图）
+    /// <para>null = 自动（按模型名判断，见 <see cref="GuessSupportsVision"/>）</para>
+    /// <para>true = 明确支持；false = 明确不支持</para>
+    /// </summary>
+    public bool? SupportsVision { get; set; } = null;
+
+    /// <summary>
+    /// 实际是否支持视觉：显式设置优先，否则按模型名自动判断
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool EffectiveSupportsVision =>
+        SupportsVision ?? GuessSupportsVision(Type, Model);
+
     /// <summary>备注（可选）</summary>
     public string Remark { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ★ 2026-11-07：根据厂商类型 + 模型名猜是否支持视觉
+    /// <para>只是初次添加时的默认值，陛下可在设置页改。</para>
+    /// </summary>
+    public static bool GuessSupportsVision(AiProviderType type, string model)
+    {
+        string m = (model ?? string.Empty).ToLowerInvariant().Trim();
+        if (m.Length == 0) return false;
+
+        // 明确不支持视觉的（避免误报）
+        if (m.Contains("deepseek-chat") || m.Contains("deepseek-reasoner")) return false;
+        if (m.StartsWith("qwen-plus") || m.StartsWith("qwen-turbo") || m.StartsWith("qwen-max")) return false;
+        if (m.StartsWith("moonshot-v1") || m.StartsWith("moonshot-v2")) return false;
+        if (m.StartsWith("glm-4-flash") || m.StartsWith("glm-4-plus") || m.StartsWith("glm-4-air")) return false;
+        if (m.Contains("abab")) return false;
+
+        // 支持视觉的
+        if (m.Contains("gpt-4o") || m.Contains("gpt-4.1") || m.Contains("gpt-4-turbo")
+            || m.Contains("gpt-4-vision") || m.StartsWith("gpt-5")) return true;
+        if (m.Contains("vl") || m.Contains("vision")) return true;      // qwen-vl / qwen2.5-vl / kimi-vl / doubao-vision ...
+        // ★ 「数字 + v」也算：glm-4v / step-1v / ernie-4.5-vl（GLM 的写法是 4v 不是 vl）
+        if (System.Text.RegularExpressions.Regex.IsMatch(m, @"\d+v")) return true;
+        if (m.Contains("llava") || m.Contains("bakllava") || m.Contains("moondream")
+            || m.Contains("minicpm-v") || m.Contains("internvl") || m.Contains("pixtral")) return true;
+        if (m.StartsWith("minimax-vl") || m.StartsWith("abab6.5s-v")) return true;
+        if (m.Contains("gemma-3")) return true;                        // gemma-3 支持视觉
+
+        return false;
+    }
 }
 
 /// <summary>

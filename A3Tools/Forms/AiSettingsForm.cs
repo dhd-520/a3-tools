@@ -79,6 +79,8 @@ public partial class AiSettingsForm : Form
         chkEnableAiLog.Checked = _config.EnableAiLog;
         nudRetryCount.Value = _config.MaxRetryCount;
         nudRetryInterval.Value = _config.RetryIntervalSeconds;
+        // ★ 2026-11-07 图片消息支持：单次请求图片上限
+        nudMaxImg.Value = Math.Clamp(_config.MaxImagesPerRequest, 0, 20);
         AiAssistantLogger.Enabled = _config.EnableAiLog;  // 同步到静态开关
     }
 
@@ -107,6 +109,13 @@ public partial class AiSettingsForm : Form
         txtApiKey.Text = p.ApiKey;
         txtModel.Text = p.Model;
         chkEnabled.Checked = p.Enabled;
+        // ★ 2026-11-07 图片消息支持：视觉能力三态（null = 自动）
+        cmbVision.SelectedIndex = p.SupportsVision switch
+        {
+            true => 1,
+            false => 2,
+            _ => 0
+        };
         txtRemark.Text = p.Remark;
         LastAutoUrl = p.ApiUrl;
         LastAutoModel = p.Model;
@@ -151,7 +160,9 @@ public partial class AiSettingsForm : Form
             Type = AiProviderType.OpenAI,
             ApiUrl = "https://api.openai.com/v1",
             Model = "gpt-4o-mini",
-            Enabled = true
+            Enabled = true,
+            // ★ 2026-11-07 图片消息支持：null = 自动（按模型名判断）
+            SupportsVision = null
         };
         _config.Providers.Add(p);
         RefreshProviderList();
@@ -205,6 +216,13 @@ public partial class AiSettingsForm : Form
         p.ApiKey = txtApiKey.Text; // 不 Trim，保留原样
         p.Model = txtModel.Text.Trim();
         p.Enabled = chkEnabled.Checked;
+        // ★ 2026-11-07 图片消息支持：保存视觉能力设置
+        p.SupportsVision = cmbVision.SelectedIndex switch
+        {
+            1 => true,
+            2 => false,
+            _ => null      // 自动（按模型名判断）
+        };
         p.Remark = txtRemark.Text.Trim();
 
         if (string.IsNullOrEmpty(p.Name))
@@ -240,7 +258,9 @@ public partial class AiSettingsForm : Form
             ApiUrl = preset.ApiUrl,
             Model = preset.Model,
             ApiKey = string.Empty, // 陛下后续填
-            Enabled = true
+            Enabled = true,
+            // ★ 2026-11-07 图片消息支持：预设按模型名自动判断视觉能力
+            SupportsVision = null
         };
 
         if (_config.Providers.Count == 0)
@@ -264,6 +284,8 @@ public partial class AiSettingsForm : Form
         _config.EnableAiLog = chkEnableAiLog.Checked;
         _config.MaxRetryCount = (int)nudRetryCount.Value;
         _config.RetryIntervalSeconds = (int)nudRetryInterval.Value;
+        // ★ 2026-11-07 图片消息支持：单次请求图片上限
+        _config.MaxImagesPerRequest = (int)nudMaxImg.Value;
 
         _configService.SaveConfig(_config);
         // ★ 2026-10-06 同步静态开关（保存后立即生效，不需重启）

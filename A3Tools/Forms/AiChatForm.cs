@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -143,6 +144,14 @@ public partial class AiChatForm : Form
     private const int MaxWindowSize = 25;
     private List<ChatToolCallRecord>? _pendingToolCallLog;
 
+    // ★ 2026-11-07 陛下要求：AI 助理增加图片消息支持
+    /// <summary>待发送图片（还没进消息，发送时才落盘）</summary>
+    private readonly List<PendingImage> _pendingImages = new();
+    /// <summary>单次最多附加图片数（防止误操作一次贴几十张）</summary>
+    private const int MaxPendingImages = 9;
+    /// <summary>预览条悬停提示（组件，不参与布局）</summary>
+    private readonly ToolTip _imgToolTip = new();
+
     public AiChatForm(MainForm? mainForm = null)
     {
         InitializeComponent();
@@ -168,6 +177,12 @@ public partial class AiChatForm : Form
         txtInput.KeyDown += TxtInput_KeyDown;
         btnSend.Click += BtnSend_Click;
         btnCancel.Click += (_, _) => _cts?.Cancel();
+        // ★ 2026-11-07 图片消息支持：选图按钮 + 拖拽放图
+        btnAttachImage.Click += BtnAttachImage_Click;
+        AllowDrop = true;
+        DragEnter += AiChatForm_DragEnter;
+        DragDrop += AiChatForm_DragDrop;
+        pnlInput.AllowDrop = true;
 
         // pnlMessages Dock=None，需手动同步宽度以填满 splitChat.Panel1
         //   ★ 2026-08-29 方案 A：flpMessages Dock=Top，会自动跟 pnlMessagesScroll 宽度走，不需要手同步
@@ -252,6 +267,8 @@ public partial class AiChatForm : Form
         // ★ 2026-10-09 失败重试配置同步到 backend
         _backend.MaxRetries = _config.MaxRetryCount;
         _backend.RetryIntervalSeconds = _config.RetryIntervalSeconds;
+        // ★ 2026-11-07 图片消息支持：单次请求图片上限（图片 token 很贵）
+        _backend.MaxImagesPerRequest = _config.MaxImagesPerRequest;
         cmbProvider.Items.Clear();
         foreach (var p in _config.Providers.Where(x => x.Enabled))
         {
@@ -1022,6 +1039,8 @@ public partial class AiChatForm : Form
         }
 
         Control bubble;
+        // ★ 2026-11-07 图片消息支持：独立的图片条（文字非空时，图片在气泡上方）
+        Control? imgStrip = null;
         if (isUser)
         {
             // ★★★ 用户气泡：Label + Paint 自绘（已验证 100% 可靠）
@@ -1138,6 +1157,18 @@ public partial class AiChatForm : Form
             flashOnce(bubbleTop, bubbleBottom);
         };
             bubble = labelBubble;
+
+            // ★ 2026-11-07 图片消息支持：用户消息带图 → 上方加缩略图条
+            //   ★ 文字为空（只发图）→ 图片条直接当气泡，不再画一个空标签
+            imgStrip = (msg.Images is { Count: > 0 }) ? CreateUserImageStrip(msg.Images, bubbleMaxW) : null;
+            if (imgStrip != null && string.IsNullOrEmpty(displayContent))
+            {
+                // ★ 图片条直接当气泡 → 必须清掉 IMG_STRIP 标记
+                //   否则 LayoutBubbleRow 会把它当成「气泡上方的独立图片条」→ 高度算两遍、位置错乱
+                imgStrip.Tag = null;
+                bubble = imgStrip;
+                imgStrip = null;
+            }
         }
         else
         {
@@ -1379,6 +1410,7 @@ _ = wv2.EnsureCoreWebView2Async();
         };
         // ★ 布局：先把 bubble + avatar 加进 row，row.Layout() 后 PreferredSize 才准确
         if (avatar != null) row.Controls.Add(avatar);
+        if (imgStrip != null) row.Controls.Add(imgStrip);
         row.Controls.Add(bubble);
         row.PerformLayout();  // 强制 layout，让 PreferredSize 准
 
@@ -1560,8 +1592,17 @@ _ = wv2.EnsureCoreWebView2Async();
         int bubbleW = bubble.Width;
         int bubbleH = bubble.Height;
 
-        // row 高度 = max(avatarH, bubbleH)
-        int rowH = Math.Max(avatarH, bubbleH);
+        // ★ 2026-11-07 图片消息支持：找本行的图片条（在气泡上方，靠右对齐）
+        Control? imgStrip = null;
+        foreach (Control c in row.Controls)
+        {
+            if (c.Tag as string == "IMG_STRIP") { imgStrip = c; break; }
+        }
+        int stripH = imgStrip?.Height ?? 0;
+        int stripGap = stripH > 0 ? 6 : 0;
+
+        // row 高度 = max(avatarH, bubbleH + 图片条高)
+        int rowH = Math.Max(avatarH, bubbleH + stripH + stripGap);
         row.Height = rowH;
 
         // 头像位置
@@ -1591,8 +1632,19 @@ _ = wv2.EnsureCoreWebView2Async();
             // AI 气泡靠左：头像 + gap
             bubbleX = avatarX + avatarW + gap;
         }
-        int bubbleY = rowH / 2 - bubbleH / 2;
+        // ★ 图片条存在时：气泡整体下移，给图片条腾出高度
+        int bubbleY = rowH / 2 - bubbleH / 2 + (stripH > 0 ? stripH / 2 + stripGap / 2 : 0);
         bubble.Location = new System.Drawing.Point(bubbleX, bubbleY);
+
+        // ★ 图片条位置：在气泡正上方，右边缘跟气泡右边缘对齐（用户气泡靠右）
+        if (imgStrip != null)
+        {
+            int stripX = isUser
+                ? bubbleX + bubbleW - imgStrip.Width
+                : bubbleX;
+            int stripY = bubbleY - stripH - stripGap;
+            imgStrip.Location = new System.Drawing.Point(Math.Max(sidePadding, stripX), stripY);
+        }
     }
 
     /// <summary>
@@ -1878,6 +1930,16 @@ _ = wv2.EnsureCoreWebView2Async();
 
     private void TxtInput_KeyDown(object? sender, KeyEventArgs e)
     {
+        // ★ 2026-11-07 图片消息支持：Ctrl+V 粘贴图片（截图 / 从资源管理器复制的图片文件）
+        if (e.Control && e.KeyCode == Keys.V)
+        {
+            if (TryGetClipboardImage(out var pasted))
+            {
+                e.SuppressKeyPress = true;   // 别让文本框把图片路径贴进去
+                AddPendingImage(pasted);
+                return;
+            }
+        }
         if (e.KeyCode == Keys.Enter && !e.Shift)
         {
             e.SuppressKeyPress = true;
@@ -1885,11 +1947,229 @@ _ = wv2.EnsureCoreWebView2Async();
         }
     }
 
+    // ============================================================
+    //  ★ 2026-11-07 陛下要求：AI 助理增加图片消息支持
+    // ============================================================
+
+    /// <summary>缩略图缓存（聊天气泡重建时复用，避免反复解密 + 占内存无上限）</summary>
+    private readonly Dictionary<string, Bitmap> _thumbCache = new();
+
+    /// <summary>
+    /// 选择图片文件（支持多选）
+    /// </summary>
+    private void BtnAttachImage_Click(object? sender, EventArgs e)
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = "选择图片",
+            Filter = "图片文件|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp;*.tif;*.tiff|所有文件|*.*",
+            Multiselect = true
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        foreach (var f in dlg.FileNames)
+        {
+            var pend = AiImageAttach.FromFile(f);
+            if (pend != null) AddPendingImage(pend);
+        }
+    }
+
+    /// <summary>
+    /// 从剪贴板取图：先看文件列表（资源管理器里复制的 png/jpg），再看位图（截图工具复制的）
+    /// <para>★ 两者都有文字时优先文字：从 Excel 复制单元格时位图和文本并存，粘文本才对</para>
+    /// </summary>
+    private bool TryGetClipboardImage([NotNullWhen(true)] out PendingImage? image)
+    {
+        image = null;
+        try
+        {
+            if (Clipboard.ContainsFileDropList())
+            {
+                var files = Clipboard.GetFileDropList();
+                foreach (var f in files)
+                {
+                    if (!AiImageAttach.IsImageFile(f)) continue;
+                    var p = AiImageAttach.FromFile(f);
+                    if (p != null) { image = p; return true; }
+                }
+            }
+            if (Clipboard.ContainsImage() && !Clipboard.ContainsText())
+            {
+                var p = AiImageAttach.FromClipboard();
+                if (p != null) { image = p; return true; }
+            }
+        }
+        catch
+        {
+            // 剪贴板被其他程序占用时会抛异常 → 当作没有图片
+        }
+        return false;
+    }
+
+    /// <summary>加入一张待发送图片（超出上限会提示）</summary>
+    private void AddPendingImage(PendingImage img)
+    {
+        if (_pendingImages.Count >= MaxPendingImages)
+        {
+            MessageBox.Show($"一次最多附加 {MaxPendingImages} 张图片", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        _pendingImages.Add(img);
+        RefreshPendingImagePreview();
+    }
+
+    /// <summary>重建「待发送图片」预览条</summary>
+    private void RefreshPendingImagePreview()
+    {
+        flpImgPreview.SuspendLayout();
+        foreach (Control c in flpImgPreview.Controls)
+        {
+            if (c is PictureBox old) old.Image?.Dispose();
+        }
+        flpImgPreview.Controls.Clear();
+
+        foreach (var pend in _pendingImages)
+        {
+            var thumb = AiImageAttach.MakeThumb(pend.JpegBytes);
+            if (thumb == null) continue;
+
+            var pb = new PictureBox
+            {
+                Image = thumb,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Size = new Size(56, 56),
+                Margin = new Padding(4),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White,
+                Cursor = Cursors.Hand,
+                Tag = pend
+            };
+            // ★ 点击缩略图 = 移除该图（拖一个删除按钮到缩略图上反而碍事）
+            pb.Click += (s, _) =>
+            {
+                var target = (s as PictureBox)?.Tag as PendingImage;
+                if (target == null) return;
+                _pendingImages.Remove(target);
+                RefreshPendingImagePreview();
+            };
+            _imgToolTip.SetToolTip(pb, $"{pend.FileName}（{pend.Width}×{pend.Height}）\n点击移除");
+            flpImgPreview.Controls.Add(pb);
+        }
+        flpImgPreview.ResumeLayout(true);
+
+        // ★ 没图就整条藏起来（dock 控件隐藏后不占空间）
+        pnlImgPreview.Visible = _pendingImages.Count > 0;
+    }
+
+    /// <summary>拖拽文件进窗口：只接受图片</summary>
+    private void AiChatForm_DragEnter(object? sender, DragEventArgs e)
+    {
+        e.Effect = DragDropEffects.None;
+        if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Any(AiImageAttach.IsImageFile))
+            e.Effect = DragDropEffects.Copy;
+    }
+
+    /// <summary>放下图片文件 → 加入待发送列表</summary>
+    private void AiChatForm_DragDrop(object? sender, DragEventArgs e)
+    {
+        if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
+        foreach (var f in files)
+        {
+            if (!AiImageAttach.IsImageFile(f)) continue;
+            var pend = AiImageAttach.FromFile(f);
+            if (pend != null) AddPendingImage(pend);
+        }
+    }
+
+    /// <summary>
+    /// 取缩略图（带缓存）：同一张图重建气泡时不再重复解密
+    /// </summary>
+    private Bitmap? GetThumb(ChatImage img, int maxBox)
+    {
+        if (_thumbCache.TryGetValue(img.Id, out var cached) && cached != null) return cached;
+
+        var bmp = AiImageService.LoadThumb(img, maxBox);
+        if (bmp == null) return null;
+
+        // 缓存上限：超了就清（避免长时间使用无限涨内存）
+        // ★ 只丢引用不 Dispose：位图可能还被某个 PictureBox 引用着
+        //   提前 Dispose → 那些气泡直接变成 GDI+ 错误图
+        if (_thumbCache.Count >= 200)
+        {
+            _thumbCache.Clear();
+        }
+        _thumbCache[img.Id] = bmp;
+        return bmp;
+    }
+
+    /// <summary>
+    /// 为「带图片的用户消息」生成缩略图条（放在文字气泡上方，靠右对齐）
+    /// <para>★ 自适应宽度（AutoSize）：宽度跟着缩略图数量走，避免留一大片空白</para>
+    /// </summary>
+    private Control? CreateUserImageStrip(List<ChatImage> images, int maxW)
+    {
+        if (images == null || images.Count == 0) return null;
+
+        var strip = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.RightToLeft,   // ★ 靠右对齐（用户气泡在右边）
+            WrapContents = false,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            Tag = "IMG_STRIP"
+        };
+
+        foreach (var img in images)
+        {
+            var bmp = GetThumb(img, 160);
+            if (bmp == null) continue;   // 文件丢了就跳过，不让整条消息渲染失败
+            strip.Controls.Add(new PictureBox
+            {
+                Image = bmp,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Size = new Size(60, 60),
+                Margin = new Padding(3),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White
+            });
+        }
+
+        if (strip.Controls.Count == 0) return null;
+        // 宽度上限：超过气泡最大宽就换行
+        int maxStripW = Math.Min(maxW, 260 * Math.Max(1, strip.Controls.Count));
+        strip.MaximumSize = new Size(maxStripW, 0);
+        return strip;
+    }
+
+    /// <summary>
+    /// 把待发送图片转成消息附件（Local 策略落盘，其他策略留在内存）
+    /// </summary>
+    private List<ChatImage>? BuildAttachedImages()
+    {
+        if (_pendingImages.Count == 0) return null;
+
+        var list = new List<ChatImage>();
+        bool persist = _config.StoreStrategy == ChatStoreStrategy.Local;
+        foreach (var pend in _pendingImages)
+        {
+            var meta = persist
+                ? AiImageService.Save(pend.JpegBytes, _currentSession.Id, pend.FileName, pend.Width, pend.Height)
+                : AiImageService.SaveToMemory(pend.JpegBytes, pend.FileName, pend.Width, pend.Height);
+            list.Add(meta);
+        }
+        return list;
+    }
+
     private async void BtnSend_Click(object? sender, EventArgs e)
     {
         if (_isSending) return;
         var text = txtInput.Text.Trim();
-        if (string.IsNullOrEmpty(text)) return;
+        // ★ 2026-11-07 图片消息支持：允许「只发图不发字」（图片本身就是提问）
+        if (string.IsNullOrEmpty(text) && _pendingImages.Count == 0) return;
 
         if (_currentProvider == null)
         {
@@ -1902,6 +2182,16 @@ _ = wv2.EnsureCoreWebView2Async();
             return;
         }
 
+        // ★ 2026-11-07 图片消息支持：厂商不支持视觉 → 明确拦下，别让用户白等一个报错
+        if (_pendingImages.Count > 0 && !_currentProvider.EffectiveSupportsVision)
+        {
+            var r = MessageBox.Show(
+                $"厂商「{_currentProvider.Name}」的模型「{_currentProvider.Model}」不支持图片识别，发送图片会失败。\n\n" +
+                "仍要发送吗？（可在「设置」里勾选「支持图片」）",
+                "提示", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (r != DialogResult.Yes) return;
+        }
+
         // 添加用户消息
         var userMsg = new ChatMessage
         {
@@ -1909,10 +2199,19 @@ _ = wv2.EnsureCoreWebView2Async();
             Role = ChatRole.User,
             Content = text
         };
+        // ★ 2026-11-07 图片消息支持：待发图片随消息一起存
+        var attachedImages = BuildAttachedImages();
+        if (attachedImages is { Count: > 0 })
+        {
+            userMsg.Images = attachedImages;
+            _pendingImages.Clear();
+            RefreshPendingImagePreview();
+        }
         _currentSession.Messages.Add(userMsg);
         if (_currentSession.Title == "新会话" || string.IsNullOrEmpty(_currentSession.Title))
         {
-            _currentSession.Title = text.Length > 30 ? text.Substring(0, 30) + "..." : text;
+            string titleSrc = string.IsNullOrEmpty(text) ? "[图片]" : text;
+            _currentSession.Title = titleSrc.Length > 30 ? titleSrc.Substring(0, 30) + "..." : titleSrc;
         }
         _currentSession.LastActiveAtUtc = DateTime.UtcNow;
         _currentSession.ProviderId = _currentProvider.Id;

@@ -32,6 +32,13 @@ public class OpenAiCompatibleBackend : IAiChatBackend
     /// <summary>每次重试前等待秒数，默认 5</summary>
     public int RetryIntervalSeconds { get; set; } = 5;
 
+    /// <summary>
+    /// ★ 2026-11-07 图片消息支持：单次请求最多携带多少张图片
+    /// <para>图片 token 很贵（一张 ≈ 1000+ token），且历史消息里的图会被反复重发。
+    /// 上限用来兜住成本，超出的图按「从新到旧」丢弃。</para>
+    /// </summary>
+    public int MaxImagesPerRequest { get; set; } = 4;
+
     public OpenAiCompatibleBackend()
     {
         _http = new HttpClient
@@ -50,11 +57,7 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         var requestBody = new
         {
             model = provider.Model,
-            messages = messages.Select(m => new
-            {
-                role = RoleToString(m.Role),
-                content = m.Content
-            }).ToArray(),
+            messages = BuildMessagePayloads(messages, MaxImagesPerRequest),
             temperature = 0.7,
             stream = false
         };
@@ -96,11 +99,7 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         var requestBody = new
         {
             model = provider.Model,
-            messages = messages.Select(m => new
-            {
-                role = RoleToString(m.Role),
-                content = m.Content
-            }).ToArray(),
+            messages = BuildMessagePayloads(messages, MaxImagesPerRequest),
             temperature = 0.7,
             stream = true
         };
@@ -160,11 +159,9 @@ public class OpenAiCompatibleBackend : IAiChatBackend
 
         // 复制消息列表（Function Calling 循环会追加 tool 消息）
         // 用 List<object> 避免 anonymous type shape 不一致
+        // ★ 2026-11-07：改用 BuildMessagePayloads（支持多模态 content 数组）
         var msgs = new List<object>();
-        foreach (var m in messages)
-        {
-            msgs.Add(new { role = RoleToString(m.Role), content = m.Content });
-        }
+        msgs.AddRange(BuildMessagePayloads(messages, MaxImagesPerRequest));
 
         const int maxLoops = 30; // 防止 AI 无限循环（2026-10-06 5→15→30：多步骤 Skill + 续命器注入需要更多轮次）
         var sb = new StringBuilder();
@@ -552,6 +549,72 @@ public class OpenAiCompatibleBackend : IAiChatBackend
         ChatRole.Assistant => "assistant",
         _ => "user"
     };
+
+    /// <summary>
+    /// ★ 2026-11-07 图片消息支持：把 ChatMessage 列表转成 OpenAI 兼容的 message 数组
+    /// <para>无图时 content 是纯字符串（与原来完全一致，老厂商不受影响）；</para>
+    /// <para>有图时 content 变成多模态数组：</para>
+    /// <code>
+    /// [ {"type":"text","text":"..."},
+    ///   {"type":"image_url","image_url":{"url":"data:image/jpeg;base64,..."}} ]
+    /// </code>
+    /// <para>★ 兼容策略：图片额度从「最新消息」往回分配，旧消息的图会被先丢弃
+    /// （历史图每轮都要重发，token 成本高）。</para>
+    /// </summary>
+    private static List<object> BuildMessagePayloads(List<ChatMessage> messages, int maxImages)
+    {
+        var result = new List<object>();
+        if (messages == null || messages.Count == 0) return result;
+
+        // 1) 先按「新 → 旧」分配图片额度
+        var quota = new Dictionary<string, int>();
+        int budget = Math.Max(0, maxImages);
+        for (int i = messages.Count - 1; i >= 0 && budget > 0; i--)
+        {
+            var m = messages[i];
+            if (m?.Images == null || m.Images.Count == 0) continue;
+            int take = Math.Min(budget, m.Images.Count);
+            quota[m.Id] = take;
+            budget -= take;
+        }
+
+        // 2) 按原顺序构造 payload
+        foreach (var m in messages)
+        {
+            if (m == null) continue;
+
+            int allowed = quota.TryGetValue(m.Id, out var q) ? q : 0;
+            if (allowed <= 0 || m.Images == null || m.Images.Count == 0)
+            {
+                // 无图 → 纯文本（保持原行为）
+                result.Add(new { role = RoleToString(m.Role), content = m.Content });
+                continue;
+            }
+
+            var parts = new List<object>();
+            if (!string.IsNullOrEmpty(m.Content))
+                parts.Add(new { type = "text", text = m.Content });
+
+            int taken = 0;
+            foreach (var img in m.Images)
+            {
+                if (taken >= allowed) break;
+                if (img == null) continue;
+                string? url = AiImageService.BuildDataUrl(img);
+                if (string.IsNullOrEmpty(url)) continue;   // 文件丢了就跳过，不让整个请求炸掉
+                parts.Add(new { type = "image_url", image_url = new { url } });
+                taken++;
+            }
+
+            // 图片全丢（文件缺失）→ 退化成纯文本
+            if (taken == 0)
+                result.Add(new { role = RoleToString(m.Role), content = m.Content });
+            else
+                result.Add(new { role = RoleToString(m.Role), content = parts });
+        }
+
+        return result;
+    }
 
     private static string? ExtractErrorMessage(string body)
     {

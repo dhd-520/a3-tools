@@ -177,7 +177,9 @@ public class LocalChatStore : IChatStore
                 TokensUsed = m.TokensUsed,
                 IsError = m.IsError,
                 ErrorMessage = m.ErrorMessage,
-                ToolCalls = m.ToolCalls
+                ToolCalls = m.ToolCalls,
+                // ★ 2026-11-07 图片消息支持：图片元数据（本体在 DATA/ai_chat/images/）
+                Images = m.Images
             }).ToList();
 
             string json = JsonSerializer.Serialize(toSave, _jsonOptions);
@@ -350,6 +352,9 @@ public class LocalChatStore : IChatStore
 
             // 2. 删 messages 文件
             DeleteMessagesFile(sessionId);
+
+            // ★ 2026-11-07：连带删掉该会话的图片目录（不然磁盘会一直涨）
+            AiImageService.DeleteSessionImages(sessionId);
         }
     }
 
@@ -367,6 +372,14 @@ public class LocalChatStore : IChatStore
                     try { File.Delete(f); } catch { }
                 }
             }
+            // ★ 2026-11-07：连带删掉所有会话图片
+            try
+            {
+                string imagesDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                               AiImageService.ImagesFolder.Replace('/', Path.DirectorySeparatorChar));
+                if (Directory.Exists(imagesDir)) Directory.Delete(imagesDir, true);
+            }
+            catch { }
         }
     }
 

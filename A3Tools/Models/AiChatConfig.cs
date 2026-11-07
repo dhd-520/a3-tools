@@ -63,4 +63,11 @@ public class AiChatConfig
     /// <para>每次重试前等待的秒数，默认 5 秒</para>
     /// </summary>
     public int RetryIntervalSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// ★ 2026-11-07 陛下要求：AI 助理增加图片消息支持
+    /// <para>单次请求最多携带多少张图片（图片 token 很贵：一张 ≈ 1000+ token）</para>
+    /// <para>超出时按「从新到旧」丢弃旧图；0 = 不带图</para>
+    /// </summary>
+    public int MaxImagesPerRequest { get; set; } = 4;
 }

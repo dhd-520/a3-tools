@@ -57,6 +57,13 @@ public class ChatMessage
     ///   持久化到 LocalChatStore，加载时由 CreateBubbleRow 渲染成 cards 进 #tools-stream
     /// </summary>
     public List<ChatToolCallRecord>? ToolCalls { get; set; }
+
+    /// <summary>
+    /// 随消息携带的图片（★ 2026-11-07 陛下要求：AI 助理增加图片消息支持）
+    /// <para>仅 User 消息会有。图片本体落盘，见 <see cref="ChatImage.StoredPath"/>；</para>
+    /// <para>这里只存元数据（文件名 / MIME / 尺寸 / 路径），不存 base64。</para>
+    /// </summary>
+    public List<ChatImage>? Images { get; set; }
 }
 
 /// <summary>

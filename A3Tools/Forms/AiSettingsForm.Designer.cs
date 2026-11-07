@@ -36,6 +36,8 @@ partial class AiSettingsForm
         this.txtRemark = new System.Windows.Forms.TextBox();
         this.lblRemark = new System.Windows.Forms.Label();
         this.chkEnabled = new System.Windows.Forms.CheckBox();
+        this.lblVision = new System.Windows.Forms.Label();
+        this.cmbVision = new System.Windows.Forms.ComboBox();
         this.txtModel = new System.Windows.Forms.TextBox();
         this.lblModel = new System.Windows.Forms.Label();
         this.txtApiKey = new System.Windows.Forms.TextBox();
@@ -63,6 +65,8 @@ partial class AiSettingsForm
         this.nudRetryCount = new System.Windows.Forms.NumericUpDown();
         this.lblRetryInterval = new System.Windows.Forms.Label();
         this.nudRetryInterval = new System.Windows.Forms.NumericUpDown();
+        this.lblMaxImg = new System.Windows.Forms.Label();
+        this.nudMaxImg = new System.Windows.Forms.NumericUpDown();
         this.cmbStoreStrategy = new System.Windows.Forms.ComboBox();
         this.lblStoreStrategy = new System.Windows.Forms.Label();
         this.pnlHeader.SuspendLayout();
@@ -74,6 +78,7 @@ partial class AiSettingsForm
         ((System.ComponentModel.ISupportInitialize)(this.nudTemperature)).BeginInit();
         ((System.ComponentModel.ISupportInitialize)(this.nudMaxContext)).BeginInit();
         ((System.ComponentModel.ISupportInitialize)(this.nudRetentionDays)).BeginInit();
+        ((System.ComponentModel.ISupportInitialize)(this.nudMaxImg)).BeginInit();
         this.SuspendLayout();
         //
         // pnlHeader
@@ -256,6 +261,8 @@ partial class AiSettingsForm
         this.grpProviderEdit.Controls.Add(this.txtRemark);
         this.grpProviderEdit.Controls.Add(this.lblRemark);
         this.grpProviderEdit.Controls.Add(this.chkEnabled);
+        this.grpProviderEdit.Controls.Add(this.lblVision);
+        this.grpProviderEdit.Controls.Add(this.cmbVision);
         this.grpProviderEdit.Controls.Add(this.txtModel);
         this.grpProviderEdit.Controls.Add(this.lblModel);
         this.grpProviderEdit.Controls.Add(this.txtApiKey);
@@ -315,6 +322,33 @@ partial class AiSettingsForm
         this.chkEnabled.TabIndex = 10;
         this.chkEnabled.Text = "启用";
         this.chkEnabled.UseVisualStyleBackColor = true;
+        //
+        // lblVision
+        //  ★ 2026-11-07 图片消息支持：该厂商模型能否看图
+        //
+        this.lblVision.AutoSize = true;
+        this.lblVision.Location = new System.Drawing.Point(280, 66);
+        this.lblVision.Name = "lblVision";
+        this.lblVision.Size = new System.Drawing.Size(40, 20);
+        this.lblVision.TabIndex = 13;
+        this.lblVision.Text = "视觉：";
+        //
+        // cmbVision
+        //  ★ 2026-11-07 图片消息支持：三态（自动 / 支持 / 不支持）
+        //    自动 = 按模型名判断（gpt-4o / qwen-vl / glm-4v … 认得出，认不出就当不支持）
+        //
+        this.cmbVision.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+        this.cmbVision.Font = new Font("Microsoft YaHei UI", 9F);
+        this.cmbVision.FormattingEnabled = true;
+        this.cmbVision.Items.AddRange(new object[] {
+            "自动（按模型判断）",
+            "支持图片",
+            "不支持图片"});
+        this.cmbVision.Location = new System.Drawing.Point(322, 62);
+        this.cmbVision.Margin = new Padding(3, 0, 3, 0);
+        this.cmbVision.Name = "cmbVision";
+        this.cmbVision.Size = new System.Drawing.Size(154, 25);
+        this.cmbVision.TabIndex = 14;
         //
         // txtModel
         //
@@ -425,6 +459,8 @@ partial class AiSettingsForm
         this.grpGlobal.Controls.Add(this.nudRetryCount);
         this.grpGlobal.Controls.Add(this.lblRetryInterval);
         this.grpGlobal.Controls.Add(this.nudRetryInterval);
+        this.grpGlobal.Controls.Add(this.lblMaxImg);
+        this.grpGlobal.Controls.Add(this.nudMaxImg);
         this.grpGlobal.Controls.Add(this.cmbStoreStrategy);
         this.grpGlobal.Controls.Add(this.lblStoreStrategy);
         this.grpGlobal.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold);
@@ -509,6 +545,28 @@ partial class AiSettingsForm
         this.nudRetryInterval.TabIndex = 17;
         this.nudRetryInterval.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
         this.nudRetryInterval.Value = new decimal(new int[] { 5, 0, 0, 0 });
+        //
+        // lblMaxImg
+        //  ★ 2026-11-07 图片消息支持：单次请求最多带几张图（图片 token 很贵）
+        //
+        this.lblMaxImg.AutoSize = true;
+        this.lblMaxImg.Location = new System.Drawing.Point(330, 194);
+        this.lblMaxImg.Name = "lblMaxImg";
+        this.lblMaxImg.Size = new System.Drawing.Size(85, 20);
+        this.lblMaxImg.TabIndex = 18;
+        this.lblMaxImg.Text = "图片上限：";
+        //
+        // nudMaxImg
+        //  ★ 2026-11-07 图片消息支持：单次请求图片数量上限
+        //
+        this.nudMaxImg.Location = new System.Drawing.Point(420, 192);
+        this.nudMaxImg.Maximum = new decimal(new int[] { 20, 0, 0, 0 });
+        this.nudMaxImg.Minimum = new decimal(new int[] { 0, 0, 0, 0 });
+        this.nudMaxImg.Name = "nudMaxImg";
+        this.nudMaxImg.Size = new System.Drawing.Size(60, 27);
+        this.nudMaxImg.TabIndex = 19;
+        this.nudMaxImg.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+        this.nudMaxImg.Value = new decimal(new int[] { 4, 0, 0, 0 });
         //
         // txtSystemPromptAppend
         //
@@ -647,6 +705,7 @@ partial class AiSettingsForm
         ((System.ComponentModel.ISupportInitialize)(this.nudTemperature)).EndInit();
         ((System.ComponentModel.ISupportInitialize)(this.nudMaxContext)).EndInit();
         ((System.ComponentModel.ISupportInitialize)(this.nudRetentionDays)).EndInit();
+        ((System.ComponentModel.ISupportInitialize)(this.nudMaxImg)).EndInit();
         this.ResumeLayout(false);
     }
 
@@ -671,6 +730,8 @@ partial class AiSettingsForm
     private System.Windows.Forms.TextBox txtRemark;
     private System.Windows.Forms.Label lblRemark;
     private System.Windows.Forms.CheckBox chkEnabled;
+    private System.Windows.Forms.Label lblVision;
+    private System.Windows.Forms.ComboBox cmbVision;
     private System.Windows.Forms.TextBox txtModel;
     private System.Windows.Forms.Label lblModel;
     private System.Windows.Forms.TextBox txtApiKey;
@@ -697,6 +758,8 @@ partial class AiSettingsForm
     private System.Windows.Forms.NumericUpDown nudRetryCount;
     private System.Windows.Forms.Label lblRetryInterval;
     private System.Windows.Forms.NumericUpDown nudRetryInterval;
+    private System.Windows.Forms.Label lblMaxImg;
+    private System.Windows.Forms.NumericUpDown nudMaxImg;
     private System.Windows.Forms.Label lblRetention;
     private System.Windows.Forms.ComboBox cmbStoreStrategy;
     private System.Windows.Forms.Label lblStoreStrategy;
