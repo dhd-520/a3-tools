@@ -2020,44 +2020,80 @@ _ = wv2.EnsureCoreWebView2Async();
     /// <summary>重建「待发送图片」预览条</summary>
     private void RefreshPendingImagePreview()
     {
-        flpImgPreview.SuspendLayout();
-        foreach (Control c in flpImgPreview.Controls)
+        // ★ 2026-11-10 修：重建预览条会抛 ArgumentException: Parameter is not valid
+        //   根因：原写法「先 Dispose 缩略图 → 后 Controls.Clear()」。PictureBox 还引用着
+        //   已释放的 Bitmap，只要布局或重绘算一次尺寸（Image.Size /
+        //   PictureBox.GetPreferredSize）就抛 ArgumentException，堆栈正好落在
+        //   Controls.Clear() 上，看着就像「清空这行报错」。
+        //   （删除图片、发送图片后都会走到这里，所以两处都炸。）
+        //   改法：先把控件移出容器 → Image 置 null 断开引用 → 再释放位图。
+        try
         {
-            if (c is PictureBox old) old.Image?.Dispose();
-        }
-        flpImgPreview.Controls.Clear();
+            flpImgPreview.SuspendLayout();
 
-        foreach (var pend in _pendingImages)
+            // ① 先移出容器（此时位图还有效，布局/重绘不会碰到已释放的对象）
+            var olds = flpImgPreview.Controls.Cast<Control>().OfType<PictureBox>().ToList();
+            flpImgPreview.Controls.Clear();
+
+            // ② 再释放：先断开引用，再还位图
+            foreach (var old in olds)
+            {
+                var img = old.Image;
+                old.Image = null;                       // ★ 断开引用：期间的任何重绘都安全
+                try { _imgToolTip.SetToolTip(old, null); } catch { }
+                try { img?.Dispose(); } catch { }
+                // 控件可能正在它自己的 Click 事件里被移除，直接 Dispose 会在
+                // WndProc 返回时撞上「句柄已销毁」，推到消息循环后面再释放
+                try { BeginInvoke(new Action(() => { try { old.Dispose(); } catch { } })); } catch { }
+            }
+
+            foreach (var pend in _pendingImages)
+            {
+                var thumb = AiImageAttach.MakeThumb(pend.JpegBytes);
+                if (thumb == null) continue;
+
+                var pb = new PictureBox
+                {
+                    Image = thumb,
+                    SizeMode = PictureBoxSizeMode.Zoom,
+                    Size = new Size(56, 56),
+                    Margin = new Padding(4),
+                    BorderStyle = BorderStyle.FixedSingle,
+                    BackColor = Color.White,
+                    Cursor = Cursors.Hand,
+                    Tag = pend
+                };
+                // ★ 点击缩略图 = 移除该图（拖一个删除按钮到缩略图上反而碍事）
+                pb.Click += (s, _) =>
+                {
+                    var target = (s as PictureBox)?.Tag as PendingImage;
+                    if (target == null) return;
+                    _pendingImages.Remove(target);
+                    RefreshPendingImagePreview();
+                };
+                _imgToolTip.SetToolTip(pb, $"{pend.FileName}（{pend.Width}×{pend.Height}）\n点击移除");
+                flpImgPreview.Controls.Add(pb);
+            }
+            flpImgPreview.ResumeLayout(true);
+
+            // ★ 没图就整条藏起来（dock 控件隐藏后不占空间）
+            pnlImgPreview.Visible = _pendingImages.Count > 0;
+        }
+        catch (Exception ex)
         {
-            var thumb = AiImageAttach.MakeThumb(pend.JpegBytes);
-            if (thumb == null) continue;
-
-            var pb = new PictureBox
+            // 预览条出问题不该把整个聊天窗带崩；顺便落一份日志，便于事后定位
+            System.Diagnostics.Debug.WriteLine($"[AI Chat] 刷新图片预览条失败: {ex}");
+            try
             {
-                Image = thumb,
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Size = new Size(56, 56),
-                Margin = new Padding(4),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.White,
-                Cursor = Cursors.Hand,
-                Tag = pend
-            };
-            // ★ 点击缩略图 = 移除该图（拖一个删除按钮到缩略图上反而碍事）
-            pb.Click += (s, _) =>
-            {
-                var target = (s as PictureBox)?.Tag as PendingImage;
-                if (target == null) return;
-                _pendingImages.Remove(target);
-                RefreshPendingImagePreview();
-            };
-            _imgToolTip.SetToolTip(pb, $"{pend.FileName}（{pend.Width}×{pend.Height}）\n点击移除");
-            flpImgPreview.Controls.Add(pb);
+                string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DATA", "logs");
+                Directory.CreateDirectory(logDir);
+                File.AppendAllText(
+                    Path.Combine(logDir, "ai-image-error.log"),
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}\r\n\r\n",
+                    Encoding.UTF8);
+            }
+            catch { }
         }
-        flpImgPreview.ResumeLayout(true);
-
-        // ★ 没图就整条藏起来（dock 控件隐藏后不占空间）
-        pnlImgPreview.Visible = _pendingImages.Count > 0;
     }
 
     /// <summary>拖拽文件进窗口：只接受图片</summary>
