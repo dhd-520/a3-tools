@@ -151,6 +151,8 @@ public partial class AiChatForm : Form
     private const int MaxPendingImages = 9;
     /// <summary>预览条悬停提示（组件，不参与布局）</summary>
     private readonly ToolTip _imgToolTip = new();
+    /// <summary>★ 2026-11-10：预览条重建出错时只弹一次提示（避免反复刷屏），并落日志</summary>
+    private bool _imgPreviewErrorShown;
 
     public AiChatForm(MainForm? mainForm = null)
     {
@@ -2093,6 +2095,19 @@ _ = wv2.EnsureCoreWebView2Async();
                     Encoding.UTF8);
             }
             catch { }
+
+            // ★ 让问题可见：只弹一次，不然用户只看到「预览条不刷新」却不知道出了啥事
+            if (!_imgPreviewErrorShown)
+            {
+                _imgPreviewErrorShown = true;
+                try
+                {
+                    MessageBox.Show(
+                        "刷新图片预览条时出错（不影响聊天，已记录到 DATA/logs/ai-image-error.log）。\n\n" + ex.Message,
+                        "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch { }
+            }
         }
     }
 
