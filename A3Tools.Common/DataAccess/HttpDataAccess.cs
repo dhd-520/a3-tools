@@ -26,6 +26,13 @@ namespace A3Tools.Common.DataAccess
         private readonly string _serverPublicKey; // 服务端 RSA 公钥
         private readonly HttpClient _httpClient;
 
+        /// <summary>
+        /// ★ 2026-11-12：最近一次失败的详细原因。
+        /// 以前 TestConnectionAsync 只返回 bool、错误被彻底吞掉，调用方无从判断
+        /// 「地址写错了 / 密钥不对 / 网络不通 / 服务端 500」。
+        /// </summary>
+        public string? LastError { get; private set; }
+
         public DataAccessMode Mode => DataAccessMode.Http;
         public string DisplayName { get; }
 
@@ -44,10 +51,13 @@ namespace A3Tools.Common.DataAccess
             try
             {
                 var result = await ExecuteQueryAsync("SELECT 1", ct);
+                if (!result.Success) LastError = result.Message;
                 return result.Success;
             }
-            catch
+            catch (Exception ex)
             {
+                // 以前这里是 catch { return false; }，错误信息全丢
+                LastError = DescribeException(ex);
                 return false;
             }
         }
@@ -81,7 +91,13 @@ namespace A3Tools.Common.DataAccess
         public async Task<List<TableInfo>> GetTablesAsync(string? schemaFilter = null, CancellationToken ct = default)
         {
             var result = await SendRequestAsync("tables", "", ct, schema: schemaFilter);
-            if (!result.Success || result.Tables.Count == 0) return new List<TableInfo>();
+            if (!result.Success)
+            {
+                // 失败原因记下来，别让调用方只拿到一个空 List
+                LastError = result.Message;
+                return new List<TableInfo>();
+            }
+            if (result.Tables.Count == 0) return new List<TableInfo>();
 
             var tables = new List<TableInfo>();
             var table = result.Tables[0];
@@ -100,7 +116,12 @@ namespace A3Tools.Common.DataAccess
         public async Task<List<ColumnInfo>> GetTableSchemaAsync(string tableName, CancellationToken ct = default)
         {
             var result = await SendRequestAsync("schema", "", ct, tableName: tableName);
-            if (!result.Success || result.Tables.Count == 0) return new List<ColumnInfo>();
+            if (!result.Success)
+            {
+                LastError = result.Message;
+                return new List<ColumnInfo>();
+            }
+            if (result.Tables.Count == 0) return new List<ColumnInfo>();
 
             var columns = new List<ColumnInfo>();
             var table = result.Tables[0];
@@ -167,10 +188,11 @@ namespace A3Tools.Common.DataAccess
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    LastError = $"HTTP {(int)response.StatusCode}: {responseJson}";
                     return new QueryResult
                     {
                         Success = false,
-                        Message = $"HTTP {(int)response.StatusCode}: {responseJson}"
+                        Message = LastError
                     };
                 }
 
@@ -181,10 +203,12 @@ namespace A3Tools.Common.DataAccess
                 // 错误响应（明文 JSON）
                 if (root.TryGetProperty("success", out var successProp) && !successProp.GetBoolean())
                 {
+                    string msg = root.TryGetProperty("message", out var msgProp) ? msgProp.GetString() ?? "Unknown error" : "Unknown error";
+                    LastError = msg;
                     return new QueryResult
                     {
                         Success = false,
-                        Message = root.TryGetProperty("message", out var msgProp) ? msgProp.GetString() ?? "Unknown error" : "Unknown error"
+                        Message = msg
                     };
                 }
 
@@ -219,8 +243,32 @@ namespace A3Tools.Common.DataAccess
             }
             catch (Exception ex)
             {
-                return new QueryResult { Success = false, Message = ex.Message };
+                // ★ 以前只写 ex.Message，但 .NET 的 HttpRequestException.Message
+                //   是 "The SSL connection could not be established, see inner exception."
+                //   真正原因（SocketException 10054 等）在 InnerException 里，被丢了。
+                //   展开整条异常链，陛下才能一眼看出是网络断了还是密钥错了。
+                LastError = DescribeException(ex);
+                return new QueryResult { Success = false, Message = LastError };
             }
+        }
+
+        /// <summary>
+        /// 把异常链压成一行可读文本：Type: message → Type: message ...
+        /// .NET 默认 Message 常常只说 "see inner exception"，不给用户看没意义。
+        /// </summary>
+        private static string DescribeException(Exception ex)
+        {
+            var sb = new StringBuilder();
+            var cur = ex;
+            int depth = 0;
+            while (cur != null && depth < 6)
+            {
+                if (depth > 0) sb.Append(" → ");
+                sb.Append(cur.GetType().Name).Append(": ").Append(cur.Message);
+                cur = cur.InnerException;
+                depth++;
+            }
+            return sb.ToString();
         }
 
         /// <summary>

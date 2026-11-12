@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Drawing;
 using System.Collections.Generic;
 using System.Linq;
@@ -315,7 +315,7 @@ public partial class CrossDbCopyAppChartForm : Form
 
         if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text))
         {
-            MessageBox.Show("源数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ProxyHelper.BuildConnErrorMessage("源"), "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
             progressBar.Value = 0;
             return;
@@ -326,7 +326,7 @@ public partial class CrossDbCopyAppChartForm : Form
 
         if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text))
         {
-            MessageBox.Show("目标数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ProxyHelper.BuildConnErrorMessage("目标"), "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
             progressBar.Value = 0;
             return;

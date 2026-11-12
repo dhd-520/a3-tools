@@ -18,6 +18,11 @@ namespace A3Tools.Common.DataAccess
         public DataAccessMode Mode => DataAccessMode.Direct;
         public string DisplayName { get; }
 
+        /// <summary>
+        /// ★ 2026-11-12：最近一次失败的详细原因（供 UI 展示，避免只显示「连接失败」）
+        /// </summary>
+        public string? LastError { get; private set; }
+
         public DirectDataAccess(string connStr, string displayName = "")
         {
             _connStr = connStr;
@@ -30,10 +35,13 @@ namespace A3Tools.Common.DataAccess
             {
                 using var conn = new SqlConnection(_connStr);
                 await conn.OpenAsync(ct);
+                LastError = null;
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                // 以前这里是 catch { return false; }，错误信息全丢
+                LastError = ex.Message;
                 return false;
             }
         }

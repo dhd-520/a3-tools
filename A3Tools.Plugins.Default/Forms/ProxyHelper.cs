@@ -123,8 +123,33 @@ internal static class ProxyHelper
     /// </summary>
     public static async Task<bool> TestConnectionAsync(IDataAccess? dataAccess)
     {
-        if (dataAccess == null) return false;
-        return await dataAccess.TestConnectionAsync();
+        if (dataAccess == null) { LastError = "数据访问对象为空"; return false; }
+        bool ok = await dataAccess.TestConnectionAsync();
+        // ★ 2026-11-12：记下失败原因。以前只有 bool，调用方只能弹
+        //   「连接失败！请检查连接信息。」这种等于没说的提示。
+        LastError = ok ? null : (dataAccess.LastError ?? "未知原因");
+        return ok;
+    }
+
+    /// <summary>
+    /// ★ 2026-11-12：最近一次 TestConnectionAsync 的失败原因
+    /// </summary>
+    public static string? LastError { get; private set; }
+
+    /// <summary>
+    /// ★ 2026-11-12：直连模式的分支自己 catch 了异常，需要手动把原因记下来
+    /// （否则 BuildConnErrorMessage 拿不到原因）
+    /// </summary>
+    public static void SetLastError(string? error) => LastError = error;
+
+    /// <summary>
+    /// ★ 2026-11-12：生成带具体原因的连接失败提示（供 8 个跨库复制窗体复用）
+    /// </summary>
+    public static string BuildConnErrorMessage(string which)
+    {
+        return string.IsNullOrWhiteSpace(LastError)
+            ? $"{which}数据库连接失败！请检查连接信息。"
+            : $"{which}数据库连接失败！\r\n\r\n原因：{LastError}";
     }
 
     /// <summary>

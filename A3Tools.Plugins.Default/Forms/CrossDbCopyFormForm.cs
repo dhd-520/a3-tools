@@ -547,7 +547,7 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
 
         if (!await TestConnectionAsync(txtSourceServer.Text, txtSourceDbName.Text, txtSourceUser.Text, txtSourcePassword.Text, _srcAccount))
         {
-            MessageBox.Show("源数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ProxyHelper.BuildConnErrorMessage("源"), "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
             progressBar.Value = 0;
             return;
@@ -558,7 +558,7 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
 
         if (!await TestConnectionAsync(txtTargetServer.Text, txtTargetDbName.Text, txtTargetUser.Text, txtTargetPassword.Text, _tgtAccount))
         {
-            MessageBox.Show("目标数据库连接失败！请检查连接信息。", "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ProxyHelper.BuildConnErrorMessage("目标"), "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             lblProgress.Text = "";
             progressBar.Value = 0;
             return;
@@ -609,6 +609,8 @@ ORDER BY F.NAME,B.NAME,ISNULL(G3.NAME+'/','')+ISNULL(G2.NAME+'/','')+ISNULL(G1.N
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("连接测试失败: " + ex.Message);
+                // ★ 2026-11-12：记下原因，否则弹窗只能说「请检查连接信息」
+                ProxyHelper.SetLastError(ex.Message);
                 return false;
             }
         });

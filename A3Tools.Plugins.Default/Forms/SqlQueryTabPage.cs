@@ -678,13 +678,16 @@ public partial class SqlQueryTabPage : UserControl
     {
         try
         {
-            AppendMessage($"[{DateTime.Now:HH:mm:ss}] 已连接（Http 代理：{_parent.CurrentDataAccess.DisplayName}）\n");
+            // ★ 2026-11-12：不能先说「已连接」—— 代理模式下这行是在请求发出前就写的，
+            //   网络不通时用户会看到「已连接」然后紧接着报错，自相矛盾。
+            //   改成先说「正在连接」，成功后才说「已连接」。
+            AppendMessage($"[{DateTime.Now:HH:mm:ss}] 正在连接（Http 代理：{_parent.CurrentDataAccess.DisplayName}）...\n");
 
             var result = await _parent.CurrentDataAccess.ExecuteBatchAsync(sql, _cts.Token);
 
             if (!result.Success)
             {
-                AppendMessage($"[{DateTime.Now:HH:mm:ss}] {result.Message}\n");
+                AppendMessage($"[{DateTime.Now:HH:mm:ss}] [错误] {result.Message}\n");
                 _statusReporter?.Invoke($"✗ {result.Message}", sw.ElapsedMilliseconds, 0, ExecStatus.Failure);
                 SetTabStatusIcon(ExecStatus.Failure);
                 tabResultSwitcher.SelectedTab = tabMessages;

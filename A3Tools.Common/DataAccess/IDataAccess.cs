@@ -28,6 +28,13 @@ namespace A3Tools.Common.DataAccess
         Task<bool> TestConnectionAsync(CancellationToken ct = default);
 
         /// <summary>
+        /// ★ 2026-11-12：最近一次失败的详细原因（没有就为 null）。
+        /// 以前各实现只返回 bool / 把异常藏进 QueryResult.Message，
+        /// 调用方拿不到原因 → 用户只看到「连接失败」四个字，没有任何可排查的信息。
+        /// </summary>
+        string? LastError { get; }
+
+        /// <summary>
         /// 执行查询，返回多结果集
         /// </summary>
         Task<QueryResult> ExecuteQueryAsync(string sql, CancellationToken ct = default);

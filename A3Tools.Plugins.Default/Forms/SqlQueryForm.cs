@@ -240,7 +240,18 @@ public partial class SqlQueryForm : Form
             if (_account.ConnectionMode == A3Tools.Common.DataAccess.DataAccessMode.Http)
             {
                 var dbResult = await CurrentDataAccess.ExecuteQueryAsync("SELECT name FROM sys.databases WHERE state = 0 ORDER BY name");
-                if (dbResult.Success && dbResult.Tables.Count > 0)
+
+                // ★ 2026-11-12 陛下反馈：代理模式连「忠赢五金机」时既没报错信息也没连接成功。
+                //   根因：这里只判 dbResult.Success，失败时把 dbResult.Message 整个丢掉，
+                //         下拉框清空就 return —— 界面零反馈，看起来像“还在加载”。
+                //   修法：失败时把原因显示到状态栏 + 消息页，并弹窗说明。
+                if (!dbResult.Success)
+                {
+                    ReportProxyError(dbResult.Message);
+                    return;
+                }
+
+                if (dbResult.Tables.Count > 0)
                 {
                     foreach (var row in dbResult.Tables[0].Rows)
                     {
@@ -284,6 +295,7 @@ public partial class SqlQueryForm : Form
         catch (Exception ex)
         {
             lblStatus.Text = "数据库列表加载失败";
+            lblStatus.ForeColor = Color.FromArgb(251, 67, 42);   // 与 UpdateStatus 的失败红一致
             GetActiveTab()?.AppendMessage($"[警告] 数据库列表加载失败: {ex.Message}\n");
         }
         finally
@@ -1206,6 +1218,59 @@ public partial class SqlQueryForm : Form
             });
         }
     }
+
+    // ============================================
+    // 代理连接失败报错
+    // ============================================
+
+    /// <summary>
+    /// ★ 2026-11-12 代理连接失败统一报错出口。
+    /// <para>以前 Http 模式失败时 dbResult.Message 被整个丢弃，界面零反馈，
+    /// 陛下看到的就是“既没报错信息也没连接成功”。</para>
+    /// <para>现在：状态栏标红 + 消息页写明原因 + 弹窗一次（不刷屏）。</para>
+    /// </summary>
+    private void ReportProxyError(string? message)
+    {
+        string detail = string.IsNullOrWhiteSpace(message) ? "未知原因" : message!.Trim();
+
+        // ★ 可能从 await 之后的续体进来（不是 UI 线程）→ 统一 marshal 回 UI 线程
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(new Action(() => ReportProxyError(detail))); } catch { }
+            return;
+        }
+
+        string endpoint = _account.HttpEndpoint;
+
+        // 1. 状态栏（红字，一眼可见）
+        lblStatus.Text = "代理连接失败";
+        lblStatus.ForeColor = Color.FromArgb(251, 67, 42);   // #fb432a 与 UpdateStatus 一致
+        lblStatus.BackColor = SystemColors.Control;
+
+        // 2. 消息页（详情留档，可复制）
+        GetActiveTab()?.AppendMessage(
+            $"[{DateTime.Now:HH:mm:ss}] [错误] 代理连接失败（{endpoint}）\r\n{detail}\r\n\r\n");
+
+        // 3. 弹窗（只弹一次，避免刷新列表时刷屏）
+        if (!_proxyErrorShown)
+        {
+            _proxyErrorShown = true;
+            try
+            {
+                MessageBox.Show(
+                    $"连接代理服务失败。\r\n\r\n" +
+                    $"账套：{_account.Code} {_account.Name}\r\n" +
+                    $"地址：{endpoint}\r\n\r\n" +
+                    $"原因：{detail}\r\n\r\n" +
+                    $"详情已写入下方「消息」页。",
+                    "代理连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>代理连接失败弹窗只提示一次（重复刷新不刷屏）</summary>
+    private bool _proxyErrorShown;
 
     // ============================================
     // 状态回调（由 SqlQueryTabPage 调用）
