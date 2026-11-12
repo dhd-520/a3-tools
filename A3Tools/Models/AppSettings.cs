@@ -182,4 +182,18 @@ public class AppSettings
     //   配在 DATA/settings.json：陛下可用文本编辑器改，或后续加 AI 助理设置面板 UI。
     //   配合 CopyXxxAction 的二次确认（陛下必须输入目标账套编码）→ 双重保护。
     public List<string> CrossDbCopyWhitelist { get; set; } = new();
+
+    // ===== ★ 2026-11-12 全局界面字体 =====
+    //   31 个窗体在 Designer 里硬编码了 570 处字体，Form.Font 继承链失效，
+    //   所以改字体只能运行时遍历控件树（见 Services/UiFontManager.cs）。
+    //   字号用「缩放系数」而不是绝对字号 —— 保住 9/10/11/14f 的层级关系。
+
+    /// <summary>界面字体族名（空 = 不换字体，沿用各控件原来的字体）</summary>
+    public string UiFontFamily { get; set; } = string.Empty;
+
+    /// <summary>界面字号缩放系数（1.0 = 保持原字号；0.9 紧凑 / 1.15 宽松 / 1.3 大号）</summary>
+    public float UiFontSizeScale { get; set; } = 1.0f;
+
+    /// <summary>私有字体文件路径（TTF / OTF / TTC，未安装的字体；空 = 不使用）</summary>
+    public string UiFontFilePath { get; set; } = string.Empty;
 }

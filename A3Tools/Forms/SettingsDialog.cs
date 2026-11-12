@@ -42,6 +42,18 @@ public partial class SettingsDialog : Form
     /// <summary>是否是 Root 模式（决定某些设置项是否可见）</summary>
     public bool IsRootMode { get; set; } = false;
 
+    /// <summary>★ 2026-11-12 字号档位：显示文本 → 缩放系数</summary>
+    private static readonly (string Text, float Scale)[] FontSizeOptions =
+    {
+        ("紧凑 (90%)", 0.9f),
+        ("标准 (100%)", 1.0f),
+        ("宽松 (115%)", 1.15f),
+        ("大号 (130%)", 1.3f)
+    };
+
+    /// <summary>不修改字体的哨兵值（族名为空）</summary>
+    private const string KeepCurrentFont = "（保持各界面原有字体）";
+
     public SettingsDialog(bool isRootMode = false)
     {
         IsRootMode = isRootMode;
@@ -72,6 +84,9 @@ public partial class SettingsDialog : Form
 
         // Root 专属设置
         txtHubConfigDir.Text = settings.A3ToolsHubConfigDir;
+
+        // ★ 2026-11-12 全局界面字体
+        LoadFontControls(settings);
 
         // 根据是否为 Root 模式显示/隐藏专属控件
         bool isRoot = this.IsRootMode;
@@ -115,6 +130,104 @@ public partial class SettingsDialog : Form
         txtSsmsPath.Text = "";
     }
 
+    private void BtnFontFileBrowse_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "选择字体文件（TTF / OTF / TTC）",
+            Filter = "字体文件|*.ttf;*.otf;*.ttc|所有文件|*.*"
+        };
+        if (!string.IsNullOrEmpty(txtFontFile.Text) && File.Exists(txtFontFile.Text))
+            dialog.InitialDirectory = Path.GetDirectoryName(txtFontFile.Text);
+
+        if (dialog.ShowDialog() != DialogResult.OK) return;
+        txtFontFile.Text = dialog.FileName;
+
+        // 立即加载，让字体列表能选到这个文件里的字体
+        if (!UiFontManager.LoadPrivateFontFile(dialog.FileName))
+        {
+            MessageBox.Show(this,
+                $"字体文件加载失败：\n{UiFontManager.LastError}\n\n请确认是有效的 TTF / OTF / TTC 文件。",
+                "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        RefreshFontFamilyList();
+        var families = UiFontManager.GetPrivateFontFamilies();
+        if (families.Count > 0 && cmbFontFamily.Items.Count > 1)
+        {
+            cmbFontFamily.SelectedItem = families[0];
+        }
+
+        hintFont.Text = $"已加载字体文件，包含：{string.Join("、", families)}\r\n" +
+                        "该字体仅本程序使用，不安装到系统。字号按比例缩放（保留标题与正文的层级差）。";
+    }
+
+    private void BtnFontFileClear_Click(object? sender, EventArgs e)
+    {
+        txtFontFile.Text = string.Empty;
+        UiFontManager.LoadPrivateFontFile(string.Empty);
+        RefreshFontFamilyList();
+        hintFont.Text = "字体留空 = 保持各界面原有字体。字号按比例缩放（保留标题与正文的层级差）。\r\n" +
+                        "字体文件可选择未安装的 TTF / OTF / TTC，选用后仅本程序使用，不安装到系统。";
+
+        MessageBox.Show(this,
+            "已清除字体文件。\r\n\r\n" +
+            "★ Windows 的字体注册是进程级的，已加载的字体无法在运行中卸载，\r\n" +
+            "所以「不使用字体文件」这个状态需重启程序后才完全生效。",
+            "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    /// <summary>★ 2026-11-12：把设置里的字体配置填到界面控件上</summary>
+    private void LoadFontControls(AppSettings settings)
+    {
+        // 先加载字体文件，私有字体才能出现在列表里
+        UiFontManager.LoadPrivateFontFile(settings.UiFontFilePath);
+
+        RefreshFontFamilyList();
+
+        // 选中已配置的字体
+        if (!string.IsNullOrWhiteSpace(settings.UiFontFamily))
+        {
+            int idx = cmbFontFamily.Items.IndexOf(settings.UiFontFamily);
+            cmbFontFamily.SelectedIndex = idx >= 0 ? idx : 0;
+        }
+        else
+        {
+            cmbFontFamily.SelectedIndex = 0;
+        }
+
+        // 选中已配置的字号档位
+        float scale = settings.UiFontSizeScale <= 0 ? 1.0f : settings.UiFontSizeScale;
+        int sizeIdx = 0;
+        for (int i = 0; i < FontSizeOptions.Length; i++)
+        {
+            if (Math.Abs(FontSizeOptions[i].Scale - scale) < 0.001f) { sizeIdx = i; break; }
+            if (FontSizeOptions[i].Scale > scale && sizeIdx == 0) sizeIdx = i;
+        }
+        cmbFontSize.SelectedIndex = sizeIdx;
+
+        txtFontFile.Text = settings.UiFontFilePath ?? string.Empty;
+    }
+
+    /// <summary>★ 2026-11-12：重建可选字体列表（私有字体置顶）</summary>
+    private void RefreshFontFamilyList()
+    {
+        string previous = cmbFontFamily.SelectedItem as string ?? string.Empty;
+
+        cmbFontFamily.BeginUpdate();
+        cmbFontFamily.Items.Clear();
+        cmbFontFamily.Items.Add(KeepCurrentFont);
+        foreach (var name in UiFontManager.GetAvailableFamilies())
+        {
+            cmbFontFamily.Items.Add(name);
+        }
+        cmbFontFamily.EndUpdate();
+
+        int idx = cmbFontFamily.Items.IndexOf(previous);
+        cmbFontFamily.SelectedIndex = idx >= 0 ? idx : 0;
+    }
+
     private void BtnOK_Click(object? sender, EventArgs e)
     {
         AppDirectory = txtAppDir.Text;
@@ -136,7 +249,27 @@ public partial class SettingsDialog : Form
         settings.DevToolsPassword = txtDevToolsPassword.Text;  // 明文，SaveSettings 自动加密
         settings.EnableAi = chkEnableAi.Checked;
         settings.A3ToolsHubConfigDir = txtHubConfigDir.Text.Trim();
+
+        // ★ 2026-11-12 全局界面字体
+        string selectedFamily = cmbFontFamily.SelectedItem as string ?? string.Empty;
+        settings.UiFontFamily = selectedFamily == KeepCurrentFont ? string.Empty : selectedFamily;
+        settings.UiFontSizeScale = cmbFontSize.SelectedIndex >= 0 && cmbFontSize.SelectedIndex < FontSizeOptions.Length
+            ? FontSizeOptions[cmbFontSize.SelectedIndex].Scale
+            : 1.0f;
+        settings.UiFontFilePath = txtFontFile.Text.Trim();
+
         dataService.SaveSettings(settings);
+
+        // 立即生效（不必重启）
+        try
+        {
+            UiFontManager.ApplyFromSettings(settings);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"应用字体失败：{ex.Message}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
         this.DialogResult = DialogResult.OK;
         this.Close();
     }

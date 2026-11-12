@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -1380,7 +1382,7 @@ public partial class AiChatForm : Form
                         // ★ 2026-09-02 删除 ResizeObserver 调试日志
                     }
                 };
-                wv2.CoreWebView2.NavigateToString(RenderMarkdownAsHtml(displayContent, BuildToolCardsHtml(msg.ToolCalls)));
+                wv2.CoreWebView2.NavigateToString(ApplyFontCss(RenderMarkdownAsHtml(displayContent, BuildToolCardsHtml(msg.ToolCalls))));
             };
 _ = wv2.EnsureCoreWebView2Async();
             bubble = wv2;
@@ -2505,7 +2507,7 @@ _ = wv2.EnsureCoreWebView2Async();
             // 2. 把错误信息渲染到 #bubble-body（复用流式结束的 setBubbleBodyOnly，不动 tools-stream）
             if (wv2.CoreWebView2 != null)
             {
-                string html = RenderMarkdownAsHtml(errorText);
+                string html = ApplyFontCss(RenderMarkdownAsHtml(errorText));
                 string escaped = System.Text.Json.JsonSerializer.Serialize(html);
                 string js = "window.setBubbleBodyOnly(" + escaped + ");";
                 _ = wv2.CoreWebView2.ExecuteScriptAsync(js);
@@ -2655,7 +2657,7 @@ _ = wv2.EnsureCoreWebView2Async();
                 //         → pnlMessagesScroll 滚动条拖不动，外层 Panel 也不能滚
                 //   修法：Markdig 解析放后台线程（Task.Run），UI 线程只做轻量 IPC
                 string htmlEnd = await System.Threading.Tasks.Task.Run(
-                    () => RenderMarkdownAsHtml(fullText));
+                    () => ApplyFontCss(RenderMarkdownAsHtml(fullText)));
                 await pnlMessagesScroll.InvokeAsync(() =>
                 {
                     // ★ 2026-10-09 修陛下反馈「流式输出气泡晃动」
@@ -2977,6 +2979,43 @@ _ = wv2.EnsureCoreWebView2Async();
     ///   复用 UpdateForm.RenderMarkdownAsHtml 的 GitHub CSS 风格
     ///   返回完整 HTML，可直接赋给 WebBrowser.DocumentText
     /// </summary>
+    /// <summary>
+    /// ★ 2026-11-12：按全局界面字体设置调整 WebView2 气泡里的 CSS。
+    ///   · 字号：按缩放系数整体缩放（px / pt 都处理），保留 h1/h2/h3 与正文的层级差
+    ///   · 字体族：只换 body 的，code / pre 的等宽字体不动（SQL 代码块要保持对齐）
+    ///   · 失败就用原始 HTML，绝不因为字体让聊天气泡挂掉
+    /// </summary>
+    private static string ApplyFontCss(string html)
+    {
+        if (string.IsNullOrEmpty(html)) return html;
+
+        try
+        {
+            float scale = UiFontManager.GetCssSizeScale();
+            if (scale > 0.001f && Math.Abs(scale - 1.0f) > 0.001f)
+            {
+                html = Regex.Replace(html, @"font-size:\s*(\d+(?:\.\d+)?)(px|pt)\b",
+                    m => $"font-size: {Math.Round(double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) * scale, 1)}{m.Groups[2].Value}");
+                html = Regex.Replace(html, @"line-height:\s*(\d+(?:\.\d+)?)px\b",
+                    m => $"line-height: {Math.Round(double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) * scale, 1)}px");
+            }
+
+            string family = UiFontManager.GetCssFontFamily();
+            if (!string.IsNullOrWhiteSpace(family))
+            {
+                html = html.Replace(
+                    "body { font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif;",
+                    "body { font-family: " + family + ";");
+            }
+        }
+        catch
+        {
+            // 字体调整失败就用原始 HTML
+        }
+
+        return html;
+    }
+
     private string RenderMarkdownAsHtml(string markdown, string toolCardsHtml = "")
     {
         var pipeline = new MarkdownPipelineBuilder()

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using A3Tools.Forms;
+using A3Tools.Services;
 
 namespace A3Tools;
 
@@ -42,9 +43,25 @@ static class Program
         {
             ApplicationConfiguration.Initialize();
 
+            // ★ 2026-11-12 全局界面字体
+            //   31 个窗体的字体在 Designer 里硬编码，Form.Font 继承链失效，
+            //   所以靠 UiFontManager 运行时遍历控件树换字体。
+            //   必须在创建任何窗口之前初始化（Application.SetDefaultFont 的要求）。
+            try
+            {
+                UiFontManager.Initialize(new DataService().LoadSettings());
+            }
+            catch
+            {
+                // 字体设置读不出来也不能阻塞启动
+            }
+
             // 【2026-07-14 回滚】升级时 cmd 窗口直接显示给陛下看结果，不需要 toast 反馈
             // 静默模式 + toast 是 19294bf 引入的"补救"代码，现在回滚到 cmd 窗口显示模式，toast 也不需要了
-            Application.Run(new MainForm());
+            var mainForm = new MainForm();
+            // ★ 先套字体再显示 —— 避免窗口先闪一下默认字体
+            UiFontManager.ApplyToForm(mainForm);
+            Application.Run(mainForm);
         }
         finally
         {

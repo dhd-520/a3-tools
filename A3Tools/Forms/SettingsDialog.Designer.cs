@@ -50,6 +50,17 @@ partial class SettingsDialog
         lblHubConfigDir = new Label();
         txtHubConfigDir = new TextBox();
         btnHubConfigBrowse = new Button();
+        sepFont = new Panel();
+        lblFontTitle = new Label();
+        lblFontFamily = new Label();
+        cmbFontFamily = new ComboBox();
+        lblFontSize = new Label();
+        cmbFontSize = new ComboBox();
+        lblFontFile = new Label();
+        txtFontFile = new TextBox();
+        btnFontFileBrowse = new Button();
+        btnFontFileClear = new Button();
+        hintFont = new Label();
         bottom = new Panel();
         btnCancel = new Button();
         btnOK = new Button();
@@ -128,10 +139,21 @@ partial class SettingsDialog
         mainPanel.Controls.Add(lblHubConfigDir);
         mainPanel.Controls.Add(txtHubConfigDir);
         mainPanel.Controls.Add(btnHubConfigBrowse);
+        mainPanel.Controls.Add(sepFont);
+        mainPanel.Controls.Add(lblFontTitle);
+        mainPanel.Controls.Add(lblFontFamily);
+        mainPanel.Controls.Add(cmbFontFamily);
+        mainPanel.Controls.Add(lblFontSize);
+        mainPanel.Controls.Add(cmbFontSize);
+        mainPanel.Controls.Add(lblFontFile);
+        mainPanel.Controls.Add(txtFontFile);
+        mainPanel.Controls.Add(btnFontFileBrowse);
+        mainPanel.Controls.Add(btnFontFileClear);
+        mainPanel.Controls.Add(hintFont);
         mainPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         mainPanel.Location = new Point(0, 60);
         mainPanel.Name = "mainPanel";
-        mainPanel.AutoScrollMinSize = new Size(0, 1450);
+        mainPanel.AutoScrollMinSize = new Size(0, 1700);
         mainPanel.Padding = new Padding(0, 0, 0, 12);
         mainPanel.Size = new Size(1152, 582);
         mainPanel.TabIndex = 1;
@@ -572,6 +594,122 @@ partial class SettingsDialog
         btnHubConfigBrowse.UseVisualStyleBackColor = false;
         btnHubConfigBrowse.Click += BtnHubConfigBrowse_Click;
         // 
+        // sepFont
+        // 
+        sepFont.BackColor = Color.FromArgb(220, 220, 220);
+        sepFont.Location = new Point(36, 1460);
+        sepFont.Name = "sepFont";
+        sepFont.Size = new Size(1080, 1);
+        sepFont.TabIndex = 34;
+        // 
+        // lblFontTitle
+        // 
+        lblFontTitle.Font = new Font("微软雅黑", 11F, FontStyle.Bold, GraphicsUnit.Point);
+        lblFontTitle.ForeColor = Color.FromArgb(24, 145, 176);
+        lblFontTitle.Location = new Point(36, 1478);
+        lblFontTitle.Name = "lblFontTitle";
+        lblFontTitle.Size = new Size(341, 30);
+        lblFontTitle.TabIndex = 35;
+        lblFontTitle.Text = "界面字体";
+        // 
+        // lblFontFamily
+        // 
+        lblFontFamily.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblFontFamily.Location = new Point(36, 1515);
+        lblFontFamily.Name = "lblFontFamily";
+        lblFontFamily.Size = new Size(90, 40);
+        lblFontFamily.TabIndex = 36;
+        lblFontFamily.Text = "字体：";
+        lblFontFamily.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // cmbFontFamily
+        // 
+        cmbFontFamily.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbFontFamily.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        cmbFontFamily.Location = new Point(130, 1518);
+        cmbFontFamily.Name = "cmbFontFamily";
+        cmbFontFamily.Size = new Size(380, 30);
+        cmbFontFamily.TabIndex = 37;
+        // 
+        // lblFontSize
+        // 
+        lblFontSize.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblFontSize.Location = new Point(530, 1515);
+        lblFontSize.Name = "lblFontSize";
+        lblFontSize.Size = new Size(70, 40);
+        lblFontSize.TabIndex = 38;
+        lblFontSize.Text = "字号：";
+        lblFontSize.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // cmbFontSize
+        // 
+        cmbFontSize.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbFontSize.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        cmbFontSize.Location = new Point(600, 1518);
+        cmbFontSize.Name = "cmbFontSize";
+        cmbFontSize.Size = new Size(150, 30);
+        cmbFontSize.TabIndex = 39;
+        // 
+        // lblFontFile
+        // 
+        lblFontFile.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        lblFontFile.Location = new Point(36, 1570);
+        lblFontFile.Name = "lblFontFile";
+        lblFontFile.Size = new Size(90, 40);
+        lblFontFile.TabIndex = 40;
+        lblFontFile.Text = "字体文件：";
+        lblFontFile.TextAlign = ContentAlignment.MiddleLeft;
+        // 
+        // txtFontFile
+        // 
+        txtFontFile.BackColor = Color.FromArgb(248, 248, 248);
+        txtFontFile.Font = new Font("微软雅黑", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        txtFontFile.Location = new Point(130, 1573);
+        txtFontFile.Name = "txtFontFile";
+        txtFontFile.ReadOnly = true;
+        txtFontFile.Size = new Size(620, 41);
+        txtFontFile.TabIndex = 41;
+        // 
+        // btnFontFileBrowse
+        // 
+        btnFontFileBrowse.BackColor = Color.FromArgb(245, 245, 245);
+        btnFontFileBrowse.Cursor = Cursors.Hand;
+        btnFontFileBrowse.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
+        btnFontFileBrowse.FlatStyle = FlatStyle.Flat;
+        btnFontFileBrowse.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnFontFileBrowse.Location = new Point(760, 1573);
+        btnFontFileBrowse.Name = "btnFontFileBrowse";
+        btnFontFileBrowse.Size = new Size(150, 41);
+        btnFontFileBrowse.TabIndex = 42;
+        btnFontFileBrowse.Text = "浏览...";
+        btnFontFileBrowse.UseVisualStyleBackColor = false;
+        btnFontFileBrowse.Click += BtnFontFileBrowse_Click;
+        // 
+        // btnFontFileClear
+        // 
+        btnFontFileClear.BackColor = Color.FromArgb(245, 245, 245);
+        btnFontFileClear.Cursor = Cursors.Hand;
+        btnFontFileClear.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
+        btnFontFileClear.FlatStyle = FlatStyle.Flat;
+        btnFontFileClear.Font = new Font("微软雅黑", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        btnFontFileClear.Location = new Point(920, 1573);
+        btnFontFileClear.Name = "btnFontFileClear";
+        btnFontFileClear.Size = new Size(120, 41);
+        btnFontFileClear.TabIndex = 43;
+        btnFontFileClear.Text = "清除";
+        btnFontFileClear.UseVisualStyleBackColor = false;
+        btnFontFileClear.Click += BtnFontFileClear_Click;
+        // 
+        // hintFont
+        // 
+        hintFont.Font = new Font("微软雅黑", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        hintFont.ForeColor = Color.FromArgb(150, 150, 150);
+        hintFont.Location = new Point(36, 1630);
+        hintFont.Name = "hintFont";
+        hintFont.Size = new Size(1000, 50);
+        hintFont.TabIndex = 44;
+        hintFont.Text = "字体留空 = 保持各界面原有字体。字号按比例缩放（保留标题与正文的层级差）。\r\n字体文件可选择未安装的 TTF / OTF / TTC，选用后仅本程序使用，不安装到系统。";
+        // 
         // bottom
         // 
         bottom.BackColor = Color.FromArgb(248, 248, 248);
@@ -672,4 +810,17 @@ partial class SettingsDialog
     private Label lblHubConfigDir = null!;
     private TextBox txtHubConfigDir = null!;
     private Button btnHubConfigBrowse = null!;
+
+    // ★ 2026-11-12 全局界面字体
+    private Panel sepFont = null!;
+    private Label lblFontTitle = null!;
+    private Label lblFontFamily = null!;
+    private ComboBox cmbFontFamily = null!;
+    private Label lblFontSize = null!;
+    private ComboBox cmbFontSize = null!;
+    private Label lblFontFile = null!;
+    private TextBox txtFontFile = null!;
+    private Button btnFontFileBrowse = null!;
+    private Button btnFontFileClear = null!;
+    private Label hintFont = null!;
 }
