@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -25,6 +26,17 @@ namespace A3Tools.Common.DataAccess
         private readonly string _secretKey;      // HMAC 共享密钥
         private readonly string _serverPublicKey; // 服务端 RSA 公钥
         private readonly HttpClient _httpClient;
+
+        /// <summary>
+        /// ★ 2026-11-12：是否已降级到「不发 SNI」通道。
+        /// null = 还没试过；true = 常规通道握手会被链路层 RST，已固定走降级通道。
+        /// </summary>
+        private bool? _preferRawTransport;
+
+        /// <summary>
+        /// ★ 2026-11-12：当前是否正在使用「不发 SNI」降级通道（诊断用）。
+        /// </summary>
+        public bool UsingRawTransport => _preferRawTransport == true;
 
         /// <summary>
         /// ★ 2026-11-12：最近一次失败的详细原因。
@@ -181,14 +193,13 @@ namespace A3Tools.Common.DataAccess
                 };
                 string requestJson = JsonSerializer.Serialize(requestBody);
 
-                // 7. POST
-                var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync($"{_endpoint}/api/exec", content, ct);
-                string responseJson = await response.Content.ReadAsStringAsync(ct);
+                // 7. POST（常规通道握手被链路层重置时，自动降级到「不发 SNI」通道）
+                string requestUrl = $"{_endpoint}/api/exec";
+                var (statusCode, responseJson) = await PostJsonWithFallbackAsync(requestUrl, requestJson, ct);
 
-                if (!response.IsSuccessStatusCode)
+                if (statusCode < 200 || statusCode >= 300)
                 {
-                    LastError = $"HTTP {(int)response.StatusCode}: {responseJson}";
+                    LastError = $"HTTP {statusCode}: {responseJson}";
                     return new QueryResult
                     {
                         Success = false,
@@ -250,6 +261,98 @@ namespace A3Tools.Common.DataAccess
                 LastError = DescribeException(ex);
                 return new QueryResult { Success = false, Message = LastError };
             }
+        }
+
+        /// <summary>
+        /// ★ 2026-11-12：发送 POST JSON，带「不发 SNI」降级通道。
+        ///
+        /// 背景：部分网络链路会在 ClientHello 里读到 SNI=某域名 时直接 RST 掉连接，
+        ///   .NET 表现为 HttpRequestException("The SSL connection could not be established")
+        ///   → SocketException(10054)。同一台机器上 Chromium / Node 能通，小 ClientHello 的客户端被打掉。
+        ///   降级通道：TLS 握手连 IP（不发 SNI）+ HTTP Host 头带真实域名，证书仍按域名校验。
+        ///
+        /// 只在「连接级失败」时降级；超时（TaskCanceledException）不降级，避免白等两倍时间。
+        /// </summary>
+        private async Task<(int StatusCode, string Body)> PostJsonWithFallbackAsync(
+            string requestUrl, string requestJson, CancellationToken ct)
+        {
+            Exception? normalError = null;
+
+            // 已确认降级通道可用 → 直接走降级，省掉一次必然失败的重置往返
+            if (_preferRawTransport == true)
+            {
+                try
+                {
+                    return await PostRawAsync(requestUrl, requestJson, ct);
+                }
+                catch (Exception ex) when (IsConnectionLevelFailure(ex))
+                {
+                    normalError = ex;
+                }
+
+                try
+                {
+                    return await PostNormalAsync(requestUrl, requestJson, ct);
+                }
+                catch (Exception ex)
+                {
+                    throw new AggregateException(
+                        $"降级通道与常规通道都失败。降级通道: {DescribeException(normalError!)}；常规通道: {DescribeException(ex)}");
+                }
+            }
+
+            try
+            {
+                return await PostNormalAsync(requestUrl, requestJson, ct);
+            }
+            catch (Exception ex) when (IsConnectionLevelFailure(ex))
+            {
+                normalError = ex;
+            }
+
+            try
+            {
+                var result = await PostRawAsync(requestUrl, requestJson, ct);
+                _preferRawTransport = true;
+                return result;
+            }
+            catch (Exception rawEx)
+            {
+                throw new AggregateException(
+                    $"常规通道与降级通道都失败。常规通道: {DescribeException(normalError!)}；降级通道: {DescribeException(rawEx)}");
+            }
+        }
+
+        /// <summary>常规通道：正常发 SNI 的 HTTPS 请求。</summary>
+        private async Task<(int StatusCode, string Body)> PostNormalAsync(
+            string requestUrl, string requestJson, CancellationToken ct)
+        {
+            var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(requestUrl, content, ct);
+            string body = await response.Content.ReadAsStringAsync(ct);
+            return ((int)response.StatusCode, body);
+        }
+
+        /// <summary>降级通道：连 IP + Host 头（TLS 不发 SNI）。</summary>
+        private async Task<(int StatusCode, string Body)> PostRawAsync(
+            string requestUrl, string requestJson, CancellationToken ct)
+        {
+            return await RawHttpTransport.PostJsonAsync(requestUrl, requestJson, 300, ct);
+        }
+
+        /// <summary>
+        /// 是否「连接级失败」（握手被 RST、连接被拒等）——这类才值得降级重试。
+        /// 超时（TaskCanceledException）不算，否则一次超时会白等两倍时间。
+        /// </summary>
+        private static bool IsConnectionLevelFailure(Exception ex)
+        {
+            for (Exception? cur = ex; cur != null; cur = cur.InnerException)
+            {
+                if (cur is System.Net.Sockets.SocketException) return true;
+                if (cur is System.Net.Http.HttpRequestException) return true;
+                if (cur is IOException) return true;
+            }
+            return false;
         }
 
         /// <summary>
