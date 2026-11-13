@@ -197,17 +197,71 @@ public partial class SettingsDialog : Form
             cmbFontFamily.SelectedIndex = 0;
         }
 
-        // 选中已配置的字号档位
+        // ★ 2026-11-13 字号下拉必须先填项，再设 SelectedIndex。
+        //   空 ComboBox 设 SelectedIndex 必然越界：
+        //   ArgumentOutOfRangeException("Selected index was invalid")
+        //   —— 这个坑真的踩过：打开设置对话框直接崩，字体分区根本显示不出来。
+        FillFontSizeItems();
+
+        // 选中已配置的字号档位（取最接近的一档）
         float scale = settings.UiFontSizeScale <= 0 ? 1.0f : settings.UiFontSizeScale;
-        int sizeIdx = 0;
-        for (int i = 0; i < FontSizeOptions.Length; i++)
+        int sizeIdx = FindClosestSizeIndex(scale);
+        if (sizeIdx >= 0 && sizeIdx < cmbFontSize.Items.Count)
         {
-            if (Math.Abs(FontSizeOptions[i].Scale - scale) < 0.001f) { sizeIdx = i; break; }
-            if (FontSizeOptions[i].Scale > scale && sizeIdx == 0) sizeIdx = i;
+            cmbFontSize.SelectedIndex = sizeIdx;
         }
-        cmbFontSize.SelectedIndex = sizeIdx;
 
         txtFontFile.Text = settings.UiFontFilePath ?? string.Empty;
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：确保字号下拉的选项与 FontSizeOptions 一致。
+    ///
+    /// Designer 里已经写了 Items.AddRange（所见即所得，VS 设计器能直接看到这 4 项），
+    /// 但万一以后有人改了其中一边，这里做一次自愈校验并重建 —— 选项与下标对不上时
+    /// 保存出来的缩放系数就是错的。
+    /// </summary>
+    private void FillFontSizeItems()
+    {
+        bool needRebuild = cmbFontSize.Items.Count != FontSizeOptions.Length;
+        if (!needRebuild)
+        {
+            for (int i = 0; i < FontSizeOptions.Length; i++)
+            {
+                if (!string.Equals(cmbFontSize.Items[i]?.ToString(), FontSizeOptions[i].Text, StringComparison.Ordinal))
+                {
+                    needRebuild = true;
+                    break;
+                }
+            }
+        }
+        if (!needRebuild) return;
+
+        cmbFontSize.BeginUpdate();
+        cmbFontSize.Items.Clear();
+        foreach (var opt in FontSizeOptions) cmbFontSize.Items.Add(opt.Text);
+        cmbFontSize.EndUpdate();
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：找最接近给定缩放系数的档位下标。
+    /// 旧写法用 sizeIdx == 0 当哨兵，有 bug：scale=0.85 时会选中「标准 100%」
+    /// 而不是「紧凑 90%」（因为下标 0 既是默认值又是合法候选，哨兵失效）。
+    /// </summary>
+    private static int FindClosestSizeIndex(float scale)
+    {
+        int best = 0;
+        double bestDiff = double.MaxValue;
+        for (int i = 0; i < FontSizeOptions.Length; i++)
+        {
+            double diff = Math.Abs(FontSizeOptions[i].Scale - scale);
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                best = i;
+            }
+        }
+        return best;
     }
 
     /// <summary>★ 2026-11-12：重建可选字体列表（私有字体置顶）</summary>
@@ -253,7 +307,8 @@ public partial class SettingsDialog : Form
         // ★ 2026-11-12 全局界面字体
         string selectedFamily = cmbFontFamily.SelectedItem as string ?? string.Empty;
         settings.UiFontFamily = selectedFamily == KeepCurrentFont ? string.Empty : selectedFamily;
-        settings.UiFontSizeScale = cmbFontSize.SelectedIndex >= 0 && cmbFontSize.SelectedIndex < FontSizeOptions.Length
+        settings.UiFontSizeScale = cmbFontSize.SelectedIndex >= 0
+                                  && cmbFontSize.SelectedIndex < FontSizeOptions.Length
             ? FontSizeOptions[cmbFontSize.SelectedIndex].Scale
             : 1.0f;
         settings.UiFontFilePath = txtFontFile.Text.Trim();
