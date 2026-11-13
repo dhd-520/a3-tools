@@ -52,6 +52,8 @@ partial class MainForm
     private Button btnRefresh = null!;
     private DataGridView dgvAccounts = null!;
     private Panel descPanel = null!;
+    // ★ 2026-11-13：源/目标两半区的百分比布局容器
+    private TableLayoutPanel dbSelectRow = null!;
     private Label lblDesc = null!;
     private Label lblPluginStatus = null!;
     private Label lblToolsSourceDb = null!;
@@ -575,6 +577,161 @@ partial class MainForm
         this.ResumeLayout(false);
     }
 
+    /// <summary>
+    /// ★ 2026-11-13：标记固定宽度控件。
+    ///
+    /// 源/目标两半区的列宽由 TableLayoutPanel 的固定列接管，
+    /// 所以不让字体管理器的「文字截断就自动加宽」插手 ——
+    /// 加宽会被 TLP 打回列宽，文字反而被裁（比不加宽更糟）。
+    /// 文字放不下时由字体管理器改挂 ToolTip 显示全文。
+    /// </summary>
+    private static void MarkFixedWidthControl(Control control)
+        => A3Tools.Services.UiFontManager.MarkFixedWidth(control);
+
+    /// <summary>
+    /// ★ 2026-11-13：源/目标两半区的控件组。
+    /// 抽成独立类型，是为了无头探针能直接构造、量真实几何（不用启动整个 MainForm）。
+    /// </summary>
+    internal sealed class DbSelectRow
+    {
+        public TableLayoutPanel Row = null!;
+        public Label SourceLabel = null!;
+        public Button SelectSource = null!;
+        public Label SourceName = null!;
+        public Button ClearSource = null!;
+        public Label TargetLabel = null!;
+        public Button SelectTarget = null!;
+        public Label TargetName = null!;
+        public Button ClearTarget = null!;
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：构造源/目标两半区（各占一半的百分比布局）。
+    ///
+    /// 8 列 = 源半区(标签/选择/账套名/清空) + 目标半区(同款四列)。
+    /// 两半区的固定列完全对称（96 / 124 / 68），弹性列各 25%
+    /// → 剩余空间被平分，两半区严格各占一半（跟窗口宽度无关）。
+    ///
+    /// 标签一律 AutoSize=false + Dock=Fill —— 换字体后不会自动撑大压到按钮上。
+    /// </summary>
+    internal static DbSelectRow CreateDbSelectRow()
+    {
+        var g = new DbSelectRow();
+
+        var row = new TableLayoutPanel
+        {
+            ColumnCount = 8,
+            RowCount = 1,
+            Dock = System.Windows.Forms.DockStyle.Fill,
+            Padding = new Padding(20, 46, 20, 10),
+            BackColor = System.Drawing.Color.FromArgb(250, 250, 250),
+            Name = "dbSelectRow",
+        };
+        row.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+        // 源半区：标签 / 选择 / 账套名(弹性) / 清空
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60F));
+        // 目标半区：完全对称
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60F));
+        g.Row = row;
+
+        g.SourceLabel = NewCellLabel("源数据库：", ContentAlignment.MiddleRight);
+        g.SelectSource = NewCellButton("选择源账套…", System.Drawing.Color.FromArgb(24, 145, 176), System.Drawing.Color.White, 9F);
+        g.SourceName = NewCellLabel("（未选择）", ContentAlignment.MiddleLeft);
+        g.ClearSource = NewCellButton("清空", System.Drawing.Color.White, System.Drawing.Color.Black, 8F);
+        // 源半区的「清空」右侧留 16px —— 两半区之间的分隔
+        g.ClearSource.Margin = new Padding(0, 0, 16, 0);
+
+        g.TargetLabel = NewCellLabel("目标数据库：", ContentAlignment.MiddleRight);
+        g.SelectTarget = NewCellButton("选择目标账套…", System.Drawing.Color.FromArgb(228, 94, 29), System.Drawing.Color.White, 9F);
+        g.TargetName = NewCellLabel("（未选择）", ContentAlignment.MiddleLeft);
+        g.ClearTarget = NewCellButton("清空", System.Drawing.Color.White, System.Drawing.Color.Black, 8F);
+
+        row.Controls.Add(g.SourceLabel, 0, 0);
+        row.Controls.Add(g.SelectSource, 1, 0);
+        row.Controls.Add(g.SourceName, 2, 0);
+        row.Controls.Add(g.ClearSource, 3, 0);
+        row.Controls.Add(g.TargetLabel, 4, 0);
+        row.Controls.Add(g.SelectTarget, 5, 0);
+        row.Controls.Add(g.TargetName, 6, 0);
+        row.Controls.Add(g.ClearTarget, 7, 0);
+
+        // ★ 固定宽度：不让字体管理器的「自动加宽」跟表格列宽打架
+        //   （加宽会被 TLP 打回列宽，文字反而被裁）。
+        //   文字放不下时由字体管理器挂 ToolTip 显示全文。
+        MarkFixedWidthControl(g.SourceLabel);
+        MarkFixedWidthControl(g.SelectSource);
+        MarkFixedWidthControl(g.SourceName);
+        MarkFixedWidthControl(g.ClearSource);
+        MarkFixedWidthControl(g.TargetLabel);
+        MarkFixedWidthControl(g.SelectTarget);
+        MarkFixedWidthControl(g.TargetName);
+        MarkFixedWidthControl(g.ClearTarget);
+
+        return g;
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：表格单元格里的标签。
+    /// AutoSize 必须显式关掉 —— Label 默认 true，换字体后会自动撑大压到旁边的按钮。
+    /// </summary>
+    private static Label NewCellLabel(string text, ContentAlignment align)
+    {
+        var l = new Label
+        {
+            Text = text,
+            Dock = System.Windows.Forms.DockStyle.Fill,
+            AutoSize = false,
+            AutoEllipsis = true,
+            TextAlign = align,
+            Margin = new Padding(0, 0, 6, 0),
+            Font = new Font("微软雅黑", 9F),
+        };
+        if (align == ContentAlignment.MiddleLeft)
+        {
+            // ★ 不能设 MinimumSize！
+            //   弹性列（Percent）在窄窗口下可能只有 40~60px，
+            //   标签却要 MinimumSize 那么多 → 撑破自己的列、压到旁边的「清空」按钮。
+            //   （探针实测 700px 时 name.Right=320 > clear.Left=282，就是这么来的。）
+            //   让 Percent 列说了算：名字放不下就省略号 + 悬浮提示看全文。
+            l.ForeColor = System.Drawing.Color.FromArgb(120, 120, 120);
+        }
+        else
+        {
+            l.ForeColor = System.Drawing.Color.FromArgb(80, 80, 80);
+        }
+        return l;
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：表格单元格里的按钮。
+    /// AutoEllipsis：文字放不下时显示省略号（配合 ToolTip 看全文），而不是硬裁一半字。
+    /// </summary>
+    private static Button NewCellButton(string text, System.Drawing.Color back, System.Drawing.Color fore, float fontSize)
+    {
+        var b = new Button
+        {
+            Text = text,
+            Dock = System.Windows.Forms.DockStyle.Fill,
+            AutoSize = false,
+            AutoEllipsis = true,
+            Margin = new Padding(0, 0, 6, 0),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = back,
+            ForeColor = fore,
+            Font = new Font("微软雅黑", fontSize),
+            Cursor = Cursors.Hand,
+        };
+        // 彩色按钮去边框；白底「清空」保留 1px 边框（原样）
+        if (fore == System.Drawing.Color.White) b.FlatAppearance.BorderSize = 0;
+        return b;
+    }
+
     private void InitToolsTabControls()
     {
         // --- 说明面板 ---
@@ -602,96 +759,33 @@ partial class MainForm
         lblPluginStatus.AutoSize = true;
         lblPluginStatus.Name = "lblPluginStatus";
 
-        lblToolsSourceDb = new Label();
-        lblToolsSourceDb.Text = "源数据库：";
-        lblToolsSourceDb.Location = new Point(20, 52);
-        lblToolsSourceDb.Size = new Size(85, 30);
-        lblToolsSourceDb.TextAlign = ContentAlignment.MiddleRight;
-        lblToolsSourceDb.Font = new Font("微软雅黑", 9F);
-        lblToolsSourceDb.ForeColor = System.Drawing.Color.FromArgb(80, 80, 80);
-        lblToolsSourceDb.Name = "lblToolsSourceDb";
+        // ★ 2026-11-13：源/目标两半区改为百分比布局（各占一半），随窗口宽度自适应。
+        //
+        // 之前的问题（陛下截图）：
+        //   1) 绝对定位：X 从 20 一路排到 1018 —— 窗口一窄，右边「清空」按钮就被裁掉；
+        //   2) Label 的 AutoSize 默认是 true —— 换字体后标签自动撑大，直接压到按钮上；
+        //   3) UpdateToolsHeaderLayout 用 descPanel.Width - 990 手算坐标，宽度不够就出界。
+        //
+        // 现在：TableLayoutPanel 8 列。两半区的固定列完全对称，
+        //   两个 Percent(25) 列平分剩余空间 → 源半区与目标半区严格各占一半。
+        //   标签统一 AutoSize=false + Dock=Fill —— 换字体也压不到按钮。
+        //
+        // 构造放在静态工厂里 —— 运行时和无头探针共用同一份几何来源。
+        var db = CreateDbSelectRow();
+        dbSelectRow = db.Row;
+        lblToolsSourceDb = db.SourceLabel;
+        btnToolsSelectSourceDb = db.SelectSource;
+        lblToolsSourceDbName = db.SourceName;
+        btnToolsClearSourceDb = db.ClearSource;
+        lblToolsTargetDb = db.TargetLabel;
+        btnToolsSelectTargetDb = db.SelectTarget;
+        lblToolsTargetDbName = db.TargetName;
+        btnToolsClearTargetDb = db.ClearTarget;
 
-        btnToolsSelectSourceDb = new Button();
-        btnToolsSelectSourceDb.Text = "选择源账套…";
-        btnToolsSelectSourceDb.Location = new Point(110, 51);
-        btnToolsSelectSourceDb.Size = new Size(110, 32);
-        btnToolsSelectSourceDb.FlatStyle = FlatStyle.Flat;
-        btnToolsSelectSourceDb.BackColor = Color.FromArgb(24, 145, 176);
-        btnToolsSelectSourceDb.ForeColor = Color.White;
-        btnToolsSelectSourceDb.FlatAppearance.BorderSize = 0;
-        btnToolsSelectSourceDb.Font = new Font("微软雅黑", 9F);
-        btnToolsSelectSourceDb.Cursor = Cursors.Hand;
-        btnToolsSelectSourceDb.Name = "btnToolsSelectSourceDb";
-
-        lblToolsSourceDbName = new Label();
-        lblToolsSourceDbName.Text = "（未选择）";
-        lblToolsSourceDbName.Location = new Point(228, 52);
-        lblToolsSourceDbName.Size = new Size(200, 30);
-        lblToolsSourceDbName.TextAlign = ContentAlignment.MiddleLeft;
-        lblToolsSourceDbName.Font = new Font("微软雅黑", 9F);
-        lblToolsSourceDbName.ForeColor = System.Drawing.Color.FromArgb(120, 120, 120);
-        lblToolsSourceDbName.Name = "lblToolsSourceDbName";
-
-        btnToolsClearSourceDb = new Button();
-        btnToolsClearSourceDb.Text = "清空";
-        btnToolsClearSourceDb.Location = new Point(434, 51);
-        btnToolsClearSourceDb.Size = new Size(68, 32);
-        btnToolsClearSourceDb.FlatStyle = FlatStyle.Flat;
-        btnToolsClearSourceDb.BackColor = Color.White;
-        btnToolsClearSourceDb.Font = new Font("微软雅黑", 8F);
-        btnToolsClearSourceDb.Cursor = Cursors.Hand;
-        btnToolsClearSourceDb.Name = "btnToolsClearSourceDb";
-
-        lblToolsTargetDb = new Label();
-        lblToolsTargetDb.Text = "目标数据库：";
-        lblToolsTargetDb.Location = new Point(516, 52);
-        lblToolsTargetDb.Size = new Size(95, 30);
-        lblToolsTargetDb.TextAlign = ContentAlignment.MiddleRight;
-        lblToolsTargetDb.Font = new Font("微软雅黑", 9F);
-        lblToolsTargetDb.ForeColor = System.Drawing.Color.FromArgb(80, 80, 80);
-        lblToolsTargetDb.Name = "lblToolsTargetDb";
-
-        btnToolsSelectTargetDb = new Button();
-        btnToolsSelectTargetDb.Text = "选择目标账套…";
-        btnToolsSelectTargetDb.Location = new Point(616, 51);
-        btnToolsSelectTargetDb.Size = new Size(120, 32);
-        btnToolsSelectTargetDb.FlatStyle = FlatStyle.Flat;
-        btnToolsSelectTargetDb.BackColor = Color.FromArgb(228, 94, 29);
-        btnToolsSelectTargetDb.ForeColor = Color.White;
-        btnToolsSelectTargetDb.FlatAppearance.BorderSize = 0;
-        btnToolsSelectTargetDb.Font = new Font("微软雅黑", 9F);
-        btnToolsSelectTargetDb.Cursor = Cursors.Hand;
-        btnToolsSelectTargetDb.Name = "btnToolsSelectTargetDb";
-
-        lblToolsTargetDbName = new Label();
-        lblToolsTargetDbName.Text = "（未选择）";
-        lblToolsTargetDbName.Location = new Point(744, 52);
-        lblToolsTargetDbName.Size = new Size(200, 30);
-        lblToolsTargetDbName.TextAlign = ContentAlignment.MiddleLeft;
-        lblToolsTargetDbName.Font = new Font("微软雅黑", 9F);
-        lblToolsTargetDbName.ForeColor = System.Drawing.Color.FromArgb(120, 120, 120);
-        lblToolsTargetDbName.Name = "lblToolsTargetDbName";
-
-        btnToolsClearTargetDb = new Button();
-        btnToolsClearTargetDb.Text = "清空";
-        btnToolsClearTargetDb.Location = new Point(950, 51);
-        btnToolsClearTargetDb.Size = new Size(68, 32);
-        btnToolsClearTargetDb.FlatStyle = FlatStyle.Flat;
-        btnToolsClearTargetDb.BackColor = Color.White;
-        btnToolsClearTargetDb.Font = new Font("微软雅黑", 8F);
-        btnToolsClearTargetDb.Cursor = Cursors.Hand;
-        btnToolsClearTargetDb.Name = "btnToolsClearTargetDb";
-
+        // Dock=Fill 的先 Add，再 Add 绝对定位的说明文字（保证文字浮在表格之上）
+        descPanel.Controls.Add(dbSelectRow);
         descPanel.Controls.Add(lblDesc);
         descPanel.Controls.Add(lblPluginStatus);
-        descPanel.Controls.Add(lblToolsSourceDb);
-        descPanel.Controls.Add(btnToolsSelectSourceDb);
-        descPanel.Controls.Add(lblToolsSourceDbName);
-        descPanel.Controls.Add(btnToolsClearSourceDb);
-        descPanel.Controls.Add(lblToolsTargetDb);
-        descPanel.Controls.Add(btnToolsSelectTargetDb);
-        descPanel.Controls.Add(lblToolsTargetDbName);
-        descPanel.Controls.Add(btnToolsClearTargetDb);
 
         // --- 滚动容器（只竖向滚动）---
         var toolsScrollPanel = new Panel();

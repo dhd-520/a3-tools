@@ -178,6 +178,11 @@ public partial class MainForm : Form, IToolContext
         lblToolsTargetDbName.Text = _toolTargetAccount == null
             ? "（未选择）"
             : $"{_toolTargetAccount.Code} - {_toolTargetAccount.Name}";
+
+        // ★ 账套名变了，可能又放不下了 —— 重新判定悬浮提示（显示完整账套名）
+        UiFontManager.ApplyFixedWidthTooltip(lblToolsSourceDbName);
+        UiFontManager.ApplyFixedWidthTooltip(lblToolsTargetDbName);
+
         UpdateToolsDescLabel();
     }
 
@@ -233,18 +238,9 @@ public partial class MainForm : Form, IToolContext
 
         lblPluginStatus.Left = Math.Max(500, descPanel.Width - lblPluginStatus.Width - 20);
 
-        int available = descPanel.Width - 990;
-        int extra = Math.Max(0, available / 2);
-        int labelWidth = Math.Min(420, 290 + extra);
-
-        lblToolsSourceDbName.Width = labelWidth;
-        lblToolsSourceDbName.Left = btnToolsSelectSourceDb.Right + 8;
-        btnToolsClearSourceDb.Left = lblToolsSourceDbName.Right + 8;
-        lblToolsTargetDb.Left = btnToolsClearSourceDb.Right + 20;
-        btnToolsSelectTargetDb.Left = lblToolsTargetDb.Right + 5;
-        lblToolsTargetDbName.Width = labelWidth;
-        lblToolsTargetDbName.Left = btnToolsSelectTargetDb.Right + 8;
-        btnToolsClearTargetDb.Left = lblToolsTargetDbName.Right + 8;
+        // ★ 2026-11-13：源/目标两半区不再手算坐标。
+        //   以前这里用 descPanel.Width - 990 绝对定位，窗口一窄右边「清空」按钮就出界被裁。
+        //   现在由 dbSelectRow（TableLayoutPanel，Percent 列）自动排布 —— 源/目标各占一半。
     }
 
     /// <summary>
