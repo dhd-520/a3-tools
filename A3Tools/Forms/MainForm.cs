@@ -3571,6 +3571,7 @@ public partial class MainForm : Form, IToolContext
     private void LoadPlugins()
     {
         _plugins.Clear();
+        ClearCardTooltips(this.flpTools);
         this.flpTools.Controls.Clear();
 
         // 只加载配置化工具（禁用旧版IPlugin兼容加载）
@@ -3688,6 +3689,7 @@ public partial class MainForm : Form, IToolContext
     private void LoadCustomTools()
     {
         if (flpCustomTools == null) return;
+        ClearCardTooltips(flpCustomTools);
         flpCustomTools.Controls.Clear();
         flpCustomTools.Controls.Add(btnAddCustomTool);
 
@@ -3759,12 +3761,30 @@ public partial class MainForm : Form, IToolContext
         LoadCustomTools();
     }
 
+    /// <summary>工具卡片固定宽度（像素）</summary>
+    private const int ToolCardWidth = 200;
+
+    /// <summary>工具卡片固定高度（像素）—— 两行文字：名称 + 描述</summary>
+    private const int ToolCardHeight = 65;
+
+    /// <summary>
+    /// ★ 2026-11-13 工具卡片创建。
+    ///
+    /// 陛下要求：「工具设置固定宽度，显示不全放上去后浮动显示」。
+    ///   · 宽度固定 200px —— 卡片在 FlowLayoutPanel 里左到右自动排列，
+    ///     宽度必须一致才能对齐。之前的「自动加宽」会把同一排卡片改得参差不齐，
+    ///     排版反而更乱。
+    ///   · 文字装不下时，悬停显示完整内容（ToolTip），而不是把卡片撑宽。
+    ///
+    /// 卡片文字是「图标 + 名称\n描述」两行，描述长短不一，字号调大后必然有卡片放不下。
+    /// </summary>
     private Button CreateToolCard(string icon, string name, string description)
     {
+        string cardText = $"{icon}  {name}\n{description}";
         var btn = new Button
         {
-            Text = $"{icon}  {name}\n{description}",
-            Size = new System.Drawing.Size(200, 65),
+            Text = cardText,
+            Size = new System.Drawing.Size(ToolCardWidth, ToolCardHeight),
             FlatStyle = FlatStyle.Flat,
             BackColor = System.Drawing.Color.White,
             Font = new System.Drawing.Font("微软雅黑", 9F),
@@ -3776,7 +3796,29 @@ public partial class MainForm : Form, IToolContext
         btn.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(220, 220, 220);
         btn.FlatAppearance.MouseOverBackColor = System.Drawing.Color.FromArgb(240, 248, 255);
         btn.FlatAppearance.MouseDownBackColor = System.Drawing.Color.FromArgb(230, 240, 250);
+
+        // ★ 固定宽度：不参与「文字截断就自动加宽」（那会把同一排卡片改得参差不齐）
+        // ★ 文字放不下时，悬浮显示完整内容（名称 + 描述）
+        //   ToolTip 文本就是卡片全文 —— 不另存，Tag 已被 "custom-tool" 占用
+        UiFontManager.MarkFixedWidth(btn);
+        // 卡片是运行时动态创建的，此刻还没换过字体 —— 立即按当前字体判定一次
+        UiFontManager.ApplyToNewControl(btn);
+
         return btn;
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：清掉即将被移除的工具卡片的悬浮提示。
+    /// 卡片重建（加载 / 新增 / 编辑 / 删除自定义工具）时旧的 Button 会被丢弃，
+    /// 提示里还挂着引用会漏 —— 移除前先清掉。
+    /// </summary>
+    private static void ClearCardTooltips(FlowLayoutPanel panel)
+    {
+        if (panel == null) return;
+        foreach (Control c in panel.Controls)
+        {
+            UiFontManager.ClearFixedWidthTooltip(c);
+        }
     }
 
     #region Root模式

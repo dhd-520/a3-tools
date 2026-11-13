@@ -71,6 +71,19 @@ public static class UiFontManager
     /// <summary>控件「原始字体」记录 —— 重新应用时从这里还原，避免缩放被叠加多次</summary>
     private static readonly ConditionalWeakTable<Control, FontSpec> _originalFonts = new();
 
+    /// <summary>
+    /// ★ 2026-11-13：固定宽度、不允许自动加宽的控件。
+    ///
+    /// 陛下要求：「工具设置固定宽度，显示不全放上去后浮动显示」。
+    /// 工具箱里的卡片（默认工具 / 自定义工具）必须保持统一宽度 ——
+    /// 之前那套「文字截断就自动加宽」会把同一排卡片改得参差不齐，排版反而更乱。
+    /// 这些控件一律不参与加宽，文字放不下时靠 ToolTip 悬浮显示全文。
+    ///
+    /// ★ 用 HashSet 而不是 ConditionalWeakTable：后者的 TValue 必须是引用类型，
+    ///   装不了 bool。改用 HashSet + 引用相等（不用默认的 Equals/GetHashCode）。
+    /// </summary>
+    private static readonly HashSet<Control> _fixedWidthControls = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>已经应用过字体的窗体（避免重复遍历）</summary>
     private static readonly HashSet<Form> _appliedForms = new();
 
@@ -242,6 +255,156 @@ public static class UiFontManager
 
         control.Font = target;
         EnsureTextFits(control);
+
+        // ★ 2026-11-13：字号变了，文字是否放得下也变了 —— 重新判定悬浮提示
+        ApplyFixedWidthTooltip(control);
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：把控件标记为「固定宽度」。
+    ///
+    /// 标记后：
+    ///   · 换字体时不会被自动加宽（保持统一宽度，排版整齐）
+    ///   · 文字放不下时，自动挂上 ToolTip，悬浮显示完整文字
+    ///
+    /// 工具箱的默认工具 / 自定义工具卡片就是这么用的。
+    /// </summary>
+    public static void MarkFixedWidth(Control control)
+    {
+        if (control == null) return;
+        _fixedWidthControls.Add(control);
+    }
+
+    /// <summary>是否为固定宽度控件（不参与自动加宽）</summary>
+    private static bool IsFixedWidth(Control control)
+        => _fixedWidthControls.Contains(control);
+
+    /// <summary>共享的 ToolTip —— 固定宽度控件文字放不下时，用它悬浮显示全文</summary>
+    private static ToolTip? _sharedToolTip;
+
+    /// <summary>
+    /// 共享 ToolTip 实例（懒创建）。
+    /// 实测：ToolTip 是【实例作用域】的 —— t1 设的提示 t2 读不到，
+    /// 所以用独立实例不会污染 Designer 里已写的提示（如 AccountDialog 的账号说明）。
+    /// </summary>
+    private static ToolTip SharedToolTip
+    {
+        get
+        {
+            if (_sharedToolTip == null)
+            {
+                _sharedToolTip = new ToolTip
+                {
+                    AutoPopDelay = 8000,
+                    InitialDelay = 300,
+                    ReshowDelay = 200,
+                    ShowAlways = true,
+                };
+            }
+            return _sharedToolTip;
+        }
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：固定宽度控件的文字放不下时，悬浮显示全文。
+    ///
+    /// 控件文字截断了但用户看不到后面是什么 —— 这是「显示不全」的真正问题。
+    /// 宽度不动（排版整齐），内容交给悬浮提示。
+    /// </summary>
+    public static void ApplyFixedWidthTooltip(Control control)
+    {
+        try
+        {
+            if (!IsFixedWidth(control)) return;
+
+            string? text = control switch
+            {
+                ButtonBase b => b.Text,
+                Label l => l.Text,
+                _ => null
+            };
+            if (string.IsNullOrEmpty(text)) return;
+
+            if (TextOverflows(control, text!))
+            {
+                SharedToolTip.SetToolTip(control, text);
+            }
+            else
+            {
+                // 放得下就不要提示，免得鼠标一放上去就弹个没用的框
+                SharedToolTip.SetToolTip(control, null);
+            }
+        }
+        catch
+        {
+            // 提示失败不影响字体本身
+        }
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：给动态创建的控件套用当前界面字体与悬浮提示。
+    ///
+    /// 工具箱的卡片是运行时动态创建的（不在 Designer 里），
+    /// 创建的那一刻还没有换字体 —— 那时判定「文字放不放得下」是不准的。
+    /// 调用这个方法立即按当前字体设置判定一次。
+    /// </summary>
+    public static void ApplyToNewControl(Control control)
+    {
+        if (control == null || control.IsDisposed) return;
+        try
+        {
+            ReplaceFont(control);
+            ApplyFixedWidthTooltip(control);
+        }
+        catch
+        {
+            // 单个控件失败不影响其他
+        }
+    }
+
+    /// <summary>
+    /// ★ 2026-11-13：清掉固定宽度控件的悬浮提示。
+    /// 控件即将被丢弃时必须调用 —— ToolTip 里还挂着引用会漏。
+    /// </summary>
+    public static void ClearFixedWidthTooltip(Control control)
+    {
+        if (control == null) return;
+        try
+        {
+            _fixedWidthControls.Remove(control);
+            if (_sharedToolTip != null) _sharedToolTip.SetToolTip(control, null);
+        }
+        catch
+        {
+            // 控件可能已释放
+        }
+    }
+
+    /// <summary>
+    /// 文字是否放不下（宽度或高度超出可用区域）。
+    /// 多行文字（\n）逐行量宽、总高度也要算。
+    /// </summary>
+    private static bool TextOverflows(Control control, string text)
+    {
+        try
+        {
+            int maxLineWidth = 0;
+            int totalHeight = 0;
+            foreach (var line in text.Split('\n'))
+            {
+                var size = TextRenderer.MeasureText(line, control.Font);
+                if (size.Width > maxLineWidth) maxLineWidth = size.Width;
+                totalHeight += size.Height;
+            }
+
+            int availWidth = control.ClientSize.Width - 2;
+            int availHeight = control.ClientSize.Height - 2;
+            return maxLineWidth > availWidth || totalHeight > availHeight;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -253,6 +416,7 @@ public static class UiFontManager
         try
         {
             if (control.AutoSize) return;   // AutoSize 的控件会自己重算
+            if (IsFixedWidth(control)) return;   // ★ 固定宽度控件不加宽（改用 ToolTip）
 
             string? text = control switch
             {
